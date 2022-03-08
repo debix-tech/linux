@@ -1776,8 +1776,19 @@ static int fec_get_mac(struct net_device *ndev)
 		struct device_node *np = fep->pdev->dev.of_node;
 		if (np) {
 			const char *mac = of_get_mac_address(np);
-			if (!IS_ERR(mac))
+			if (!IS_ERR(mac)){
 				iap = (unsigned char *) mac;
+				//Add by polyhex
+				if(iap[0]&0x01)
+				{
+					dev_warn(&fep->pdev->dev, "Convert Invalid Addr Mac[0]=0x%x\n",iap[0]); 
+					memcpy(tmpaddr, iap, ETH_ALEN);
+					tmpaddr[0] &= 0xFE;
+					iap = tmpaddr;
+				}
+				//End Add by polyhex
+			}
+				
 			else if (PTR_ERR(mac) == -EPROBE_DEFER)
 				return -EPROBE_DEFER;
 		}
@@ -3796,6 +3807,10 @@ fec_probe(struct platform_device *pdev)
 	if (!ndev)
 		return -ENOMEM;
 
+	//add by polyhex 
+	strcpy(ndev->name, "ens34");
+	//end add by polyhex 
+	
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
 	/* setup board info structure */

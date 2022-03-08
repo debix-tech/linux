@@ -1,0 +1,1 @@
+obj-y				+= polyhex_gpio.o

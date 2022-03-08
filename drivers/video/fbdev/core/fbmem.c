@@ -53,9 +53,9 @@ EXPORT_SYMBOL(registered_fb);
 int num_registered_fb __read_mostly;
 EXPORT_SYMBOL(num_registered_fb);
 
-bool fb_center_logo __read_mostly;
+bool fb_center_logo __read_mostly = true ;;
 
-int fb_logo_count __read_mostly = -1;
+int fb_logo_count __read_mostly = 1; //-1; modify by polyhex
 
 static struct fb_info *get_fb_info(unsigned int idx)
 {

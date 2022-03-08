@@ -5045,6 +5045,10 @@ int stmmac_dvr_probe(struct device *device,
 	if (!ndev)
 		return -ENOMEM;
 
+	//add by polyhex 
+	strcpy(ndev->name, "ens33");
+	//end add by polyhex 
+
 	SET_NETDEV_DEV(ndev, device);
 
 	priv = netdev_priv(ndev);
@@ -5098,6 +5102,14 @@ int stmmac_dvr_probe(struct device *device,
 	ret = stmmac_hw_init(priv);
 	if (ret)
 		goto error_hw_init;
+
+//Add by polyhex
+	if(priv->dev->dev_addr[0]&0x01)
+	{
+		priv->dev->dev_addr[0] &= 0xFE;
+		dev_warn(priv->device, "Convert Invalid Addr Mac[0]=0x%x\n",priv->dev->dev_addr[0]);	
+	}
+//End Add by polyhex
 
 	stmmac_check_ether_addr(priv);
 
