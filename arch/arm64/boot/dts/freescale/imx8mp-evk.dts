@@ -184,8 +184,8 @@
 };
 
 &{/reserved-memory/linux,cma} {
-	size = <0 0x28000000>;
-	alloc-ranges = <0 0x40000000 0 0x60000000>;
+	size = <0 0x3c000000>;
+	alloc-ranges = <0 0x40000000 0 0x80000000>;
 };
 
 &mix_gpu_ml {
@@ -462,16 +462,15 @@
 		compatible = "sony,imx219";
 		reg = <0x10>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_csi0_rst>, <&pinctrl_csi_mclk>; 
-
+		pinctrl-0 = <&pinctrl_csi0_rst> ,<&pinctrl_csi0_pwn>; 
 		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
 		clock-names = "xclk";
 		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
 		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
 		assigned-clock-rates = <24000000>;
 		csi_id = <0>;
-
-		reset-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
+		pwn-gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+		rst-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
 		mclk = <24000000>;
 		mclk_source = <0>;
 		
@@ -487,7 +486,7 @@
 				remote-endpoint = <&mipi_csi0_ep>;
 				data-lanes = <1 2>;
 				clock-lanes = <0>;
-				//clock-noncontinuous;
+				clock-noncontinuous;
 				link-frequencies = /bits/ 64 <456000000>;
 	
 			};
@@ -1405,7 +1404,7 @@
 
 	pinctrl_csi0_pwn: csi0_pwn_grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11	0x19
+			MX8MP_IOMUXC_GPIO1_IO15__GPIO1_IO15	0x19
 		>;
 	};
 
@@ -1414,7 +1413,7 @@
 			MX8MP_IOMUXC_GPIO1_IO06__GPIO1_IO06		0x19
 		>;
 	};
-
+	
 	pinctrl_csi_mclk: csi_mclk_grp {
 		fsl,pins = <
 			MX8MP_IOMUXC_GPIO1_IO15__CCM_CLKO2	0x59
@@ -1494,7 +1493,7 @@
 };
 
 &isi_0 {
-	status = "okay";
+	status = "disabled";
 
 	cap_device {
 		status = "okay";
@@ -1512,3 +1511,14 @@
 		status = "okay";
 	};
 };
+
+
+&isp_0 {
+	status = "okay";
+};
+
+&dewarp {
+	status = "okay";
+};
+
+

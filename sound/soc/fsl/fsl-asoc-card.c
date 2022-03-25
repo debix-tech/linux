@@ -288,6 +288,15 @@ static int fsl_asoc_card_hw_params(struct snd_pcm_substream *substream,
 			return ret;
 		}
 	}
+	else if(priv->card_type == CARD_ES8316){
+		/* set codec DAI configuration */
+		ret = snd_soc_dai_set_fmt(asoc_rtd_to_codec(rtd, 0), priv->dai_fmt);
+		if (ret) {
+			dev_err(dev, "failed to set codec dai fmt: %d\n", ret);
+			return ret;
+		}
+
+	}
 
 	return 0;
 

@@ -65,6 +65,12 @@ static const struct reg_default es8316_reg_defaults[] = {
 	{0x4c, 0xff}, {0x4d, 0x00}, {0x4e, 0x00}, {0x4f, 0xff},
 	{0x50, 0x00}, {0x51, 0x00}, {0x52, 0x00}, {0x53, 0x00},
 };
+	
+static struct reg_default es8316_resume_restore_reg[] = {
+	{0x33, 0xc0},
+	{0x34, 0xc0},
+
+};
 
 /* codec private data */
 struct es8316_priv {
@@ -1113,6 +1119,13 @@ static int es8316_init_regs(struct snd_soc_component *component)
 
 static int es8316_suspend(struct snd_soc_component *component)
 {
+	int i ;
+	struct reg_default *prestore_reg;
+	for(i = 0;i < ARRAY_SIZE(es8316_resume_restore_reg);i++){
+		prestore_reg=  &es8316_resume_restore_reg[i];
+		prestore_reg->def = snd_soc_component_read(component, prestore_reg->reg);
+	}
+
 	return 0;
 }
 
@@ -1120,6 +1133,9 @@ static int es8316_resume(struct snd_soc_component *component)
 {
 	struct es8316_priv *es8316 = snd_soc_component_get_drvdata(component);
 	int ret;
+	int i ;
+	struct reg_default *prestore_reg;
+	ret = clk_prepare_enable(es8316->mclk);
 
 	es8316_reset(component); /* UPDATED BY DAVID,15-3-5 */
 	ret = snd_soc_component_read(component, ES8316_CLKMGR_ADCDIV2_REG05);
@@ -1143,7 +1159,16 @@ static int es8316_resume(struct snd_soc_component *component)
 		snd_soc_component_write(component, ES8316_SYS_LP2_REG0F, 0xFF);
 		snd_soc_component_write(component, ES8316_CLKMGR_CLKSW_REG01, 0xF3);
 		snd_soc_component_write(component, ES8316_ADC_PDN_LINSEL_REG22, 0xc0);
+		for(i = 0;i < ARRAY_SIZE(es8316_resume_restore_reg);i++){
+			prestore_reg=  &es8316_resume_restore_reg[i];
+			snd_soc_component_write(component,prestore_reg->reg,prestore_reg->def);
+		}
 	}
+
+	
+
+
+	
 	return 0;
 }
 /*
