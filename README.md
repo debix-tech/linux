@@ -2,7 +2,7 @@
 #### 1. 下载内核   
 
 ```
-git clone https://github.com/9278978/polyhex-kernel.git
+git clone https://github.com/9278978/debix-kernel.git
 ```
 #### 2. 下载编译器 
 - https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/9.2-2019.12/binrel/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu.tar.xz
