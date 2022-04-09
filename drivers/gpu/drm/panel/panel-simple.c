@@ -2433,6 +2433,116 @@ static const struct panel_desc jdi_tx26d202vm0bwa = {
 	.connector_type = DRM_MODE_CONNECTOR_LVDS,
 };
 
+static const struct display_timing debix_HC050IG40029_D58_mode = {
+
+#if 0
+	.pixelclock = { 26400000, 50000000, 50000000 },
+	.hactive = { 800, 800, 800 },
+	.hfront_porch = { 16, 354, 354 },
+	.hback_porch = { 46, 46, 46 },
+	.hsync_len = { 1, 40, 40 },
+	.vactive = { 480, 480, 480 },
+	.vfront_porch = { 7, 147, 147 },
+	.vback_porch = { 23, 23, 23 },
+	.vsync_len = { 1, 20, 20 },
+	.flags = DISPLAY_FLAGS_DE_HIGH,
+#else
+	.pixelclock =   { 26400000, 49500000, 50000000 },
+	.hactive =      { 800, 800, 800 },
+	.hfront_porch = { 16, 354, 354 },
+	.hback_porch =  { 46, 46, 46 },
+	.hsync_len =    { 1, 40, 40 },
+	.vactive =      { 480, 480, 480 },
+	.vfront_porch = { 7, 147, 147 },
+	.vback_porch =  { 23, 23, 23 },
+	.vsync_len =    { 1, 20, 20 },
+
+	.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+		 DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
+		 DISPLAY_FLAGS_SYNC_POSEDGE,
+#endif
+
+};
+static const struct panel_desc debix_HC050IG40029_D58= {
+        .timings = &debix_HC050IG40029_D58_mode,
+        .num_timings = 1,
+        .bpc = 8,
+        .size = {
+                .width = 130,
+                .height = 85,
+        },
+        .delay = {
+                /*
+                 * The panel spec recommends one second delay
+                 * to the below items.  However, it's a bit too
+                 * long in pratice.  Based on tests, it turns
+                 * out 100 milliseconds is fine.
+                 */
+                .prepare = 100,
+                .enable = 100,
+                .unprepare = 100,
+                .disable = 100,
+        },
+        //.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
+        //.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
+        //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
+        .bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        //.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+        //       DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
+        //       DISPLAY_FLAGS_SYNC_POSEDGE,
+        .connector_type = DRM_MODE_CONNECTOR_LVDS,
+};
+
+static const struct display_timing polyhex_HSD272WQVGA_mode = {
+
+	.pixelclock = { 8000000, 12500000, 12000000 },
+	.hactive = { 480, 480, 480 },
+	.hfront_porch = { 2, 75, 75 },
+	.hback_porch = { 3, 20, 43 },
+	.hsync_len = { 2, 13, 43 },
+	.vactive = { 272, 272, 272},
+	.vfront_porch = { 2, 12, 37 },
+	.vback_porch = { 2, 8, 12 },
+	.vsync_len =   { 2, 4, 12 },
+	.flags = DISPLAY_FLAGS_DE_HIGH,
+	//.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
+	//.flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+	//	 DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
+	//	 DISPLAY_FLAGS_SYNC_POSEDGE,
+};
+
+static const struct panel_desc polyhex_HSD272WQVGA = {
+	.timings = &polyhex_HSD272WQVGA_mode,
+	.num_timings = 1,
+	.bpc = 8,
+	.size = {
+		.width = 105,
+		.height = 67,
+	},
+	.delay = {
+		/*
+		 * The panel spec recommends one second delay
+		 * to the below items.  However, it's a bit too
+		 * long in pratice.  Based on tests, it turns
+		 * out 100 milliseconds is fine.
+		 */
+		.prepare = 100,
+		.enable = 100,
+		.unprepare = 100,
+		.disable = 100,
+	},
+	//.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
+	//.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
+	//.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
+	.bus_flags = DRM_BUS_FLAG_DE_HIGH,
+	//.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
+	//	 DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
+	//	 DISPLAY_FLAGS_SYNC_POSEDGE,
+	.connector_type = DRM_MODE_CONNECTOR_LVDS,
+};	
+
 static const struct display_timing koe_tx14d24vm1bpa_timing = {
 	.pixelclock = { 5580000, 5850000, 6200000 },
 	.hactive = { 320, 320, 320 },
@@ -4146,8 +4256,17 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "kingdisplay,kd116n21-30nv-a010",
 		.data = &kingdisplay_kd116n21_30nv_a010,
 	}, {
+		//John_gao polyhex 800x480
+		.compatible = "debix,HC050IG40029-D58V.C",
+		.data = &debix_HC050IG40029_D58,
+
+	}, {
 		.compatible = "jdi,tx26d202vm0bwa",
 		.data = &jdi_tx26d202vm0bwa,
+	}, {
+		//John_gao polyhex 480x272
+		.compatible = "polyhex,HSD272WQVGA",
+		.data = &polyhex_HSD272WQVGA,
 	}, {
 		.compatible = "koe,tx14d24vm1bpa",
 		.data = &koe_tx14d24vm1bpa,
