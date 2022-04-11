@@ -1961,7 +1961,8 @@ static const struct hid_device_id mt_devices[] = {
 			USB_DEVICE_ID_HANVON_ALT_MULTITOUCH) },
 
 	/* Ilitek dual touch panel */
-	{  .driver_data = MT_CLS_NSMU,
+	//John_gao {  .driver_data = MT_CLS_NSMU,
+	{ .driver_data = MT_CLS_GENERALTOUCH_PWT_TENFINGERS,
 		MT_USB_DEVICE(USB_VENDOR_ID_ILITEK,
 			USB_DEVICE_ID_ILITEK_MULTITOUCH) },
 

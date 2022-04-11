@@ -29,6 +29,9 @@
 #include <linux/of.h>
 #include <asm/unaligned.h>
 
+
+#define POLL_INTERVAL_MS               100      /* 17ms = 60fps */
+
 #define GOODIX_GPIO_INT_NAME		"irq"
 #define GOODIX_GPIO_RST_NAME		"reset"
 
@@ -49,6 +52,7 @@
 /* Register defines */
 #define GOODIX_REG_COMMAND		0x8040
 #define GOODIX_CMD_SCREEN_OFF		0x05
+#define GOODIX_REG_GPIO		0x804D
 
 #define GOODIX_READ_COOR_ADDR		0x814E
 #define GOODIX_GT1X_REG_CONFIG_DATA	0x8050
@@ -115,6 +119,9 @@ struct goodix_ts_data {
 	unsigned int contact_size;
 	u8 config[GOODIX_CONFIG_MAX_LENGTH];
 	unsigned short keymap[GOODIX_MAX_KEYS];
+
+	struct timer_list timer;
+	struct work_struct work_i2c_poll;
 };
 
 static int goodix_check_cfg_8(struct goodix_ts_data *ts,
@@ -484,6 +491,27 @@ static irqreturn_t goodix_ts_irq_handler(int irq, void *dev_id)
 		dev_err(&ts->client->dev, "I2C write end_cmd error\n");
 
 	return IRQ_HANDLED;
+}
+
+static void debix_ts_irq_poll_timer(struct timer_list *t)
+{
+       struct goodix_ts_data *ts = from_timer(ts, t, timer);
+
+       schedule_work(&ts->work_i2c_poll);
+       mod_timer(&ts->timer, jiffies + msecs_to_jiffies(POLL_INTERVAL_MS));
+}
+
+static void debix_ts_work_i2c_poll(struct work_struct *work)
+{
+       struct goodix_ts_data *ts = container_of(work,
+                       struct goodix_ts_data, work_i2c_poll);
+
+	goodix_process_events(ts);
+
+	if (goodix_i2c_write_u8(ts->client, GOODIX_READ_COOR_ADDR, 0) < 0)
+		dev_err(&ts->client->dev, "I2C write end_cmd error\n");
+
+
 }
 
 static void goodix_free_irq(struct goodix_ts_data *ts)
@@ -1283,6 +1311,7 @@ reset:
 	ts->chip = goodix_get_chip_data(ts->id);
 
 	if (ts->load_cfg_from_disk) {
+#if 0
 		/* update device config */
 		ts->cfg_name = devm_kasprintf(&client->dev, GFP_KERNEL,
 					      "goodix_%s_cfg.bin", ts->id);
@@ -1300,12 +1329,22 @@ reset:
 		}
 
 		return 0;
+#else
+		goodix_configure_dev(ts);
+		complete_all(&ts->firmware_loading_complete);
+#endif
 	} else {
 		error = goodix_configure_dev(ts);
 		if (error)
 			return error;
 	}
 
+	INIT_WORK(&ts->work_i2c_poll,
+			debix_ts_work_i2c_poll);
+	timer_setup(&ts->timer, debix_ts_irq_poll_timer, 0);
+	ts->timer.expires = jiffies +
+		msecs_to_jiffies(POLL_INTERVAL_MS);
+	add_timer(&ts->timer);
 	return 0;
 }
 
@@ -1313,6 +1352,7 @@ static int goodix_ts_remove(struct i2c_client *client)
 {
 	struct goodix_ts_data *ts = i2c_get_clientdata(client);
 
+	del_timer(&ts->timer);
 	if (ts->load_cfg_from_disk)
 		wait_for_completion(&ts->firmware_loading_complete);
 
