@@ -102,9 +102,8 @@ mipi_backlight: mipi_backlight {
 
 		pinctrl-0 = <&pinctrl_mipiTP>;
 		interrupt-parent = <&gpio1>;
-		interrupts = <9 IRQ_TYPE_EDGE_FALLING>;
+		interrupts = <9 IRQ_TYPE_EDGE_RISING>;
                 irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;        /* CTP-INT: PH4 */
-           //     irq-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;        /* CTP-INT: PH4 */
                 reset-gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;     /* CTP-RST: PH11 */
                 //touchscreen-inverted-x;
                 //touchscreen-inverted-y;
@@ -121,9 +120,7 @@ mipi_backlight: mipi_backlight {
         pinctrl_mipiTP: mipiTPgrp {
                 fsl,pins = <
                         MX8MP_IOMUXC_GPIO1_IO14__GPIO1_IO14       0x16
-                        MX8MP_IOMUXC_GPIO1_IO09__GPIO1_IO09       0x140
-                        //MX8MP_IOMUXC_GPIO1_IO12__GPIO1_IO12       0x140
-			
+                        MX8MP_IOMUXC_GPIO1_IO09__GPIO1_IO09       0x1c4
                 >;
         };
 

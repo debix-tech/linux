@@ -532,7 +532,7 @@
 	#endif
 };
 &i2c4 {
-	clock-frequency = <400000>;
+	clock-frequency = <100000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c4>;
 	status = "okay";
@@ -549,7 +549,7 @@
 		#clock-cells = <0>;
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
-
+		init_date="2022/04/12";
 		interrupt-parent = <&gpio2>;
 		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
 		
