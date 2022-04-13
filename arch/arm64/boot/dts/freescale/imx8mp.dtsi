@@ -749,6 +749,7 @@
 						     <GIC_SPI 20 IRQ_TYPE_LEVEL_HIGH>;
 					clocks = <&clk IMX8MP_CLK_SNVS_ROOT>;
 					clock-names = "snvs-rtc";
+					 status = "disabled";
 				};
 
 				snvs_pwrkey: snvs-powerkey {

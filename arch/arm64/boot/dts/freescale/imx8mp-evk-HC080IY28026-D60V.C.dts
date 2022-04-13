@@ -50,17 +50,35 @@ mipi_backlight: mipi_backlight {
 		status = "okay";
 	};
 };
-#if 0
 &i2c2 {
-	synaptics_dsx_ts@20 {
-		compatible = "synaptics_dsx";
-		reg = <0x20>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_i2c2_synaptics_dsx_io>;
+     	touchscreen@5d {
+                compatible = "goodix,gt911";
+                reg = <0x5d>;
+                //reg = <0x14>;
+
+		pinctrl-0 = <&pinctrl_mipiTP>;
 		interrupt-parent = <&gpio1>;
-		interrupts = <9 IRQ_TYPE_LEVEL_LOW>;
-		synaptics,diagonal-rotation;
+		interrupts = <9 IRQ_TYPE_EDGE_RISING>;
+                irq-gpios = <&gpio1 9 GPIO_ACTIVE_HIGH>;        /* CTP-INT: PH4 */
+                reset-gpios = <&gpio1 14 GPIO_ACTIVE_HIGH>;     /* CTP-RST: PH11 */
+                //touchscreen-inverted-x;
+                //touchscreen-inverted-y;
+		//edge-failling-trigger;
+		touchscreen-size-x = <800>;
+		touchscreen-size-y = <1280>;
+
 		status = "okay";
-	};
+        };
+
 };
-#endif
+
+&iomuxc {
+        pinctrl_mipiTP: mipiTPgrp {
+                fsl,pins = <
+                        MX8MP_IOMUXC_GPIO1_IO14__GPIO1_IO14       0x16
+                        MX8MP_IOMUXC_GPIO1_IO09__GPIO1_IO09       0x1c4
+                >;
+        };
+
+};
+
