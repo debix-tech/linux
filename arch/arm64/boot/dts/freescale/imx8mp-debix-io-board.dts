@@ -55,7 +55,7 @@
 		gpio = <&gpio2 19 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
-
+	
 	imx219_vana_2v8: 2p8v {
 		compatible = "regulator-fixed";
 		regulator-name = "camera_vana";
@@ -643,9 +643,11 @@
 		#clock-cells = <0>;
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
-		init_date="2022/04/12";
+
 		interrupt-parent = <&gpio2>;
 		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
+		
+		init_date="2022/04/12";
 		
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_rtc_int>;
@@ -1151,6 +1153,12 @@
 		>;
 	};
 	
+	pinctrl_lora_board_3v3: lora3v3grp {
+		fsl,pins = <
+			MX8MP_IOMUXC_SAI5_RXC__GPIO3_IO20		0x16
+		>;
+	};
+	
 	pinctrl_rtc_int: rtcintgrp {
 		fsl,pins = <
 			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11 0x140
@@ -1213,8 +1221,8 @@
 
 	pinctrl_uart2: uart2grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_UART2_RXD__UART2_DCE_RX	0x14f
-			MX8MP_IOMUXC_UART2_TXD__UART2_DCE_TX	0x14f
+			MX8MP_IOMUXC_UART2_RXD__UART2_DCE_RX	0x49
+			MX8MP_IOMUXC_UART2_TXD__UART2_DCE_TX	0x49
 		>;
 	};
 
@@ -1405,6 +1413,16 @@
 	pinctrl_csi_mclk: csi_mclk_grp {
 		fsl,pins = <
 			MX8MP_IOMUXC_GPIO1_IO15__CCM_CLKO2	0x59
+		>;
+	};
+	pinctrl_lora_en: loraengrp {
+		fsl,pins = <
+			MX8MP_IOMUXC_SAI5_RXD1__GPIO3_IO22 	  0x19 // lora power
+		>;
+	};
+	pinctrl_lora_reset: lorarstgrp {
+		fsl,pins = <
+			MX8MP_IOMUXC_GPIO1_IO11__GPIO1_IO11		0x19 // lora reset
 		>;
 	};
 };
