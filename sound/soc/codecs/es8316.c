@@ -125,7 +125,6 @@ static ssize_t  gpio_write(struct file *filp, const char __user *buf, size_t cou
 {
 	char wrdata[10] = {0};
 	int reg = 0, value = 0;
-    const char *buftmp = buf;
 
 	if(es8316_component==NULL){
 		printk("%s: gl_data is NULL\n", __func__);
@@ -133,7 +132,6 @@ static ssize_t  gpio_write(struct file *filp, const char __user *buf, size_t cou
 	}
 
 	if(copy_from_user(&wrdata, buf, count)){
-		printk("%s: write error (%s)\n",__func__);
         return -1;
 	}
 	

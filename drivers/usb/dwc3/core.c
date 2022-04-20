@@ -1701,7 +1701,6 @@ static int dwc3_probe(struct platform_device *pdev)
 		if(gpio_is_valid(reset_pin)){
 			printk("John_gao hub reset pin name %s\n", pdev->name);
 			if(devm_gpio_request(dev,reset_pin, "HUB_RST") >= 0){
-				printk("John_gao reset USB hub %d\n");
 				gpio_direction_output(reset_pin,(gpio_flags == OF_GPIO_ACTIVE_LOW) ? 0:1);
 				mdelay(200);
 				gpio_direction_output(reset_pin,(gpio_flags == OF_GPIO_ACTIVE_LOW) ? 1:0);
