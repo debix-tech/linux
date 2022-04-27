@@ -12,21 +12,8 @@ On a Debix, first install the latest version of Debix OS. Then boot your Debix, 
 
 ==Note==   
         
-    1. kernel compilation occupies much space, thus,we recommend using TF card larger than 32G.   
-    2. swap partition is used when compiling system, so allocate swap partition before compilation.
-      sudo dd if=/dev/zero of=/swapfile bs=1k count=2048000    
-      sudo mkswap /swapfile 
-      sudo swapon /swapfile
-
-Command free -m can verify whether swap partition is mounted successfully. If succeeded, you could see output like this 
-      
-```
-root@imx8mpevk:~# free -m
-              total        used        free      shared  buff/cache   available
-Mem:           1949         726          94           9        1128        1126
-Swap:          1999           0        1999
-
-```
+    kernel compilation occupies much space, thus,we recommend using TF card larger than 32G.   
+ 
 
 ###### First install git and the build dependencies:
      sudo apt install git bc bison flex libssl-dev make  
@@ -56,16 +43,13 @@ The default configuration of Debix is imx_v8_defconfig
     
 ###### Building the Kernel
 Build and install the kernel, modules, and Device Tree blobs; this step takes a relatively long time ;    
-The default device tree is imx8mp-evk.dts, according to the add-on boards used and the show requirement, different device tree can be chosen, e.g. when using 800x480 display,it needs to use imx8mp-evk-HC050IG40029-D58V.C-lvds-panel.dtb
+The default device tree is imx8mp-evk.dts, according to the add-on boards used and the show requirement, different device tree can be chosen through Add-on Board tool.
 
 ```
-make -j4 Image
-make -j4 freescale/imx8mp-evk.dtb 
-make -j4 modules
+make -j4 
 sudo make INSTALL_MOD_STRIP=1 modules_install
-sudo mount /dev/mmcblk1p1 /boot
-sudo cp arch/arm64/boot/dts/freescale/imx8mp-evk.dtb /boot/ 
-sudo cp arch/arm/boot/Image /boot/Image
+sudo cp arch/arm64/boot/dts/freescale/*.dtb /boot/. 
+sudo cp arch/arm64/boot/Image /boot/.
 ```
 
 #### 1.1 Cross-Compiling the Kernel
@@ -125,8 +109,7 @@ Compile kernel dts modules
 
 ```
 export PATH=$PATH:/opt/toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu/bin
-make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-  Image modules
-make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-  freescale/imx8mp-evk.dtb
+make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-  
 ```
 
 ###### Install Directly onto the SD Card
@@ -167,7 +150,8 @@ Next, install the kernel modules onto the SD card:
 
 ```
 export PATH=$PATH:/opt/toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-gnu/bin 
-sudo env PATH=$PATH make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-  INSTALL_MOD_PATH=mnt/ext4 INSTALL_MOD_STRIP=1 modules_install 
+sudo env PATH=$PATH make ARCH=arm64 CROSS_COMPILE=aarch64-none-linux-gnu-  INSTALL_MOD_PATH=mnt/ext4 INSTALL_MOD_STRIP=1 modules_install
+sudo umount mnt/ext4
 ```
 
 Finally, copy the kernel and Device Tree blobs onto the SD card, making sure to back up your old kernel:
@@ -176,9 +160,8 @@ Finally, copy the kernel and Device Tree blobs onto the SD card, making sure to 
 ```
 sudo cp mnt/fat32/Image mnt/fat32/Image-backup.img
 sudo cp arch/arm64/boot/Image mnt/fat32/Image
-sudo cp arch/arm64/boot/dts/freescale/imx8mp-evk.dtb mnt/fat32/imx8mp-evk.dtb  
+sudo cp arch/arm64/boot/dts/freescale/*.dtb mnt/fat32/. 
 sudo umount mnt/fat32
-sudo umount mnt/ext4
 ```
 
 Finally, plug the card into Debix and boot it!
