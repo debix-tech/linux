@@ -52,7 +52,7 @@ static int __init cpu_feature_match_ ## x ## _init(void)	\
 		return -ENODEV;					\
 	return __initfunc();					\
 }								\
-module_init(cpu_feature_match_ ## x ## _init)
+module_init(cpu_feature_match_ ## x ## _init);
 
 #endif
 #endif

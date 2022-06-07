@@ -10,6 +10,10 @@
 #include <linux/list.h>
 #include <linux/rcupdate.h>
 
+#ifndef ASSERT_EXCLUSIVE_ACCESS
+#define ASSERT_EXCLUSIVE_ACCESS(var) do { } while (0)
+#endif
+
 /*
  * Why is there no list_empty_rcu()?  Because list_empty() serves this
  * purpose.  The list_empty() function fetches the RCU-protected pointer

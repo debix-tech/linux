@@ -21,6 +21,7 @@
 #include <linux/ieee80211.h>
 #include <linux/net.h>
 #include <net/regulatory.h>
+#include <net/netlink.h>
 
 /**
  * DOC: Introduction
@@ -4883,6 +4884,9 @@ struct wiphy_iftype_akm_suites {
 struct wiphy {
 	/* assign these fields before you register the wiphy */
 
+#define WIPHY_COMPAT_PAD_SIZE  2048
+	u8 padding[WIPHY_COMPAT_PAD_SIZE];
+
 	u8 perm_addr[ETH_ALEN];
 	u8 addr_mask[ETH_ALEN];
 
@@ -6845,6 +6849,8 @@ struct cfg80211_fils_resp_params {
  *	not known. This value is used only if @status < 0 to indicate that the
  *	failure is due to a timeout and not due to explicit rejection by the AP.
  *	This value is ignored in other cases (@status >= 0).
+ * @authorized: Indicates whether the connection is ready to transport
+ *	data packets.
  */
 struct cfg80211_connect_resp_params {
 	int status;
@@ -6856,6 +6862,7 @@ struct cfg80211_connect_resp_params {
 	size_t resp_ie_len;
 	struct cfg80211_fils_resp_params fils;
 	enum nl80211_timeout_reason timeout_reason;
+	bool authorized;
 };
 
 /**
@@ -7005,6 +7012,9 @@ cfg80211_connect_timeout(struct net_device *dev, const u8 *bssid,
  * @resp_ie: association response IEs (may be %NULL)
  * @resp_ie_len: assoc response IEs length
  * @fils: FILS related roaming information.
+ * @authorized: true if the 802.1X authentication was done by the driver or is
+ *	not needed (e.g., when Fast Transition protocol was used), false
+ *	otherwise. Ignored for networks that don't use 802.1X authentication.
  */
 struct cfg80211_roam_info {
 	struct ieee80211_channel *channel;
@@ -7015,6 +7025,7 @@ struct cfg80211_roam_info {
 	const u8 *resp_ie;
 	size_t resp_ie_len;
 	struct cfg80211_fils_resp_params fils;
+	bool authorized;
 };
 
 /**
