@@ -1,3 +1,9 @@
+### System SDK Download
+- Ubuntu 20.04 :    
+     https://source.codeaurora.org/external/imx/meta-nxp-desktop/?h=imx-5.10.72-hardknott
+- Yocto-Linux 5.10.72_2.2.0    
+     https://www.nxp.com/design/software/embedded-software/i-mx-software/embedded-linux-for-i-mx-applications-processors:IMXLINUX?   
+     
 ### Building the Kernel
 The default compilers and linkers that come with an OS are configured to build executables to run on that OS - they are native tools - but that doesn’t have to be the case. A cross-compiler is configured to build code for a target other than the one running the build process, and using it is called cross-compilation.
 
@@ -19,13 +25,13 @@ On a Debix, first install the latest version of Debix OS. Then boot your Debix, 
      sudo apt install git bc bison flex libssl-dev make  
      
 ###### Next get the sources, which will take some time:
-    git clone --depth=1 https://github.com/9278978/debix-kernel
+    git clone --depth=1 https://github.com/debix-tech/linux
     
 ###### Choosing Sources
 The git clone command above will download the current active branch (the one we are building Debix OS images from) without any history. Omitting the --depth=1 will download the entire repository, including the full history of all branches, but this takes much longer and occupies much more storage.   
 To download a different branch (again with no history), use the --branch option： 
     
-    git clone --depth=1 --branch <branch> https://github.com/9278978/debix-kernel
+    git clone --depth=1 --branch <branch> https://github.com/debix-tech/linux
 where <branch> is the name of the branch that you wish to download.
 
 Refer to the original GitHub repository for information about the available branches.
@@ -82,7 +88,7 @@ export PATH=$PATH:/opt/toolchain/gcc-arm-9.2-2019.12-x86_64-aarch64-none-linux-g
 ###### Get the Kernel Sources
 To download the minimal source tree for the current branch, run:  
 
-     git clone --depth=1 https://github.com/9278978/debix-kernel
+     git clone --depth=1 https://github.com/debix-tech/linux
      
 See Choosing sources above for instructions on how to choose a different branch
 ###### Build sources
