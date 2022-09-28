@@ -721,11 +721,13 @@ static const struct drm_display_mode edid_cea_modes_1[] = {
 		   752, 800, 0, 480, 490, 492, 525, 0,
 		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
 	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
-	/* 2 - 720x480@60Hz 4:3 */
-	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
-		   798, 858, 0, 480, 489, 495, 525, 0,
-		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
-	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
+	/* 2 - 1280x800@75Hz 16:10 */
+	{ DRM_MODE("1280x800", DRM_MODE_TYPE_DRIVER, 106500, 1280, 1360,
+		   1488, 1696, 0, 800, 803, 809, 838, 0,
+	//{ DRM_MODE("1280x800", DRM_MODE_TYPE_DRIVER, 71000, 1280, 1328,
+	//	   1360, 1440, 0, 800, 803, 809, 823, 0,
+		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
 	/* 3 - 720x480@60Hz 16:9 */
 	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
 		   798, 858, 0, 480, 489, 495, 525, 0,
@@ -2429,6 +2431,20 @@ static int drm_mode_hsync(const struct drm_display_mode *mode)
 	return DIV_ROUND_CLOSEST(mode->clock, mode->htotal);
 }
 
+static int isRTK27(struct edid *edid){
+	u8 *p = (u8 *) edid;
+	
+	if(p[8] == 0x4a &&
+	   p[9] == 0x8b &&
+	   p[10]== 0x3b &&
+	   p[11]== 0x2a &&
+	   p[20]== 0x80 &&
+	   p[21]== 0x3c &&
+	   p[22]== 0x22){
+		return 1;	
+	}
+	return 0;
+}
 /**
  * drm_mode_std - convert standard mode info (width, height, refresh) into mode
  * @connector: connector of for the EDID block
@@ -2503,6 +2519,18 @@ drm_mode_std(struct drm_connector *connector, struct edid *edid,
 		return mode;
 	}
 
+	if(isRTK27(edid)){
+		if(hsize == 1920 && vsize == 1080 ){
+			return NULL;
+		}else if(hsize == 1600 && vsize == 1200 ){
+			return NULL;
+		}else if(hsize == 1280 && vsize == 1024 ){
+			return NULL;
+		}else if(hsize == 1152 && vsize == 864 ){
+			hsize = 1280;
+			vsize = 800;
+		} 
+	}
 	/* check whether it can be found in default mode table */
 	if (drm_monitor_supports_rb(edid)) {
 		mode = drm_mode_find_dmt(dev, hsize, vsize, vrefresh_rate,
