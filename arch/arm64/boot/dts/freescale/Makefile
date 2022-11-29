@@ -94,6 +94,7 @@ DTC_FLAGS_fsl-ls1028a-qds-9999 := -@
 #dtb-$(CONFIG_ARCH_MXC) += imx8mn-ab2.dtb imx8mn-ddr4-ab2.dtb imx8mn-ddr3l-ab2.dtb
 #dtb-$(CONFIG_ARCH_MXC) += imx8mn-var-som-symphony.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk.dtb \
+			  imx8mp-evk-1080p-lvds.dtb \
 			  imx8mp-debix-core-board.dtb \
 			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
 			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \
@@ -101,12 +102,11 @@ dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk.dtb \
 			  imx8mp-debix-core-JW070R0520B02.dtb \
 			  imx8mp-debix-core-JW101HD-X00.dtb \
 			  imx8mp-debix-core-JW080R1120B02.dtb \
-			  imx8mp-debix-core-JW050R0320I01.dtb \
-			  imx8mp-debix-4g-board.dtb \
+			  imx8mp-debix-core-JW050R0320I01.dtb 
+			  #imx8mp-debix-4g-board.dtb \
 			  imx8mp-debix-io-board.dtb \
 			  imx8mp-debix-io-HC050IG40029-D58V.C.dtb \
 			  imx8mp-debix-io-HC080IY28026-D60V.C.dtb \
-			  imx8mp-debix-io-raspberrypi-touchscreen.dtb \
 			  imx8mp-debix-io-HC101IK25050-D59V.C.dtb \
 			  imx8mp-debix-io-JW070R0520B02.dtb \
 			  imx8mp-debix-io-JW101HD-X00.dtb \

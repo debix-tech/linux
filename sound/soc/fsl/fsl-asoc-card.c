@@ -6,6 +6,12 @@
 //
 // Author: Nicolin Chen <nicoleotsuka@gmail.com>
 
+#define DEBUG
+#define VERBOSE_DEBUG
+
+#undef DEBUG
+#undef VERBOSE_DEBUG
+
 #include <linux/clk.h>
 #include <linux/i2c.h>
 #include <linux/module.h>
@@ -29,6 +35,7 @@
 
 #define CS427x_SYSCLK_MCLK 0
 
+#define INVALID_GPIO -1
 #define RX 0
 #define TX 1
 
@@ -100,6 +107,14 @@ struct fsl_asoc_card_priv {
 	struct snd_soc_dai_link dai_link[3];
 	struct asoc_simple_jack hp_jack;
 	struct asoc_simple_jack mic_jack;
+	int spk_vdd5v_en;
+	enum of_gpio_flags spk_vdd5v_en_flag;
+	int hp_spk_sel;
+	enum of_gpio_flags hp_spk_sel_flag;
+	int spk_mute;
+	int hp_det;
+	int hp_irq;
+	//enum of_gpio_flags spk_mute_flag;
 	struct platform_device *pdev;
 	struct codec_priv codec_priv;
 	struct cpu_priv cpu_priv;
@@ -118,6 +133,7 @@ struct fsl_asoc_card_priv {
 	char name[32];
 };
 
+struct fsl_asoc_card_priv *mypriv = NULL;
 /*
  * This dapm route map exists for DPCM link only.
  * The other routes shall go through Device Tree.
@@ -607,27 +623,90 @@ static int fsl_asoc_card_audmux_init(struct device_node *np,
 	return 0;
 }
 
+int onece_set = 0;
+//static void set_gpio_spk(struct fsl_asoc_card_priv *priv, int enable)
+
+void __set_gpio_spk(int enable)
+{
+	struct fsl_asoc_card_priv *priv = mypriv;
+	printk("GLS_AUDIO spk set %s\n", enable?"on":"off");
+	if(priv->spk_mute != INVALID_GPIO){
+		gpio_direction_output(priv->spk_mute, enable);
+	}
+	if(priv->hp_spk_sel != INVALID_GPIO){
+		gpio_direction_output(priv->hp_spk_sel, enable);
+	}
+	msleep(500);
+	if(priv->spk_vdd5v_en != INVALID_GPIO){
+		gpio_direction_output(priv->spk_vdd5v_en, enable);
+	}
+
+}
+
+void set_gpio_spk(int mute)
+{
+	struct fsl_asoc_card_priv *priv = mypriv;
+
+	int enable = 0;
+	int hp_det_value=gpio_get_value(priv->hp_det);
+	if(hp_det_value || mute){
+		enable = 0;
+	}else{
+		enable = 1;
+	}
+	__set_gpio_spk(enable);
+}
+EXPORT_SYMBOL_GPL(set_gpio_spk);
+
+static irqreturn_t hp_det_irq(int irq, void *dev_id)
+{
+        //struct fsl_asoc_card_priv *priv = (struct fsl_asoc_card_priv *)dev_id;
+        //struct platform_device *pdev = priv->pdev;
+        //struct device *dev = &pdev->dev;
+
+	//dev_info(dev,"GLS_AUDIO irq = %d \n", gpio_get_value(priv->hp_det));
+	set_gpio_spk(0);
+
+	return IRQ_HANDLED;
+}
+
 static int hp_jack_event(struct notifier_block *nb, unsigned long event,
 			 void *data)
 {
 	struct snd_soc_jack *jack = (struct snd_soc_jack *)data;
 	struct snd_soc_dapm_context *dapm = &jack->card->dapm;
+	//struct fsl_asoc_card_priv *priv = snd_soc_card_get_drvdata(jack->card);
 
+/*
+	printk("GLS_AUDIO 001 vdd5v(%d) spk-sel(%d) spk-mute(%d)\n",
+			priv->spk_vdd5v_en,
+			priv->hp_spk_sel,
+			priv->spk_mute
+			);
+*/
 	if (event & SND_JACK_HEADPHONE)	{
 		/* Disable speaker if headphone is plugged in */
-	//	snd_soc_dapm_disable_pin(dapm, "Ext Spk"); // original
+		snd_soc_dapm_disable_pin(dapm, "Ext Spk"); // original
 	//add by polyhex
 		printk("es8316 %s hp in \n",__func__);
-		snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
+		//snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
 	//end add by polyhex
-
+	
+		//set_gpio_spk(priv,0);
+		set_gpio_spk(1);
 	}else {
 		
-		//snd_soc_dapm_enable_pin(dapm, "Ext Spk");// original
+		snd_soc_dapm_enable_pin(dapm, "Ext Spk");// original
 		//add by polyhex
 		printk("es8316 %s hp out \n",__func__);
-		snd_soc_dapm_disable_pin(dapm, "Headphone Jack");
+		//snd_soc_dapm_disable_pin(dapm, "Headphone Jack");
+		//snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
 		//end add by polyhex
+		//set_gpio_spk(priv,1);
+		if(onece_set)
+		set_gpio_spk(0);
+		else
+		onece_set = 1;	
 	}
 	return 0;
 }
@@ -1157,6 +1236,91 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 		snd_soc_jack_notifier_register(&priv->mic_jack.jack, &mic_jack_nb);
 	}
 
+	//John_gao add spk gpios 
+	//
+	priv->hp_det = of_get_named_gpio(np,"hp-det-gpios",0);
+	if(priv->hp_det < 0){
+		printk("GLS_AUDIO Can not read property spk_mute\n");
+		priv->hp_det = INVALID_GPIO;	
+	}else{
+		priv->hp_irq = gpio_to_irq(priv->hp_det);			
+		if (priv->hp_irq > 0) {
+			ret = devm_request_threaded_irq(&pdev->dev, priv->hp_irq,
+					NULL, hp_det_irq,
+					IRQF_TRIGGER_RISING |IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+					"hp_det_irq", priv);
+			if (ret < 0) {
+				dev_err(&pdev->dev, "irq %d request failed, %d\n",
+						priv->hp_irq, ret);
+				goto asrc_fail;
+			}
+		}
+
+	}
+
+	priv->spk_mute = of_get_named_gpio(np,"spk-mute",0);
+	if (priv->spk_mute < 0) {
+		printk("Can not read property spk_mute\n");
+		priv->spk_mute = INVALID_GPIO;
+	}else{
+		ret = devm_gpio_request_one(&pdev->dev, priv->spk_mute,
+					    GPIOF_DIR_OUT, "spk-mute");
+		if (ret) {
+			printk( "Failed to request spk_mute\n");
+			priv->spk_mute = INVALID_GPIO;
+		}else{
+			gpio_direction_output(priv->spk_mute, 0);
+		}
+	
+	}
+
+	priv->hp_spk_sel = of_get_named_gpio_flags(np,
+						      "hp-spk-sel",
+						      0,
+						      &priv->hp_spk_sel_flag);
+	if (priv->hp_spk_sel < 0) {
+		printk("Can not read property hp_spk_sel\n");
+		priv->hp_spk_sel = INVALID_GPIO;
+	}else{
+		ret = devm_gpio_request_one(&pdev->dev, priv->hp_spk_sel,
+					    GPIOF_DIR_OUT, "hp_spk_sel");
+		if (ret) {
+			printk( "Failed to request hp_spk_sel\n");
+			priv->hp_spk_sel = INVALID_GPIO;
+		}else{
+			gpio_direction_output(priv->hp_spk_sel, 0);
+		}
+	
+	}
+	priv->spk_vdd5v_en = of_get_named_gpio_flags(np,
+						      "spk-vdd5v-en",
+						      0,
+						      &priv->spk_vdd5v_en_flag);
+	if (priv->spk_vdd5v_en < 0) {
+		printk( "Can not read property spk_vdd5v_en\n");
+		priv->spk_vdd5v_en = INVALID_GPIO;
+	}else{
+		ret = devm_gpio_request_one(&pdev->dev, priv->spk_vdd5v_en,
+					    GPIOF_DIR_OUT, "spk_vdd5v_en");
+		if (ret) {
+			printk( "Failed to request spk_vdd5v_en\n");
+			priv->spk_vdd5v_en = INVALID_GPIO;
+		}else{
+			gpio_direction_output(priv->spk_vdd5v_en, 0);
+		}
+	
+	}
+	mypriv = priv;
+
+	//set_gpio_spk();
+/*	printk("GLS_AUDIO vdd5v(%d) spk-sel(%d) spk-mute(%d)\n",
+			priv->spk_vdd5v_en,
+			priv->hp_spk_sel,
+			priv->spk_mute
+			);
+			*/
+	//end John_gao add spk gpios 
+
 asrc_fail:
 	of_node_put(asrc_np);
 	of_node_put(codec_np);
@@ -1165,6 +1329,18 @@ fail:
 	of_node_put(cpu_np);
 
 	return ret;
+}
+static int fsl_asoc_card_remove(struct platform_device *pdev)
+{
+	struct fsl_asoc_card_priv *priv = platform_get_drvdata(pdev);
+	struct device *dev = &priv->pdev->dev;
+	dev_err(dev, "GLS_AUDIO %s ....... \n",__func__);
+	if (priv->hp_irq > 0) {
+		devm_free_irq(&pdev->dev,priv->hp_irq, priv);
+	}
+	__set_gpio_spk(0);
+        kfree(priv);	
+	return 0;
 }
 
 static const struct of_device_id fsl_asoc_card_dt_ids[] = {
@@ -1184,6 +1360,7 @@ MODULE_DEVICE_TABLE(of, fsl_asoc_card_dt_ids);
 
 static struct platform_driver fsl_asoc_card_driver = {
 	.probe = fsl_asoc_card_probe,
+	.remove = fsl_asoc_card_remove,
 	.driver = {
 		.name = "fsl-asoc-card",
 		.pm = &snd_soc_pm_ops,
