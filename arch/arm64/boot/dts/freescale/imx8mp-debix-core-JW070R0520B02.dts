@@ -7,7 +7,7 @@
 
 / {
 	lvds0_panel {
-		compatible = "debix,HC050IG40029-D58V.C";
+		compatible = "debix,JW070R0520B02";
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_lvds_en>;
 		enable-gpios = <&gpio5 4 GPIO_ACTIVE_HIGH>;
@@ -77,8 +77,9 @@
 	status = "okay";
 
 	lvds-channel@0 {
-		fsl,data-mapping = "jeida";
-                //fsl,data-mappin  = "spwg";
+		//fsl,data-mapping = "jeida";
+                fsl,data-mappin  = "spwg";
+		//fsl,data-width = <18>;
 		fsl,data-width = <24>;
 		status = "okay";
 
