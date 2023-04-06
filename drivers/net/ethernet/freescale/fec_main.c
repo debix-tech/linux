@@ -1808,6 +1808,21 @@ static int fec_get_mac(struct net_device *ndev)
 	}
 
 	/*
+	 * polyhex John_gao get eeprom mac
+	 */
+	{
+		extern void get_eeprom_mac(int index, char *mac);
+		char eeprom_mac[6];
+		get_eeprom_mac(2, eeprom_mac);
+		printk("GLS_MAC 02 : %pM \n", eeprom_mac);
+		if(eeprom_mac[0] == 0x10 && 
+				eeprom_mac[1] == 0x07 &&
+				eeprom_mac[2] == 0x23){
+			iap = eeprom_mac;	
+			netdev_err(ndev, "Use Polyhex MAC2 address: %pM\n", iap);
+		}
+	}
+	/*
 	 * 4) FEC mac registers set by bootloader
 	 */
 	if (!is_valid_ether_addr(iap)) {

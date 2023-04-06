@@ -5128,6 +5128,26 @@ int stmmac_dvr_probe(struct device *device,
 	}
 //End Add by polyhex
 
+	/*
+	* polyhex John_gao get eeprom mac
+	*/
+	{
+		extern void get_eeprom_mac(int index, char *mac);
+		char eeprom_mac[6];
+		get_eeprom_mac(1, eeprom_mac);
+		//printk("GLS_MAC 01 : %pM \n", eeprom_mac);
+		if(eeprom_mac[0] == 0x10 &&
+				eeprom_mac[1] == 0x07 &&
+				eeprom_mac[2] == 0x23){
+			priv->dev->dev_addr[0] = eeprom_mac[0];
+			priv->dev->dev_addr[1] = eeprom_mac[1];
+			priv->dev->dev_addr[2] = eeprom_mac[2];
+			priv->dev->dev_addr[3] = eeprom_mac[3];
+			priv->dev->dev_addr[4] = eeprom_mac[4];
+			priv->dev->dev_addr[5] = eeprom_mac[5];
+			netdev_err(ndev, "Use Polyhex MAC1 address: %pM\n", priv->dev->dev_addr);
+		}
+	}
 	stmmac_check_ether_addr(priv);
 
 	ndev->netdev_ops = &stmmac_netdev_ops;

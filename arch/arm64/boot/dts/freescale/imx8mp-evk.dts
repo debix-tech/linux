@@ -124,6 +124,17 @@
 			default-state = "on";
 		};
 
+		CSI2_VDD3V3_EN {
+			label = "CSI2_VDD3V3_EN";
+			gpios = <&gpio4 25 GPIO_ACTIVE_HIGH>;
+			default-state = "on";
+		};
+		CSI2_VDD1V8_EN {
+			label = "CSI2_VDD1V8_EN";
+			gpios = <&gpio3 21 GPIO_ACTIVE_HIGH>;
+			default-state = "on";
+		};
+
 		DOUT_1 {
 			label = "DOUT_1";
 			gpios = <&pca9535_2 0 GPIO_ACTIVE_HIGH>;
@@ -150,6 +161,12 @@
 			gpios = <&pca9535_2 11 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
 		};
+		4G_DISABLE {
+			label = "4G_DISABLE";
+			gpios = <&pca9535_2 10 GPIO_ACTIVE_HIGH>;
+			default-state = "off";
+		};
+
 		USB30_RST {
 			label = "USB30_RST";
 			gpios = <&pca9535_2 9 GPIO_ACTIVE_HIGH>;
@@ -267,7 +284,8 @@
 			"Headphone Jack", "HPOL",
 			"Headphone Jack", "HPOR";
 	};
-#else 
+#endif 
+#if 0
 	sound-wm8960 {
 		compatible = "fsl,imx-audio-wm8960";
 		model = "wm8960-audio";
@@ -622,7 +640,7 @@
 	pinctrl-0 = <&pinctrl_i2c2>;
 	status = "okay";
 
-#if 1
+#if 0
 	imx219: imx219@10 {
 		compatible = "sony,imx219";
 		reg = <0x10>;
@@ -658,7 +676,38 @@
 			};
 		};
 	};
-#else
+#endif
+#if 1
+	gc2145_0: gc2145_mipi@3c {
+                compatible = "gc2145";
+                reg = <0x3c>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&pinctrl_csi0_pwn>;///*, <&pinctrl_csi0_rst>*/, <&pinctrl_csi_mclk>;
+                //clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
+                //clock-names = "xclk";
+                //assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
+                //assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
+                //assigned-clock-rates = <24000000>;
+                csi_id = <0>;
+                powdn-gpios = <&gpio2 11 GPIO_ACTIVE_HIGH>;
+                //reset-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;
+		reset-gpios = <&pca9535_1 15 GPIO_ACTIVE_HIGH>;
+                //mclk = <24000000>;
+                mclk_source = <0>;
+                mipi_csi;
+                status = "okay";
+
+                port {
+                        gc2145_mipi_0_ep: endpoint {
+                                remote-endpoint = <&mipi_csi0_ep>;
+                                data-lanes = <1>;
+                                clock-lanes = <0>;
+                        };
+                };
+        };
+
+#endif
+#if 0
 	ov5640_0: ov5640_mipi@3c {
 		compatible = "ovti,ov5640";
 		reg = <0x3c>;
@@ -731,7 +780,7 @@
 };
 
 &i2c3 {
-	clock-frequency = <400000>;
+	clock-frequency = <100000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c3>;
 	status = "okay";
@@ -743,7 +792,8 @@
 		clocks = <&audio_blk_ctrl IMX8MP_CLK_AUDIO_BLK_CTRL_SAI3_MCLK1>;
 		clock-names = "mclk";
 	};
-#else
+#endif
+#if 0
 	pca6416: gpio@20 {
 		compatible = "ti,tca6416";
 		reg = <0x20>;
@@ -761,24 +811,24 @@
 		wlf,gpio-cfg = <1 3>;
 		SPKVDD1-supply = <&reg_audio_pwr>;
 	};
-
+#endif
 	ov5640_1: ov5640_mipi@3c {
 		compatible = "ovti,ov5640";
 		reg = <0x3c>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_csi0_pwn>, <&pinctrl_csi0_rst>, <&pinctrl_csi_mclk>;
+		pinctrl-0 = /*<&pinctrl_csi1_pwn>, <&pinctrl_csi1_rst>,*/ <&pinctrl_csi_mclk>;
 		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
 		clock-names = "xclk";
 		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
 		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
 		assigned-clock-rates = <24000000>;
 		csi_id = <0>;
-		powerdown-gpios = <&gpio4 1 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio4 0 GPIO_ACTIVE_LOW>;
+		powerdown-gpios = <&pca9535_1 4 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&pca9535_1 3 GPIO_ACTIVE_LOW>;
 		mclk = <24000000>;
 		mclk_source = <0>;
 		mipi_csi;
-		status = "disabled";
+		status = "okay";
 
 		port {
 			ov5640_mipi_1_ep: endpoint {
@@ -788,7 +838,8 @@
 			};
 		};
 	};
-#endif
+
+
 };
 
 &i2c4 {
@@ -817,6 +868,13 @@
 		reg = <0x52>;
 		pagesize = <16>;
 	};
+
+	// factory test J39 i2c 
+	eeprom2: eeprom@54 {
+		compatible = "atmel,24c02";
+		reg = <0x54>;
+		pagesize = <16>;
+	};
 	
 	hym8563: hym8563@51 {
 		compatible = "haoyu,hym8563";
@@ -824,7 +882,7 @@
 		#clock-cells = <0>;
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
-		init_date="2022/04/12";
+		init_date="2023/04/06";
 		interrupt-parent = <&gpio4>;
 		interrupts = <3 IRQ_TYPE_EDGE_FALLING>;
 		
@@ -832,7 +890,7 @@
 		pinctrl-0 = <&pinctrl_rtc_int>;
 	};
 	
-	bmb08_tp_test: bmb08_tp_test@3f {
+/*	bmb08_tp_test: bmb08_tp_test@3f {
 		compatible = "polyhex,bmb08_tp";
 		reg = <0x3f>;
 		pinctrl-names = "default";
@@ -840,7 +898,35 @@
 		interrupt-parent = <&gpio4>;
 		interrupts = <26 IRQ_TYPE_EDGE_FALLING>;
 		reset-gpios = <&gpio2 20 GPIO_ACTIVE_LOW>;
-	};
+	}; */
+	ads1115: ads1115@48 {
+		 compatible = "ti,ads1115";
+		 status = "okay";
+		 #address-cells = <1>;
+		 #size-cells = <0>;
+		 reg = <0x48>;
+
+		 channel@4 {
+			 reg = <4>;
+			 ti,gain = <1>;
+			 ti,datarate = <7>;
+		 };
+		 channel@5 {
+			 reg = <5>;
+			 ti,gain = <1>;
+			 ti,datarate = <7>;
+		 };
+		 channel@6 {
+			 reg = <6>;
+			 ti,gain = <1>;
+			 ti,datarate = <7>;
+		 };
+		 channel@7 {
+			 reg = <7>;
+			 ti,gain = <1>;
+			 ti,datarate = <7>;
+		 };
+	 };
 };
 
 &i2c6 {
@@ -1316,6 +1402,11 @@
 
 	pinctrl_gpio_led: gpioledgrp {
 		fsl,pins = <
+			//csi2 3v3
+			MX8MP_IOMUXC_SAI2_TXC__GPIO4_IO25	 0x19 /*rst*/
+			//csi2 1v8
+			MX8MP_IOMUXC_SAI5_RXD0__GPIO3_IO21       0x19
+
 			MX8MP_IOMUXC_NAND_READY_B__GPIO3_IO16	0x19
 			//J49
 			MX8MP_IOMUXC_SPDIF_TX__GPIO5_IO03 0x19
@@ -1685,7 +1776,8 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
-
+	//status = "disabled";
+#if 0
 	port@0 {
 		reg = <0>;
 		mipi_csi0_ep: endpoint {
@@ -1696,13 +1788,25 @@
 			csis-wclk;
 		};
 	};
+#endif
+        port@0 {
+                reg = <0>;
+                mipi_csi0_ep: endpoint {
+                        remote-endpoint = <&gc2145_mipi_0_ep>;
+                        data-lanes = <1>;
+                        csis-hs-settle = <13>;
+                        csis-clk-settle = <2>;
+                        csis-wclk;
+                };
+        };
+
 };
 
 &mipi_csi_1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
-	status = "disabled";
-#if 0
+	status = "okay";
+#if 1
 	port@1 {
 		reg = <1>;
 		mipi_csi1_ep: endpoint {
@@ -1721,19 +1825,21 @@
 };
 
 &isi_0 {
-	status = "disabled";
+	//status = "disabled";
+	status = "okay";
 
 	cap_device {
 		status = "okay";
 	};
 
 	m2m_device {
-		status = "okay";
+	//	status = "okay";
+		status = "disabled";
 	};
 };
 
 &isi_1 {
-	status = "disabled";
+	status = "okay";
 
 	cap_device {
 		status = "okay";
@@ -1742,11 +1848,13 @@
 
 
 &isp_0 {
-	status = "okay";
+	//status = "okay";
+	status = "disabled";
 };
 
 &dewarp {
-	status = "okay";
+	//status = "okay";
+	status = "disabled";
 };
 
 
