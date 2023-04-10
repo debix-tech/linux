@@ -515,9 +515,10 @@ retry:
 	if (count == 0 && connector->status == connector_status_connected)
 		count = drm_add_override_edid_modes(connector);
 
-	if (count == 0 && (connector->status == connector_status_connected ||
-			   connector->status == connector_status_unknown))
-		count = drm_add_modes_noedid(connector, 1024, 768);
+	if (count == 0 && connector->status == connector_status_connected){
+		printk("GLS_HDMI, count=0 drm_add_modes_noedid \n");
+		count = drm_add_modes_noedid(connector, 1280, 720);
+	}
 	count += drm_helper_probe_add_cmdline_mode(connector);
 	if (count == 0)
 		goto prune;

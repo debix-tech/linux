@@ -722,11 +722,13 @@ static const struct drm_display_mode edid_cea_modes_1[] = {
 		   752, 800, 0, 480, 490, 492, 525, 0,
 		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
 	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
-	/* 2 - 720x480@60Hz 4:3 */
-	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
-		   798, 858, 0, 480, 489, 495, 525, 0,
-		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC),
-	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_4_3, },
+	/* 2 - 1280x800@75Hz 16:10 */
+	{ DRM_MODE("1280x800", DRM_MODE_TYPE_DRIVER, 106500, 1280, 1360,
+		   1488, 1696, 0, 800, 803, 809, 838, 0,
+	//{ DRM_MODE("1280x800", DRM_MODE_TYPE_DRIVER, 71000, 1280, 1328,
+	//	   1360, 1440, 0, 800, 803, 809, 823, 0,
+		   DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_PVSYNC),
+	  .picture_aspect_ratio = HDMI_PICTURE_ASPECT_16_9, },
 	/* 3 - 720x480@60Hz 16:9 */
 	{ DRM_MODE("720x480", DRM_MODE_TYPE_DRIVER, 27000, 720, 736,
 		   798, 858, 0, 480, 489, 495, 525, 0,

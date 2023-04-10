@@ -656,7 +656,7 @@ int goodix_reset_no_int_sync(struct goodix_ts_data *ts)
 	 * don't have a pull-up, so there the reset pin must stay active-high.
 	 */
 	if (ts->irq_pin_access_method == IRQ_PIN_ACCESS_GPIO) {
-		error = gpiod_direction_input(ts->gpiod_rst);
+		error = gpiod_direction_input(ts->gpiod_int);
 		if (error)
 			goto error;
 	}

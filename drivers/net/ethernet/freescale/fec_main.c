@@ -1782,8 +1782,15 @@ static int fec_get_mac(struct net_device *ndev)
 		struct device_node *np = fep->pdev->dev.of_node;
 		if (np) {
 			ret = of_get_mac_address(np, tmpaddr);
-			if (!ret)
+			if (!ret){
 				iap = tmpaddr;
+				//add by polyhex
+				if(is_multicast_ether_addr(iap)){
+					dev_err(&fep->pdev->dev, "Ether Addr is Multicast Address,Mac[0]=0x%x\n",iap[0]); 
+					iap[0] &= 0xFE;
+				}
+				//end add by polyhex
+			}
 			else if (ret == -EPROBE_DEFER)
 				return ret;
 		}
@@ -3855,6 +3862,10 @@ fec_probe(struct platform_device *pdev)
 				  FEC_STATS_SIZE, num_tx_qs, num_rx_qs);
 	if (!ndev)
 		return -ENOMEM;
+
+	//add by polyhex 
+	strcpy(ndev->name, "ens34");
+	//end add by polyhex 
 
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 

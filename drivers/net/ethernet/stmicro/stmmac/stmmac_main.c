@@ -1077,6 +1077,31 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, false);
 }
+				 
+//John_gao
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+	int ret = 0;
+	int ret2 = 0;
+	//page 0
+	 phy_write(phydev, 0x1f, 0);
+
+	ret = phy_read(phydev, 0x02);
+	//printk("GLS_PHY 02 id=0x%x\n", ret);
+	ret2 = phy_read(phydev, 0x03);
+	//printk("GLS_PHY 03 id=0x%x\n", ret);
+	if(ret == 0x1c && ret2 == 0xc916){
+	 /*switch to extension page44*/
+	 phy_write(phydev, 0x1f, 0xd04);
+	 phy_write(phydev, 0x10, 0x6d60);
+
+	 /*set led1(yellow) act*/
+	 phy_write(phydev, 0x11, 0x8);
+	 phy_write(phydev, 0x1f, 0);
+
+	}
+	return 0;
+}
 
 static void stmmac_mac_link_up(struct phylink_config *config,
 			       struct phy_device *phy,
@@ -1176,6 +1201,8 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 
 	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, true);
+	//John_gao
+	phy_rtl8211f_led_fixup(phy);
 }
 
 static const struct phylink_mac_ops stmmac_phylink_mac_ops = {
@@ -6985,6 +7012,10 @@ int stmmac_dvr_probe(struct device *device,
 	if (!ndev)
 		return -ENOMEM;
 
+	//add by polyhex 
+	strcpy(ndev->name, "ens33");
+	//end add by polyhex 
+
 	SET_NETDEV_DEV(ndev, device);
 
 	priv = netdev_priv(ndev);
@@ -7057,6 +7088,13 @@ int stmmac_dvr_probe(struct device *device,
 	ret = stmmac_hw_init(priv);
 	if (ret)
 		goto error_hw_init;
+	
+	//add by polyhex
+	if(is_multicast_ether_addr(priv->dev->dev_addr)){
+		dev_err(priv->device, "Ether Addr is Multicast Address,Mac[0]=0x%x\n",priv->dev->dev_addr[0]); 
+		priv->dev->dev_addr[0] &= 0xFE;
+	}
+	//end add by polyhex
 
 	/* Only DWMAC core version 5.20 onwards supports HW descriptor prefetch.
 	 */
