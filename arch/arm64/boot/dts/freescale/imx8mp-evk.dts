@@ -696,6 +696,7 @@
                 mclk_source = <0>;
                 mipi_csi;
                 status = "okay";
+		//status = "disabled";
 
                 port {
                         gc2145_mipi_0_ep: endpoint {
@@ -829,6 +830,7 @@
 		mclk_source = <0>;
 		mipi_csi;
 		status = "okay";
+	//	status = "disabled";
 
 		port {
 			ov5640_mipi_1_ep: endpoint {
@@ -869,12 +871,12 @@
 		pagesize = <16>;
 	};
 
-	// factory test J39 i2c 
+/*	// factory test J39 i2c 
 	eeprom2: eeprom@54 {
 		compatible = "atmel,24c02";
 		reg = <0x54>;
 		pagesize = <16>;
-	};
+	}; */
 	
 	hym8563: hym8563@51 {
 		compatible = "haoyu,hym8563";

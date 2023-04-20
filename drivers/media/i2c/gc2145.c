@@ -2227,7 +2227,22 @@ static struct i2c_driver gc2145_i2c_driver = {
 	.probe_new	= gc2145_probe,
 	.remove		= gc2145_remove,
 };
+#if 0
 module_i2c_driver(gc2145_i2c_driver);
+#else
+static int __init gc2145_i2c_driver_init(void)
+{
+	return i2c_add_driver(&gc2145_i2c_driver);
+}
+static void __exit gc2145_i2c_driver_exit(void)
+{
+	i2c_del_driver(&gc2145_i2c_driver);
+}
+
+late_initcall(gc2145_i2c_driver_init);
+module_exit(gc2145_i2c_driver_exit);
+
+#endif
 
 MODULE_AUTHOR("gaoliang");
 MODULE_DESCRIPTION("A low-level driver for GalaxyCore gc2145 sensors");

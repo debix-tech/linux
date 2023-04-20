@@ -5612,7 +5612,7 @@ static void __exit stmmac_exit(void)
 #endif
 }
 
-module_init(stmmac_init)
+late_initcall(stmmac_init)
 module_exit(stmmac_exit)
 
 MODULE_DESCRIPTION("STMMAC 10/100/1000 Ethernet device driver");

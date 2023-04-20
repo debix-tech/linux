@@ -3496,7 +3496,23 @@ static struct i2c_driver ov5640_i2c_driver = {
 	.remove   = ov5640_remove,
 };
 
+#if 0
 module_i2c_driver(ov5640_i2c_driver);
+#else
+static int __init ov5640_i2c_driver_init(void)
+{
+	return i2c_add_driver(&ov5640_i2c_driver);
+}
+static void __exit ov5640_i2c_driver_exit(void)
+{
+	i2c_del_driver(&ov5640_i2c_driver);
+}
+
+late_initcall(ov5640_i2c_driver_init);
+module_exit(ov5640_i2c_driver_exit);
+
+
+#endif
 
 MODULE_DESCRIPTION("OV5640 MIPI Camera Subdev Driver");
 MODULE_LICENSE("GPL");

@@ -1806,7 +1806,7 @@ static int fec_get_mac(struct net_device *ndev)
 			iap = (unsigned char *)&pdata->mac;
 #endif
 	}
-
+#if 0 
 	/*
 	 * polyhex John_gao get eeprom mac
 	 */
@@ -1822,6 +1822,7 @@ static int fec_get_mac(struct net_device *ndev)
 			netdev_err(ndev, "Use Polyhex MAC2 address: %pM\n", iap);
 		}
 	}
+#endif
 	/*
 	 * 4) FEC mac registers set by bootloader
 	 */
@@ -4270,8 +4271,19 @@ static struct platform_driver fec_driver = {
 	.probe	= fec_probe,
 	.remove	= fec_drv_remove,
 };
-
+#if 1
 module_platform_driver(fec_driver);
+#else
+static int __init fec_init(void){
+	return platform_driver_register(&fec_driver);
+}
+late_initcall(fec_init);
+static void __exit fec_exit(void)
+{
+	platform_driver_unregister(&fec_driver);
+}
+module_exit(fec_exit);
+#endif
 
 MODULE_ALIAS("platform:"DRIVER_NAME);
 MODULE_LICENSE("GPL");

@@ -856,7 +856,7 @@ static int at24_probe(struct i2c_client *client)
 		return -ENODEV;
 	}
 	change_to_addr(test_byte2, (u8 *)eeprom_mac2);
-	printk("GLS_MAC1 %s : %pM \n", test_byte2, eeprom_mac2);
+	printk("GLS_MAC2 %s : %pM \n", test_byte2, eeprom_mac2);
 
 
 #endif
