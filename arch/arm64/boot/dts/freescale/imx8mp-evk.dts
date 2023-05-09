@@ -257,6 +257,11 @@
 	status = "okay";
 };
 
+&pwm2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm2>;
+	status = "disabled";
+};
 
 &ecspi1 {
 	#address-cells = <1>;
@@ -551,6 +556,40 @@
 			};
 		};
 	};
+	ar1335: ar1335@10 {
+		compatible = "onsemi,ar1335";
+		reg = <0x10>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_csi0_rst> ,<&pinctrl_csi0_pwn>; 
+		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
+		clock-names = "xclk";
+		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
+		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
+		assigned-clock-rates = <24000000>;
+		csi_id = <0>;
+		pwn-gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+		rst-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
+		mclk = <24000000>;
+		mclk_source = <0>;
+		
+		mipi_csi;
+		status = "okay";
+		
+		DVDD-supply = <&imx219_vana_2v8>;
+		DOVDD-supply = <&imx219_vdig_1v8>;
+		AVDD-supply = <&imx219_vddl_1v2>;
+
+		port {
+			ar1335_mipi_0_ep: endpoint {
+				remote-endpoint = <&mipi_csi0_ep>;
+				data-lanes = <1 2>;
+				clock-lanes = <0>;
+				clock-noncontinuous;
+				link-frequencies = /bits/ 64 <456000000>;
+	
+			};
+		};
+	};
 #else
 	ov5640_0: ov5640_mipi@3c {
 		compatible = "ovti,ov5640";
@@ -563,7 +602,7 @@
 		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
 		assigned-clock-rates = <24000000>;
 		csi_id = <0>;
-		powerdown-gpios = <&gpio2 11 GPIO_ACTIVE_HIGH>;
+		powerdown-gpios = <&gpio2 15 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;
 		mclk = <24000000>;
 		mclk_source = <0>;
@@ -789,7 +828,7 @@
 };
 
 &ldb {
-	status = "disabled";
+	status = "okay";
 
 #if 0
 	lvds-channel@0 {
@@ -810,7 +849,7 @@
 };
 
 &ldb_phy {
-	status = "disabled";
+	status = "okay";
 };
 
 &mipi_dsi {
@@ -1104,7 +1143,13 @@
 			MX8MP_IOMUXC_GPIO1_IO01__PWM1_OUT	0x116
 		>;
 	};
-	
+
+	pinctrl_pwm2: pwm2grp {
+		fsl,pins = <
+	//		MX8MP_IOMUXC_GPIO1_IO13__PWM2_OUT	0x116
+		>;
+	};
+
 	pinctrl_ecspi1: ecspi1grp {
 		fsl,pins = <
 			MX8MP_IOMUXC_ECSPI1_SCLK__ECSPI1_SCLK		0x82
@@ -1490,7 +1535,8 @@
 
 	pinctrl_csi0_pwn: csi0_pwn_grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11	0x10
+			// MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11	0x10 //use as rtc int
+			MX8MP_IOMUXC_GPIO1_IO15__GPIO1_IO15	0x19
 		>;
 	};
 
@@ -1549,6 +1595,7 @@
 		reg = <0>;
 		mipi_csi0_ep: endpoint {
 			//remote-endpoint = <&imx219_mipi_0_ep>;
+			//remote-endpoint = <&ar1335_mipi_0_ep>;
 			remote-endpoint = <&ov5640_mipi_0_ep>;
 			data-lanes = <2>;
 			csis-hs-settle = <13>;

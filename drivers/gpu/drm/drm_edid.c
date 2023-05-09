@@ -2443,6 +2443,21 @@ static int drm_mode_hsync(const struct drm_display_mode *mode)
 	return DIV_ROUND_CLOSEST(mode->clock, mode->htotal);
 }
 
+static int isRTK27(struct edid *edid){
+	u8 *p = (u8 *) edid;
+	
+	if(p[8] == 0x4a &&
+	   p[9] == 0x8b &&
+	   p[10]== 0x3b &&
+	   p[11]== 0x2a &&
+	   p[20]== 0x80 &&
+	   p[21]== 0x3c &&
+	   p[22]== 0x22){
+		return 1;	
+	}
+	return 0;
+}
+
 /**
  * drm_mode_std - convert standard mode info (width, height, refresh) into mode
  * @connector: connector of for the EDID block
@@ -2515,6 +2530,19 @@ drm_mode_std(struct drm_connector *connector, struct edid *edid,
 		mode->hsync_start = mode->hsync_start - 1;
 		mode->hsync_end = mode->hsync_end - 1;
 		return mode;
+	}
+	
+	if(isRTK27(edid)){
+		if(hsize == 1920 && vsize == 1080 ){
+			return NULL;
+		}else if(hsize == 1600 && vsize == 1200 ){
+			return NULL;
+		}else if(hsize == 1280 && vsize == 1024 ){
+			return NULL;
+		}else if(hsize == 1152 && vsize == 864 ){
+			hsize = 1280;
+			vsize = 800;
+		} 
 	}
 
 	/* check whether it can be found in default mode table */
