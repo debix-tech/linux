@@ -117,6 +117,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk.dtb imx8mp-evk-rm67191.dtb imx8mp-evk-it626
 			  imx8mp-evk-dpdk.dtb imx8mp-evk-8mic-swpdm.dtb imx8mp-evk-rpmsg-lpv.dtb imx8mp-evk-revA3-8mic-revE.dtb	  
 dtb-$(CONFIG_ARCH_MXC) += imx8mp-debix-core-board.dtb \
 			  imx8mp-debix-core-ov5640.dtb \
+			  imx8mp-debix-core-ar1335.dts \
 			  imx8mp-debix-core-gc2145.dtb \
 			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
 			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \

@@ -57,27 +57,28 @@
 		regulator-always-on;
 	};
 
-	imx219_vana_2v8: 2p8v {
-		compatible = "regulator-fixed";
-		regulator-name = "camera_vana";
-		regulator-min-microvolt = <2800000>;
-		regulator-max-microvolt = <2800000>;
-		regulator-always-on;
-	};
 
-	imx219_vdig_1v8: 1p8v {
+	CAM_DVDD_1V5: cam-core-1v5 {
 		compatible = "regulator-fixed";
-		regulator-name = "camera_vdig";
+		regulator-name = "cam_core_vdd";
 		regulator-min-microvolt = <1500000>;
 		regulator-max-microvolt = <1500000>;
 		regulator-always-on;
 	};
 
-	imx219_vddl_1v2: 1p2v {
+	CAM_DVDD_IO_1V8: cam-io-1v8 {
 		compatible = "regulator-fixed";
-		regulator-name = "camera_vddl";
-		regulator-min-microvolt = <1200000>;
-		regulator-max-microvolt = <1200000>;
+		regulator-name = "cam_io_vdd";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	CAM_AVDD_2V8: cam-analog-2v8  {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_analog_vdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
 		regulator-always-on;
 	};
 
@@ -521,19 +522,19 @@
 	pinctrl-0 = <&pinctrl_i2c2>;
 	status = "okay";
 
-#if 1
-	imx219: imx219@10 {
-		compatible = "sony,imx219";
-		reg = <0x10>;
+	ar1335: ar1335@36 {
+		compatible = "onsemi,ar1335";
+		reg = <0x36>;
 		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_csi0_rst> ,<&pinctrl_csi0_pwn>; 
+		pinctrl-0 = <&pinctrl_csi0_rst> ,<&pinctrl_csi0_pwn>, <&pinctrl_csi_mclk>; 
+		
 		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
-		clock-names = "xclk";
+		clock-names = "csi_mclk";
 		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
 		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
 		assigned-clock-rates = <24000000>;
 		csi_id = <0>;
-		pwn-gpios = <&gpio1 15 GPIO_ACTIVE_HIGH>;
+		pwn-gpios = <&gpio2 15 GPIO_ACTIVE_HIGH>;
 		rst-gpios = <&gpio1 6 GPIO_ACTIVE_HIGH>;
 		mclk = <24000000>;
 		mclk_source = <0>;
@@ -541,49 +542,22 @@
 		mipi_csi;
 		status = "okay";
 		
-		VANA-supply = <&imx219_vana_2v8>;
-		VDIG-supply = <&imx219_vdig_1v8>;
-		VDDL-supply = <&imx219_vddl_1v2>;
-
+		DVDD-supply = <&CAM_DVDD_1V5>;
+		DOVDD-supply = <&CAM_DVDD_IO_1V8>;
+		AVDD-supply = <&CAM_AVDD_2V8>;
+		
 		port {
-			imx219_mipi_0_ep: endpoint {
-				remote-endpoint = <&mipi_csi0_ep>;
-				data-lanes = <1 2>;
+			ar1335_mipi_0_ep: endpoint {
+			
+				data-lanes = <1 2 3 4>;
 				clock-lanes = <0>;
-				clock-noncontinuous;
-				link-frequencies = /bits/ 64 <456000000>;
-	
+				max-pixel-frequency = /bits/ 64 <500000000>;
+				remote-endpoint = <&mipi_csi0_ep>;
+				
 			};
 		};
 	};
-#else
-	ov5640_0: ov5640_mipi@3c {
-		compatible = "ovti,ov5640";
-		reg = <0x3c>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_csi0_pwn>, <&pinctrl_csi0_rst>, <&pinctrl_csi_mclk>;
-		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
-		clock-names = "xclk";
-		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
-		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
-		assigned-clock-rates = <24000000>;
-		csi_id = <0>;
-		powerdown-gpios = <&gpio2 11 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&gpio1 6 GPIO_ACTIVE_LOW>;
-		mclk = <24000000>;
-		mclk_source = <0>;
-		mipi_csi;
-		status = "okay";
 
-		port {
-			ov5640_mipi_0_ep: endpoint {
-				remote-endpoint = <&mipi_csi0_ep>;
-				data-lanes = <1 2>;
-				clock-lanes = <0>;
-			};
-		};
-	};
-#endif
 
 #if 0
 	ptn5110: tcpc@50 {
@@ -713,6 +687,7 @@
 		
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_rtc_int>;
+		status = "disabled";
 	};
 	ads1115: ads1115@48 {
 		 compatible = "ti,ads1115";
@@ -1501,8 +1476,8 @@
 
 	pinctrl_csi0_pwn: csi0_pwn_grp {
 		fsl,pins = <
-			//MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11	0x10  //io borad rtc int ,core CSI1_PWDN
-			MX8MP_IOMUXC_GPIO1_IO15__GPIO1_IO15	0x19 //io board imx219 pwn
+			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11	0x10  //io borad rtc int ,core CSI1_PWDN
+			//MX8MP_IOMUXC_GPIO1_IO15__GPIO1_IO15	0x19 //io board imx219 pwn
 		>;
 	};
 
@@ -1560,14 +1535,12 @@
 	port@0 {
 		reg = <0>;
 		mipi_csi0_ep: endpoint {
-			remote-endpoint = <&imx219_mipi_0_ep>;
-			//remote-endpoint = <&ov5640_mipi_0_ep>;
-			data-lanes = <2>;
-			csis-hs-settle = <13>;
-			csis-clk-settle = <2>;
-			csis-wclk;
+			remote-endpoint = <&ar1335_mipi_0_ep>;
+			data-lanes = <4>;
+			csis-hs-settle = <16>;
 		};
 	};
+	
 };
 
 &mipi_csi_1 {
