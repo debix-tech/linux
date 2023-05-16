@@ -82,46 +82,54 @@
 			label = "SPK_VDD5V_EN";
 			gpios = <&pca9535_1 0 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 */
 		VDD5V_EN {
 			label = "VDD5V_EN";
 			gpios = <&pca9535_1 8 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		BB_VDD5V_EN {
 			label = "BB_VDD5V_EN";
 			gpios = <&pca9535_1 9 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		BB_VDD3V3_EN {
 			label = "BB_VDD5V_EN";
 			gpios = <&pca9535_1 10 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		SOM_VDD3V3_EN {
 			label = "SOM_VDD3V3_EN";
 			gpios = <&pca9535_1 11 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		SOM_VDD1V8_EN {
 			label = "SOM_VDD1V8_EN";
 			gpios = <&pca9535_1 12 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		CSI1_VDD1V8_EN {
 			label = "CSI1_VDD1V8_EN";
 			gpios = <&pca9535_1 13 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		CSI1_VDD3V3_EN {
 			label = "CSI1_VDD3V3_EN";
 			gpios = <&pca9535_1 14 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		CSI2_VDD3V3_EN {
@@ -139,53 +147,63 @@
 			label = "DOUT_1";
 			gpios = <&pca9535_2 0 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		DOUT_2 {
 			label = "DOUT_2";
 			gpios = <&pca9535_2 1 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		DOUT_3 {
 			label = "DOUT_3";
 			gpios = <&pca9535_2 2 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		DOUT_4 {
 			label = "DOUT_4";
 			gpios = <&pca9535_2 3 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 		4G_RESET {
 			label = "4G_RESET";
 			gpios = <&pca9535_2 11 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
+			retain-state-suspended;
 		};
 		4G_DISABLE {
 			label = "4G_DISABLE";
 			gpios = <&pca9535_2 10 GPIO_ACTIVE_HIGH>;
 			default-state = "off";
+			retain-state-suspended;
 		};
 
 		USB30_RST {
 			label = "USB30_RST";
 			gpios = <&pca9535_2 9 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		USB30_PWR_EN {
 			label = "USB30_PWR_EN";
 			gpios = <&pca9535_2 12 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		USB30_OTG_EN {
 			label = "USB30_OTG_EN";
 			gpios = <&pca9535_2 13 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 		USB20_PWR_EN {
 			label = "USB20_PWR_EN";
 			gpios = <&pca9535_2 14 GPIO_ACTIVE_HIGH>;
 			default-state = "on";
+			retain-state-suspended;
 		};
 
 	};
