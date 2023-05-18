@@ -584,6 +584,59 @@ static unsigned int at24_get_offset_adj(u8 flags, unsigned int byte_len)
 		return 0;
 	}
 }
+/*
+ * polyhex John_gao get eeprom mac
+ */
+static char eeprom_mac1[6];
+static char eeprom_mac2[6];
+
+int change_to_addr (uint8_t *mac, uint8_t *addr)
+{
+        int i;
+        for(i = 0 ; i < 12; i++){
+                //int v = atoi((char *)&(mac[i]-'0'));
+                int v = mac[i]-'0';
+                if( v < 0 || v > 0x9){
+//                      printf("v(0x%x) mac(0x%x) (0(0x%x)\n", v, mac[i], '0');
+                        v = mac[i] - 'a' + 10;
+                        if( v < 0xa || v > 0xf){
+//                              printf("v(0x%x) mac(0x%x) (a(0x%x)\n", v, mac[i], 'a');
+                                v = mac[i] - 'A' + 10;
+//                              printf("v(0x%x) mac(0x%x) (A(0x%x)\n", v, mac[i], 'A');
+                                if( v < 0xa || v > 0xf){
+                                        printk("input mac err, value = [ 0 - f ], cur is(%c) \n", mac[i]);
+                                        return -1;
+                                }
+                        }
+                }
+                addr[i/2] |= (i%2 == 0?(v<<4)&0xf0:v&0xf);
+        }
+
+        return 0;
+}
+
+void get_eeprom_mac(int index, char *mac)
+{
+	if(index == 1){
+		mac[0] = eeprom_mac1[0];
+		mac[1] = eeprom_mac1[1];
+		mac[2] = eeprom_mac1[2];
+		mac[3] = eeprom_mac1[3];
+		mac[4] = eeprom_mac1[4];
+		mac[5] = eeprom_mac1[5];
+		printk("GLS_MAC1 %pM %pM\n", eeprom_mac1, mac);
+	}else{
+		mac[0] = eeprom_mac2[0];
+		mac[1] = eeprom_mac2[1];
+		mac[2] = eeprom_mac2[2];
+		mac[3] = eeprom_mac2[3];
+		mac[4] = eeprom_mac2[4];
+		mac[5] = eeprom_mac2[5];
+		printk("GLS_MAC2 %pM %pM\n", eeprom_mac2, mac);
+	}
+}
+EXPORT_SYMBOL(get_eeprom_mac);
+
 
 static int at24_probe(struct i2c_client *client)
 {
@@ -597,7 +650,8 @@ static int at24_probe(struct i2c_client *client)
 	struct at24_data *at24;
 	struct regmap *regmap;
 	bool writable;
-	u8 test_byte;
+	u8 test_byte1[12];
+	u8 test_byte2[12];
 	int err;
 
 	i2c_fn_i2c = i2c_check_functionality(client->adapter, I2C_FUNC_I2C);
@@ -769,6 +823,7 @@ static int at24_probe(struct i2c_client *client)
 	 * Perform a one-byte test read to verify that the
 	 * chip is functional.
 	 */
+#if 0
 	err = at24_read(at24, 0, &test_byte, 1);
 	if (err) {
 		pm_runtime_disable(dev);
@@ -776,7 +831,35 @@ static int at24_probe(struct i2c_client *client)
 			regulator_disable(at24->vcc_reg);
 		return -ENODEV;
 	}
+#else
+/*
+ * polyhex John_gao get eeprom mac
+ * off = 0  Eth1 mac is write 
+ * off = 12  Eth2 mac is write 
+ * size = 12 char
+ */
+	err = at24_read(at24, 0, test_byte1, 12);
+	if (err) {
+		pm_runtime_disable(dev);
+		if (!pm_runtime_status_suspended(dev))
+			regulator_disable(at24->vcc_reg);
+		return -ENODEV;
+	}
+	change_to_addr(test_byte1, (u8 *)eeprom_mac1);
+	printk("GLS_MAC1 %s : %pM \n", test_byte1, eeprom_mac1);
 
+	err = at24_read(at24, 12, test_byte2, 12);
+	if (err) {
+		pm_runtime_disable(dev);
+		if (!pm_runtime_status_suspended(dev))
+			regulator_disable(at24->vcc_reg);
+		return -ENODEV;
+	}
+	change_to_addr(test_byte2, (u8 *)eeprom_mac2);
+	printk("GLS_MAC2 %s : %pM \n", test_byte2, eeprom_mac2);
+
+
+#endif
 	pm_runtime_idle(dev);
 
 	if (writable)

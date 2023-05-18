@@ -1079,28 +1079,18 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 }
 				 
 //John_gao
-static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 {
-	int ret = 0;
-	int ret2 = 0;
-	//page 0
-	 phy_write(phydev, 0x1f, 0);
+       /*switch to extension page44*/
+       phy_write(phydev, 0x1f, 0xd04);
+       phy_write(phydev, 0x10, 0x6d60);
 
-	ret = phy_read(phydev, 0x02);
-	//printk("GLS_PHY 02 id=0x%x\n", ret);
-	ret2 = phy_read(phydev, 0x03);
-	//printk("GLS_PHY 03 id=0x%x\n", ret);
-	if(ret == 0x1c && ret2 == 0xc916){
-	 /*switch to extension page44*/
-	 phy_write(phydev, 0x1f, 0xd04);
-	 phy_write(phydev, 0x10, 0x6d60);
+       /*set led1(yellow) act*/
+       phy_write(phydev, 0x11, 0x8);
+        phy_write(phydev, 0x1f, 0);
 
-	 /*set led1(yellow) act*/
-	 phy_write(phydev, 0x11, 0x8);
-	 phy_write(phydev, 0x1f, 0);
 
-	}
-	return 0;
+       return 0;
 }
 
 static void stmmac_mac_link_up(struct phylink_config *config,
@@ -1202,7 +1192,7 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, true);
 	//John_gao
-	phy_rtl8211f_led_fixup(phy);
+	phy_rtl8211e_led_fixup(phy);
 }
 
 static const struct phylink_mac_ops stmmac_phylink_mac_ops = {
@@ -7101,6 +7091,26 @@ int stmmac_dvr_probe(struct device *device,
 	if (priv->synopsys_id < DWMAC_CORE_5_20)
 		priv->plat->dma_cfg->dche = false;
 
+	/*
+	* polyhex John_gao get eeprom mac
+	*/
+	{
+		extern void get_eeprom_mac(int index, char *mac);
+		char eeprom_mac[6];
+		get_eeprom_mac(1, eeprom_mac);
+		//printk("GLS_MAC 01 : %pM \n", eeprom_mac);
+		if(eeprom_mac[0] == 0x10 &&
+				eeprom_mac[1] == 0x07 &&
+				eeprom_mac[2] == 0x23){
+			priv->dev->dev_addr[0] = eeprom_mac[0];
+			priv->dev->dev_addr[1] = eeprom_mac[1];
+			priv->dev->dev_addr[2] = eeprom_mac[2];
+			priv->dev->dev_addr[3] = eeprom_mac[3];
+			priv->dev->dev_addr[4] = eeprom_mac[4];
+			priv->dev->dev_addr[5] = eeprom_mac[5];
+			netdev_err(ndev, "Use Polyhex MAC1 address: %pM\n", priv->dev->dev_addr);
+		}
+	}
 	stmmac_check_ether_addr(priv);
 
 	ndev->netdev_ops = &stmmac_netdev_ops;
@@ -7597,7 +7607,7 @@ static void __exit stmmac_exit(void)
 #endif
 }
 
-module_init(stmmac_init)
+late_initcall(stmmac_init)
 module_exit(stmmac_exit)
 
 MODULE_DESCRIPTION("STMMAC 10/100/1000 Ethernet device driver");

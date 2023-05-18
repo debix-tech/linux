@@ -1427,10 +1427,20 @@ uart_ioctl(struct tty_struct *tty, unsigned int cmd, unsigned long arg)
 
 	case TIOCGRS485:
 		ret = uart_get_rs485_config(uport, uarg);
+		//GLS add for  ch9434
+		if(ret < 0){
+			if (uport->ops->ioctl)
+				ret = uport->ops->ioctl(uport, cmd, arg);
+		}
 		break;
 
 	case TIOCSRS485:
 		ret = uart_set_rs485_config(uport, uarg);
+		//GLS add for  ch9434
+		if(ret < 0){
+			if (uport->ops->ioctl)
+				ret = uport->ops->ioctl(uport, cmd, arg);
+		}
 		break;
 
 	case TIOCSISO7816:
