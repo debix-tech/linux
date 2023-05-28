@@ -693,25 +693,27 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c2>;
 	status = "okay";
-	
-	gc2145_0: gc2145_mipi@3c {
-		compatible = "gc2145";
-		reg = <0x3c>;
+
+	ar1335_0: ar1335@36 {
+		compatible = "onsemi,ar1335";
+		reg = <0x36>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_csi0_pwn>; 
 
 		csi_id = <0>;
-		powerdown-gpios =  <&gpio2 11 GPIO_ACTIVE_HIGH>;
+		powerdown-gpios = <&gpio2 11 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&pca9535_1 15 GPIO_ACTIVE_HIGH>;
-		//mclk = <24000000>;
-		mclk_source = <0>;
+
 		mipi_csi;
 		status = "okay";
-
+				
 		port {
-		  gc2145_mipi_0_ep: endpoint {
-	      remote-endpoint = <&mipi_csi0_ep>;
-	      data-lanes = <1>;
-	      clock-lanes = <0>;
-		  };
+			ar1335_mipi_0_ep: endpoint {
+				data-lanes = <1 2 3 4>;
+				clock-lanes = <0>;
+				max-pixel-frequency = /bits/ 64 <500000000>;
+				remote-endpoint = <&mipi_csi0_ep>;
+			};
 		};
 	};
 
@@ -731,54 +733,28 @@
 		clock-names = "mclk";
 	};
 #endif
-#if 0
-	pca6416: gpio@20 {
-		compatible = "ti,tca6416";
-		reg = <0x20>;
-		gpio-controller;
-		#gpio-cells = <2>;
-	};
+	ar1335_1: ar1335@36 {
+		compatible = "onsemi,ar1335";
+		reg = <0x36>;
 
-	codec: wm8960@1a {
-		compatible = "wlf,wm8960";
-		reg = <0x1a>;
-		clocks = <&audio_blk_ctrl IMX8MP_CLK_AUDIO_BLK_CTRL_SAI3_MCLK1>;
-		clock-names = "mclk";
-		wlf,shared-lrclk;
-		wlf,hp-cfg = <3 2 3>;
-		wlf,gpio-cfg = <1 3>;
-		SPKVDD1-supply = <&reg_audio_pwr>;
-	};
-#endif
-	ov5640_1: ov5640_mipi@3c {
-		compatible = "ovti,ov5640";
-		reg = <0x3c>;
-		pinctrl-names = "default";
-		pinctrl-0 = /*<&pinctrl_csi1_pwn>, <&pinctrl_csi1_rst>,*/ <&pinctrl_csi_mclk>;
-		clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
-		clock-names = "xclk";
-		assigned-clocks = <&clk IMX8MP_CLK_IPP_DO_CLKO2>;
-		assigned-clock-parents = <&clk IMX8MP_CLK_24M>;
-		assigned-clock-rates = <24000000>;
-		csi_id = <0>;
+		csi_id = <1>;
+	
 		powerdown-gpios = <&pca9535_1 4 GPIO_ACTIVE_HIGH>;
 		reset-gpios = <&pca9535_1 3 GPIO_ACTIVE_LOW>;
-		mclk = <24000000>;
-		mclk_source = <0>;
+		
 		mipi_csi;
 		status = "okay";
-	//	status = "disabled";
-
+				
 		port {
-			ov5640_mipi_1_ep: endpoint {
-				remote-endpoint = <&mipi_csi1_ep>;
-				data-lanes = <1 2>;
+			ar1335_mipi_1_ep: endpoint {
+				data-lanes = <1 2 3 4>;
 				clock-lanes = <0>;
+				max-pixel-frequency = /bits/ 64 <500000000>;
+				remote-endpoint = <&mipi_csi1_ep>;
 			};
 		};
 	};
-
-
+	
 };
 
 &i2c4 {
@@ -989,8 +965,8 @@
 				 <&clk IMX8MP_SYS_PLL2_50M>;
 	fsl,max-link-speed = <2>;
 	//l1ss-disabled;
-	//status = "disabled";
-	status = "okay";
+	status = "disabled";
+	//status = "okay";
 /*
 	wifi_wake_host {
 		compatible = "nxp,wifi-wake-host";
@@ -1019,8 +995,8 @@
 
 &pcie_phy{
 	ext_osc = <0>;
-//	status = "disabled";
-	status = "okay";
+	status = "disabled";
+//	status = "okay";
 };
 
 #if 0
@@ -1728,25 +1704,29 @@
 	port@0 {
 		reg = <0>;
 		mipi_csi0_ep: endpoint {
-			remote-endpoint = <&gc2145_mipi_0_ep>;
-			data-lanes = <1>;
+			remote-endpoint = <&ar1335_mipi_0_ep>;
+			data-lanes = <4>;
 			csis-hs-settle = <13>;
 			csis-clk-settle = <2>;
 			csis-wclk;
 		};
 	};
-
 };
 
 &mipi_csi_1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
+
+	clock-frequency = <500000000>;
+	assigned-clock-parents = <&clk IMX8MP_SYS_PLL2_1000M>;
+	assigned-clock-rates = <500000000>;
+
 	port@1 {
 		reg = <1>;
 		mipi_csi1_ep: endpoint {
-			remote-endpoint = <&ov5640_mipi_1_ep>;
-			data-lanes = <2>;
+			remote-endpoint = <&ar1335_mipi_1_ep>;
+			data-lanes = <4>;
 			csis-hs-settle = <13>;
 			csis-clk-settle = <2>;
 			csis-wclk;
@@ -1759,7 +1739,7 @@
 };
 
 &isi_0 {
-	status = "okay";
+	status = "disabled";
 
 	cap_device {
 		status = "okay";
@@ -1771,7 +1751,7 @@
 };
 
 &isi_1 {
-	status = "okay";
+	status = "disabled";
 
 	cap_device {
 		status = "okay";
@@ -1780,11 +1760,15 @@
 
 
 &isp_0 {
-	status = "disabled";
+	status = "okay";
+};
+
+&isp_1 {
+	status = "okay";
 };
 
 &dewarp {
-	status = "disabled";
+	status = "okay";
 };
 
 

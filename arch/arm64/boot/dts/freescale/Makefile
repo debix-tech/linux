@@ -242,6 +242,13 @@ dtb-$(CONFIG_ARCH_S32) += s32v234-evb.dtb \
 endif
 dtb-$(CONFIG_ARCH_MXC) += \
 				imx8mp-evk.dtb \
+				imx8mp-debix-A200-A200.dtb \
+				imx8mp-debix-A200-A500.dtb \
+				imx8mp-debix-A500-A200.dtb \
+				imx8mp-debix-A500-A500.dtb \
+				imx8mp-debix-A1300-A200.dtb \
+				imx8mp-debix-A1300-A500.dtb \
+				imx8mp-debix-A1300-A1300.dtb \
 			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
 			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \
 			  imx8mp-debix-core-HC101IK25050-D59V.C.dtb \
