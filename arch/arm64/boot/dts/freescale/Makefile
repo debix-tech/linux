@@ -255,4 +255,5 @@ dtb-$(CONFIG_ARCH_MXC) += \
 			  imx8mp-debix-core-JW070R0520B02.dtb \
 			  imx8mp-debix-core-JW101HD-X00.dtb \
 			  imx8mp-debix-core-JW080R1120B02.dtb \
-			  imx8mp-debix-core-JW050R0320I01.dtb
+			  imx8mp-debix-core-JW050R0320I01.dtb \
+			  imx8mp-evk-1080p-lvds.dtb
