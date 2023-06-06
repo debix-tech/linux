@@ -3854,6 +3854,55 @@ out:
 
 	return ret;
 }
+				   
+#ifndef MODULE
+static int __init ens34_mac_cmdline_opt(char *mac_str)
+{
+	int i;
+	unsigned char mac_addr_tmp[ETH_ALEN] = {0};
+	unsigned long value;
+	char *star;
+	char *end;
+
+	if(mac_str == NULL || mac_str[0] == 0){
+		pr_warn("%s mac_str Empty", __func__);
+		return 1;
+	}
+	
+	star = mac_str;
+	for(i = 0;i < ETH_ALEN;i++){
+		value = simple_strtoul(star, &end, 16);
+		if(value > 0xFF){
+			i = 0;
+			break;
+		}
+		mac_addr_tmp[i] =  value;
+		
+		if(end == NULL || *end  == 0)
+			break;
+		if(i < (ETH_ALEN - 1) &&  *end != ':')
+			break;
+		
+		star = end +1;
+	}
+	if(i < (ETH_ALEN - 1)){
+		pr_warn("%s str=%s resolve Error i=%d\n",__func__,mac_str,i);	
+		return 1;
+	}
+	
+	if (!is_valid_ether_addr(mac_addr_tmp)){
+		pr_warn("%s Invalid MAC address: %pM\n",__func__, mac_addr_tmp);
+		return 1;
+	}
+	
+	memcpy(macaddr, mac_addr_tmp, ETH_ALEN);
+	pr_info("%s resolve MAC address: %pM\n",__func__, macaddr);
+	return 1;
+}
+
+__setup("ens34_mac=", ens34_mac_cmdline_opt);
+#endif
+
 
 static int
 fec_probe(struct platform_device *pdev)

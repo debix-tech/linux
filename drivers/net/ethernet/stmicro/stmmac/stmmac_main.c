@@ -74,6 +74,9 @@ static int phyaddr = -1;
 module_param(phyaddr, int, 0444);
 MODULE_PARM_DESC(phyaddr, "Physical device address");
 
+static unsigned char macaddr_at_uboot[ETH_ALEN] = {0};
+
+
 #define STMMAC_TX_THRESH(x)	((x)->dma_tx_size / 4)
 #define STMMAC_RX_THRESH(x)	((x)->dma_rx_size / 4)
 
@@ -7094,6 +7097,7 @@ int stmmac_dvr_probe(struct device *device,
 	/*
 	* polyhex John_gao get eeprom mac
 	*/
+	if (!is_valid_ether_addr(macaddr_at_uboot))
 	{
 		extern void get_eeprom_mac(int index, char *mac);
 		char eeprom_mac[6];
@@ -7110,6 +7114,8 @@ int stmmac_dvr_probe(struct device *device,
 			priv->dev->dev_addr[5] = eeprom_mac[5];
 			netdev_err(ndev, "Use Polyhex MAC1 address: %pM\n", priv->dev->dev_addr);
 		}
+	}else {
+		memcpy(priv->dev->dev_addr, macaddr_at_uboot, ETH_ALEN);
 	}
 	stmmac_check_ether_addr(priv);
 
@@ -7585,6 +7591,57 @@ err:
 }
 
 __setup("stmmaceth=", stmmac_cmdline_opt);
+
+//add by groot
+
+static int __init ens33_mac_cmdline_opt(char *mac_str)
+{
+	int i;
+	unsigned char mac_addr_tmp[ETH_ALEN] = {0};
+	unsigned long value;
+	char *star;
+	char *end;
+
+	if(mac_str == NULL || mac_str[0] == 0){
+		pr_warn("%s mac_str Empty", __func__);
+		return 1;
+	}
+	
+	star = mac_str;
+	for(i = 0;i < ETH_ALEN;i++){
+		value = simple_strtoul(star, &end, 16);
+		if(value > 0xFF){
+			i = 0;
+			break;
+		}
+		mac_addr_tmp[i] =  value;
+		
+		if(end == NULL || *end  == 0)
+			break;
+		if(i < (ETH_ALEN - 1) &&  *end != ':')
+			break;
+		
+		star = end +1;
+	}
+	if(i < (ETH_ALEN - 1)){
+		pr_warn("%s str=%s resolve Error i=%d\n",__func__,mac_str,i);	
+		return 1;
+	}
+	
+	if (!is_valid_ether_addr(mac_addr_tmp)){
+		pr_warn("%s Invalid MAC address: %pM\n",__func__, mac_addr_tmp);
+		return 1;
+	}
+	
+	memcpy(macaddr_at_uboot, mac_addr_tmp, ETH_ALEN);
+	pr_info("%s resolve MAC address: %pM\n",__func__, macaddr_at_uboot);
+	return 1;
+}
+
+__setup("ens33_mac=", ens33_mac_cmdline_opt);
+
+//end add by groot
+
 #endif /* MODULE */
 
 static int __init stmmac_init(void)
