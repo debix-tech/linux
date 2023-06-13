@@ -1843,6 +1843,21 @@ static int fec_get_mac(struct net_device *ndev)
 	return 0;
 }
 
+
+//John_gao
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+{
+	/*switch to extension page44*/
+	phy_write(phydev, 0x1f, 0xd04);
+	phy_write(phydev, 0x10, 0x6d60);
+
+	/*set led1(yellow) act*/
+	phy_write(phydev, 0x11, 0x8);
+	phy_write(phydev, 0x1f, 0);
+
+	return 0;
+}
+
 /* ------------------------------------------------------------------------- */
 
 /*
@@ -1900,6 +1915,8 @@ static void fec_enet_adjust_link(struct net_device *ndev)
 
 	if (status_change)
 		phy_print_status(phy_dev);
+	//John_gao
+	phy_rtl8211e_led_fixup(phy_dev);
 }
 
 static int fec_enet_mdio_wait(struct fec_enet_private *fep)
