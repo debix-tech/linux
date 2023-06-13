@@ -2024,7 +2024,7 @@ static int gc2145_parse_dt(struct gc2145_dev *sensor)
 
 GLS("%s >>> \n",__func__);
 	/* request power down pin */
-    sensor->powdn_gpio = of_get_named_gpio(dev->of_node, "powdn-gpios", 0);
+    sensor->powdn_gpio = of_get_named_gpio(dev->of_node, "powerdown-gpios", 0);
     if (!gpio_is_valid(sensor->powdn_gpio))
     	dev_warn(dev, "No sensor pwdn pin available");
     else {

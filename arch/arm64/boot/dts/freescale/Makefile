@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-
+ifdef CONFIG_NXP_ALL_DTS
 dtb-$(CONFIG_ARCH_LAYERSCAPE) += fsl-ls1012a-frdm.dtb
 dtb-$(CONFIG_ARCH_LAYERSCAPE) += fsl-ls1012a-frwy.dtb
 dtb-$(CONFIG_ARCH_LAYERSCAPE) += fsl-ls1012a-oxalis.dtb
@@ -115,35 +115,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk.dtb imx8mp-evk-rm67191.dtb imx8mp-evk-it626
 			  imx8mp-evk-hifiberry-dac2.dtb \
 			  imx8mp-evk-usdhc1-m2.dtb imx8mp-evk-rm67199.dtb \
 			  imx8mp-evk-dpdk.dtb imx8mp-evk-8mic-swpdm.dtb imx8mp-evk-rpmsg-lpv.dtb imx8mp-evk-revA3-8mic-revE.dtb	  
-dtb-$(CONFIG_ARCH_MXC) += imx8mp-debix-core-board.dtb \
-			  imx8mp-debix-core-ov5640.dtb \
-			  imx8mp-debix-core-ar1335.dts \
-			  imx8mp-debix-core-gc2145.dtb \
-			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
-			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \
-			  imx8mp-debix-core-HC101IK25050-D59V.C.dtb \
-			  imx8mp-debix-core-JW070R0520B02.dtb \
-			  imx8mp-debix-core-JW101HD-X00.dtb \
-			  imx8mp-debix-core-JW080R1120B02.dtb \
-			  imx8mp-debix-core-JW050R0320I01.dtb \
-			  imx8mp-debix-4g-board.dtb \
-			  imx8mp-debix-io-board.dtb \
-			  imx8mp-debix-io-HC050IG40029-D58V.C.dtb \
-			  imx8mp-debix-io-HC080IY28026-D60V.C.dtb \
-			  imx8mp-debix-io-raspberrypi-touchscreen.dtb \
-			  imx8mp-debix-io-HC101IK25050-D59V.C.dtb \
-			  imx8mp-debix-io-JW070R0520B02.dtb \
-			  imx8mp-debix-io-JW101HD-X00.dtb \
-			  imx8mp-debix-io-JW080R1120B02.dtb \
-			  imx8mp-debix-io-JW050R0320I01.dtb \
-			  imx8mp-debix-lora-board.dtb \
-			  imx8mp-debix-lora-JW070R0520B02.dtb \
-			  imx8mp-debix-lora-JW101HD-X00.dtb \
-			  imx8mp-debix-lora-JW080R1120B02.dtb \
-			  imx8mp-debix-lora-JW050R0320I01.dtb \
-			  imx8mp-debix-lora-HC050IG40029-D58V.C.dtb \
-			  imx8mp-debix-lora-HC080IY28026-D60V.C.dtb \
-			  imx8mp-debix-lora-HC101IK25050-D59V.C.dtb
+
 dtb-$(CONFIG_ARCH_MXC) += imx8mp-phyboard-pollux-rdk.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mq-evk.dtb imx8mq-evk-rpmsg.dtb imx8mp-ab2.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mp-ddr4-evk.dtb
@@ -267,3 +239,34 @@ dtb-$(CONFIG_ARCH_MXC) += imx93-9x9-qsb.dtb \
 			  imx93-9x9-qsb-mt9m114.dtb
 dtb-$(CONFIG_ARCH_S32) += s32v234-evb.dtb \
 			  s32v234-sbc.dtb
+endif
+dtb-$(CONFIG_ARCH_MXC) += imx8mp-debix-core-board.dtb \
+			  imx8mp-debix-core-ov5640.dtb \
+			  imx8mp-debix-core-ar1335.dts \
+			  imx8mp-debix-core-gc2145.dtb \
+			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
+			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \
+			  imx8mp-debix-core-HC101IK25050-D59V.C.dtb \
+			  imx8mp-debix-core-JW070R0520B02.dtb \
+			  imx8mp-debix-core-JW101HD-X00.dtb \
+			  imx8mp-debix-core-JW080R1120B02.dtb \
+			  imx8mp-debix-core-JW050R0320I01.dtb \
+			  imx8mp-debix-4g-board.dtb \
+			  imx8mp-debix-io-board.dtb \
+			  imx8mp-debix-io-HC050IG40029-D58V.C.dtb \
+			  imx8mp-debix-io-HC080IY28026-D60V.C.dtb \
+			  imx8mp-debix-io-raspberrypi-touchscreen.dtb \
+			  imx8mp-debix-io-HC101IK25050-D59V.C.dtb \
+			  imx8mp-debix-io-JW070R0520B02.dtb \
+			  imx8mp-debix-io-JW101HD-X00.dtb \
+			  imx8mp-debix-io-JW080R1120B02.dtb \
+			  imx8mp-debix-io-JW050R0320I01.dtb \
+			  imx8mp-debix-lora-board.dtb \
+			  imx8mp-debix-lora-JW070R0520B02.dtb \
+			  imx8mp-debix-lora-JW101HD-X00.dtb \
+			  imx8mp-debix-lora-JW080R1120B02.dtb \
+			  imx8mp-debix-lora-JW050R0320I01.dtb \
+			  imx8mp-debix-lora-HC050IG40029-D58V.C.dtb \
+			  imx8mp-debix-lora-HC080IY28026-D60V.C.dtb \
+			  imx8mp-debix-lora-HC101IK25050-D59V.C.dtb \
+			  imx8mp-debix-io-imx219.dtb
