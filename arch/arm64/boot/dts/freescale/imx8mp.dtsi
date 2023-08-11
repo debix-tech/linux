@@ -387,7 +387,7 @@
 				};
 
 				cpu_crit0: trip1 {
-					temperature = <95000>;
+					temperature = <105000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -417,7 +417,7 @@
 				};
 
 				soc_crit0: trip1 {
-					temperature = <95000>;
+					temperature = <105000>;
 					hysteresis = <2000>;
 					type = "critical";
 				};
@@ -2180,7 +2180,7 @@
 			ranges;
 			status = "disabled";
 
-			usb_dwc3_0: usb@38100000 {
+			usb_dwc3_0: dwc3@38100000 {
 				compatible = "snps,dwc3";
 				reg = <0x38100000 0x10000>;
 				clocks = <&clk IMX8MP_CLK_USB_ROOT>,
