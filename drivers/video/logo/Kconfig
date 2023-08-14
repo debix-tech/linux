@@ -3,6 +3,11 @@
 # Logo configuration
 #
 
+# modified by polyhex
+config LOGO_LINUX_CLUT224
+	bool "224-color Debix logo"
+	default y
+
 menuconfig LOGO
 	bool "Bootup logo"
 	depends on FB || SGI_NEWPORT_CONSOLE

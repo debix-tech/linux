@@ -25,6 +25,7 @@
 #include <sound/soc.h>
 #include <sound/soc-dpcm.h>
 #include <sound/initval.h>
+#include <linux/delay.h>
 
 /**
  * snd_soc_info_enum_double - enumerated double mixer info callback
@@ -220,21 +221,11 @@ int snd_soc_info_volsw_sx(struct snd_kcontrol *kcontrol,
 {
 	struct soc_mixer_control *mc =
 		(struct soc_mixer_control *)kcontrol->private_value;
-	int max;
-
-	if (mc->platform_max)
-		max = mc->platform_max;
-	else
-		max = mc->max;
-
-	if (max == 1 && !strstr(kcontrol->id.name, " Volume"))
-		uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
-	else
-		uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
-
-	uinfo->count = snd_soc_volsw_is_stereo(mc) ? 2 : 1;
-	uinfo->value.integer.min = 0;
-	uinfo->value.integer.max = max;
+	snd_soc_info_volsw(kcontrol, uinfo);
+	/* Max represents the number of levels in an SX control not the
+	 * maximum value, so add the minimum value back on
+	 */
+	uinfo->value.integer.max += mc->min;
 
 	return 0;
 }
@@ -333,12 +324,14 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
 	if (sign_bit)
 		mask = BIT(sign_bit + 1) - 1;
 
-	if (ucontrol->value.integer.value[0] < 0)
-		return -EINVAL;
+	// if (ucontrol->value.integer.value[0] < 0)
+	// 	return -EINVAL;
 	val = ucontrol->value.integer.value[0];
 	if (mc->platform_max && ((int)val + min) > mc->platform_max)
 		return -EINVAL;
 	if (val > max - min)
+		return -EINVAL;
+	if (val < 0)
 		return -EINVAL;
 	val = (val + min) & mask;
 	if (invert)
@@ -346,12 +339,14 @@ int snd_soc_put_volsw(struct snd_kcontrol *kcontrol,
 	val_mask = mask << shift;
 	val = val << shift;
 	if (snd_soc_volsw_is_stereo(mc)) {
-		if (ucontrol->value.integer.value[1] < 0)
-			return -EINVAL;
+		// if (ucontrol->value.integer.value[1] < 0)
+		// 	return -EINVAL;
 		val2 = ucontrol->value.integer.value[1];
 		if (mc->platform_max && ((int)val2 + min) > mc->platform_max)
 			return -EINVAL;
 		if (val2 > max - min)
+			return -EINVAL;
+		if (val2 < 0)
 			return -EINVAL;
 		val2 = (val2 + min) & mask;
 		if (invert)
@@ -447,12 +442,14 @@ int snd_soc_put_volsw_sx(struct snd_kcontrol *kcontrol,
 	int ret;
 	unsigned int val, val_mask;
 
-	if (ucontrol->value.integer.value[0] < 0)
-		return -EINVAL;
+	// if (ucontrol->value.integer.value[0] < 0)
+	// 	return -EINVAL;
 	val = ucontrol->value.integer.value[0];
 	if (mc->platform_max && val > mc->platform_max)
 		return -EINVAL;
-	if (val > max)
+	if (val > max - min)
+		return -EINVAL;
+	if (val < 0)
 		return -EINVAL;
 	val_mask = mask << shift;
 	val = (val + min) & mask;
@@ -466,10 +463,10 @@ int snd_soc_put_volsw_sx(struct snd_kcontrol *kcontrol,
 	if (snd_soc_volsw_is_stereo(mc)) {
 		unsigned int val2 = ucontrol->value.integer.value[1];
 
-		if (mc->platform_max && val2 > mc->platform_max)
-			return -EINVAL;
-		if (val2 > max)
-			return -EINVAL;
+		// if (mc->platform_max && val2 > mc->platform_max)
+		// 	return -EINVAL;
+		// if (val2 > max)
+		// 	return -EINVAL;
 
 		val_mask = mask << rshift;
 		val2 = (val2 + min) & mask;

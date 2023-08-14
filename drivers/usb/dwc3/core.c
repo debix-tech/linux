@@ -34,6 +34,13 @@
 #include <linux/usb/of.h>
 #include <linux/usb/otg.h>
 
+//add by polyhex
+#include <linux/of_gpio.h>
+#include <linux/of_platform.h>
+#include <linux/of_device.h>
+//end add by polyhex
+
+
 #include "core.h"
 #include "gadget.h"
 #include "io.h"
@@ -1870,7 +1877,35 @@ static int dwc3_probe(struct platform_device *pdev)
 		ret = PTR_ERR(dwc->reset);
 		goto put_usb_psy;
 	}
+//John_gao power & reset usb hub
+	if (dev->of_node) {
+		int pwd_pin;
+		int reset_pin;
+		enum of_gpio_flags gpio_flags;
+		struct device_node *np = dev->of_node;
+		printk("John_gao %s ---  name %s\n",__func__, pdev->name);
 
+		pwd_pin = of_get_named_gpio_flags(np, "hub-pwd-gpio", 0,&gpio_flags);
+		reset_pin = of_get_named_gpio_flags(np, "hub-reset-gpio", 0,&gpio_flags);
+
+		if(gpio_is_valid(pwd_pin)){
+			printk("John_gao hub pwd pin name %s\n", pdev->name);
+			if(devm_gpio_request(dev,pwd_pin, "HUB_PWD") >= 0){
+				printk("John_gao pwd USB hub up \n");
+				gpio_direction_output(pwd_pin,(gpio_flags == OF_GPIO_ACTIVE_LOW) ? 1:0);
+			}
+		}
+		if(gpio_is_valid(reset_pin)){
+			printk("John_gao hub reset pin name %s\n", pdev->name);
+			if(devm_gpio_request(dev,reset_pin, "HUB_RST") >= 0){
+				gpio_direction_output(reset_pin,(gpio_flags == OF_GPIO_ACTIVE_LOW) ? 0:1);
+				mdelay(200);
+				gpio_direction_output(reset_pin,(gpio_flags == OF_GPIO_ACTIVE_LOW) ? 1:0);
+				mdelay(50);
+			}
+		}		
+	}
+//end add by polyhex		
 	if (dev->of_node) {
 		/*
 		 * Clocks are optional, but new DT platforms should support all

@@ -41,6 +41,7 @@ enum fsl_asoc_card_type {
 	CARD_CS42888 = 1,
 	CARD_WM8960,
 	CARD_WM8962,
+	CARD_ES8316, //John_gao
 	CARD_SGTL5000,
 	CARD_AC97,
 	CARD_CS427X,
@@ -300,7 +301,15 @@ static int fsl_asoc_card_hw_params(struct snd_pcm_substream *substream,
 			return ret;
 		}
 	}
+	else if(priv->card_type == CARD_ES8316){
+		/* set codec DAI configuration */
+		ret = snd_soc_dai_set_fmt(asoc_rtd_to_codec(rtd, 0), priv->dai_fmt);
+		if (ret) {
+			dev_err(dev, "failed to set codec dai fmt: %d\n", ret);
+			return ret;
+		}
 
+	}
 	return 0;
 
 fail:
@@ -634,11 +643,22 @@ static int hp_jack_event(struct notifier_block *nb, unsigned long event,
 	struct snd_soc_jack *jack = (struct snd_soc_jack *)data;
 	struct snd_soc_dapm_context *dapm = &jack->card->dapm;
 
-	if (event & SND_JACK_HEADPHONE)
+	if (event & SND_JACK_HEADPHONE)	{
 		/* Disable speaker if headphone is plugged in */
-		return snd_soc_dapm_disable_pin(dapm, "Ext Spk");
-	else
-		return snd_soc_dapm_enable_pin(dapm, "Ext Spk");
+	//	snd_soc_dapm_disable_pin(dapm, "Ext Spk"); // original
+	//add by polyhex
+		printk("es8316 %s hp in \n",__func__);
+		snd_soc_dapm_enable_pin(dapm, "Headphone Jack");
+	//end add by polyhex
+
+	}else {
+		//snd_soc_dapm_enable_pin(dapm, "Ext Spk");// original
+		//add by polyhex
+		printk("es8316 %s hp out \n",__func__);
+		snd_soc_dapm_disable_pin(dapm, "Headphone Jack");
+		//end add by polyhex
+	}
+	return 0;
 }
 
 static struct notifier_block hp_jack_nb = {
@@ -803,7 +823,30 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 		priv->codec_priv.mclk_id = SGTL5000_SYSCLK;
 		priv->dai_fmt |= SND_SOC_DAIFMT_CBP_CFP;
 		priv->card_type = CARD_SGTL5000;
-	} else if (of_device_is_compatible(np, "fsl,imx-audio-tlv320aic32x4")) {
+	}  
+//John_gao
+	else if (of_device_is_compatible(np, "fsl,imx-audio-es8316")) {
+		//printk("es8316 , setting ... \n");
+		codec_dai_name = "es8316-hifi";
+	//	codec_dai_name = "ES8316 HiFi";
+		
+		//priv->codec_priv.mclk_id = 0;
+		//slave mode use pll
+		//priv->codec_priv.fll_id = 1; //WM8960_SYSCLK_AUTO;
+		//priv->codec_priv.pll_id = 2; //WM8960_SYSCLK_AUTO;
+		//priv->dai_fmt |= SND_SOC_DAIFMT_CBM_CFM ;
+	        //			| SND_SOC_DAIFMT_CBS_CFS	
+				 ;
+		//priv->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_IF ;
+		//priv->dai_fmt = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_IF ;
+		//priv->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_IF ;
+		priv->dai_fmt |= SND_SOC_DAIFMT_CBM_CFM;
+		//priv->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBS_CFS | SND_SOC_DAIFMT_IB_NF;
+		//priv->dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_CBM_CFM | SND_SOC_DAIFMT_IB_IF;
+		priv->card_type = CARD_ES8316;
+	} 
+//end add by polyhex
+	else if (of_device_is_compatible(np, "fsl,imx-audio-tlv320aic32x4")) {
 		codec_dai_name = "tlv320aic32x4-hifi";
 		priv->dai_fmt |= SND_SOC_DAIFMT_CBP_CFP;
 		priv->card_type = CARD_TLV320AIC32X4;
@@ -1189,6 +1232,7 @@ static const struct of_device_id fsl_asoc_card_dt_ids[] = {
 	{ .compatible = "fsl,imx-audio-tlv320aic31xx", },
 	{ .compatible = "fsl,imx-audio-sgtl5000", },
 	{ .compatible = "fsl,imx-audio-wm8962", },
+	{ .compatible = "fsl,imx-audio-es8316", },//add by polyhex
 	{ .compatible = "fsl,imx-audio-wm8960", },
 	{ .compatible = "fsl,imx-audio-mqs", },
 	{ .compatible = "fsl,imx-audio-wm8524", },

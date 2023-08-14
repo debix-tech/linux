@@ -589,6 +589,11 @@ retry:
 		if (connector->connector_type == DRM_MODE_CONNECTOR_DisplayPort)
 			drm_set_preferred_mode(connector, 640, 480);
 	}
+
+	if (count == 0 && connector->status == connector_status_connected){
+		printk("GLS_HDMI, count=0 drm_add_modes_noedid \n");
+		count = drm_add_modes_noedid(connector, 1280, 720);
+	}
 	count += drm_helper_probe_add_cmdline_mode(connector);
 	if (count != 0) {
 		ret = __drm_helper_update_and_validate(connector, maxX, maxY, &ctx);

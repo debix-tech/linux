@@ -53,7 +53,7 @@ static const u8 *snvs_ssm_state_name[] = {
 	"(undef:14)",
 	"secure",
 };
-
+#if 0
 static DEFINE_STATIC_KEY_TRUE(snvs_little_end);
 
 static inline u32 secvio_read(void __iomem *reg)
@@ -71,6 +71,7 @@ static inline void secvio_write(void __iomem *reg, u32 data)
 	else
 		iowrite32be(data, reg);
 }
+#endif
 
 /* Top-level security violation interrupt */
 static irqreturn_t snvs_secvio_interrupt(int irq, void *snvsdev)
@@ -80,7 +81,7 @@ static irqreturn_t snvs_secvio_interrupt(int irq, void *snvsdev)
 
 	clk_enable(svpriv->clk);
 	/* Check the HP secvio status register */
-	svpriv->irqcause = secvio_read(&svpriv->svregs->hp.secvio_status) &
+	svpriv->irqcause = rd_reg32(&svpriv->svregs->hp.secvio_status) &
 				       HP_SECVIOST_SECVIOMASK;
 
 	if (!svpriv->irqcause) {
@@ -210,7 +211,7 @@ static int snvs_secvio_remove(struct platform_device *pdev)
 
 	clk_enable(svpriv->clk);
 	/* Set all sources to nonfatal */
-	secvio_write(&svpriv->svregs->hp.secvio_intcfg, 0);
+	wr_reg32(&svpriv->svregs->hp.secvio_intcfg, 0);
 
 	/* Remove tasklets and release interrupt */
 	for_each_possible_cpu(i)
@@ -234,7 +235,7 @@ static int snvs_secvio_probe(struct platform_device *pdev)
 	u32 hpstate;
 	const void *jtd, *wtd, *itd, *etd;
 	u32 td_en;
-	u32 ipidr, ipid;
+//	u32 ipidr, ipid;
 
 	svpriv = kzalloc(sizeof(struct snvs_secvio_drv_private), GFP_KERNEL);
 	if (!svpriv)
@@ -299,7 +300,7 @@ static int snvs_secvio_probe(struct platform_device *pdev)
 		return PTR_ERR(svpriv->clk);
 
 	clk_prepare_enable(svpriv->clk);
-
+#if 0
 	/*
 	 * Reading SNVS version ID register HPVIDR1 to identify the endianness
 	 * of the device which contain non-zero constants including 16-bit field
@@ -326,10 +327,10 @@ static int snvs_secvio_probe(struct platform_device *pdev)
 			return -EINVAL;
 		}
 	}
-
+#endif
 	/* Write the Secvio Enable Config the SVCR */
-	secvio_write(&svpriv->svregs->hp.secvio_ctl, td_en);
-	secvio_write(&svpriv->svregs->hp.secvio_intcfg, td_en);
+	wr_reg32(&svpriv->svregs->hp.secvio_ctl, td_en);
+	wr_reg32(&svpriv->svregs->hp.secvio_intcfg, td_en);
 
 	 /* Device data set up. Now init interrupt source descriptions */
 	for (i = 0; i < MAX_SECVIO_SOURCES; i++) {
@@ -352,7 +353,7 @@ static int snvs_secvio_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	hpstate = (secvio_read(&svpriv->svregs->hp.status) &
+	hpstate = (rd_reg32(&svpriv->svregs->hp.status) &
 			       HP_STATUS_SSM_ST_MASK) >> HP_STATUS_SSM_ST_SHIFT;
 	dev_info(svdev, "violation handlers armed - %s state\n",
 		 snvs_ssm_state_name[hpstate]);
