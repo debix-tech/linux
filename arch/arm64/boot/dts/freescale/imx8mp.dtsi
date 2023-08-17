@@ -222,11 +222,6 @@
 			linux,cma-default;
 		};
 
-		gpu_reserved: gpu_reserved@100000000 {
-			no-map;
-			reg = <0x1 0x00000000 0 0x10000000>;
-		};
-
 		dsp_reserved: dsp@92400000 {
 			reg = <0 0x92400000 0 0x1000000>;
 			no-map;
@@ -769,7 +764,7 @@
 							 <&clk IMX8MP_CLK_GPU3D_SHADER_CORE>;
 						power-domains = <&pgc_gpumix>;
 					};
-
+		
 					pgc_mediamix: power-domain@10 {
 						#power-domain-cells = <0>;
 						reg = <IMX8MP_POWER_DOMAIN_MEDIAMIX>;
@@ -2356,10 +2351,9 @@
 		cores = <&gpu_3d>, <&ml_vipsi>, <&gpu_2d>;
 		reg = <0x0 0x40000000 0x0 0xC0000000>, <0x0 0x0 0x0 0x10000000>;
 		reg-names = "phys_baseaddr", "contiguous_mem";
-		memory-region=<&gpu_reserved>;
 		status = "disabled";
 	};
-
+		
 	dsp: dsp@3b6e8000 {
 		compatible = "fsl,imx8mp-hifi4";
 		reg = <0x0 0x3B6E8000 0x0 0x88000>;
