@@ -641,15 +641,8 @@
 	hym8563: hym8563@51 {
 		compatible = "haoyu,hym8563";
 		reg = <0x51>;
-		#clock-cells = <0>;
-		clock-frequency = <32768>;
-		clock-output-names = "xin32k";
 		init_date="2022/04/12";
-		interrupt-parent = <&gpio2>;
-		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
 		
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_rtc_int>;
 	};
 	ads1115: ads1115@48 {
 		 compatible = "ti,ads1115";
@@ -927,12 +920,15 @@
 
 &usb_dwc3_0 {
 	//dr_mode = "device"; //otg
-	//dr_mode = "host"; 
+#if 0
+	dr_mode = "host"; 
+#else
 	dr_mode = "otg"; 
 	hnp-disable;
 	srp-disable;
 	adp-disable;
 	usb-role-switch;
+#endif
 	//role-switch-default-mode = "none";
 	status = "okay";
 #if 0
@@ -1187,12 +1183,6 @@
 		fsl,pins = <
 			MX8MP_IOMUXC_SAI5_RXFS__I2C6_SCL		0x400001c3
 			MX8MP_IOMUXC_SAI5_RXC__I2C6_SDA		0x400001c3
-		>;
-	};
-	
-	pinctrl_rtc_int: rtcintgrp {
-		fsl,pins = <
-			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11 0x140
 		>;
 	};
 	
