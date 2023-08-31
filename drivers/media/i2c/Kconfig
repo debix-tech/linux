@@ -397,7 +397,9 @@ config VIDEO_OV2640
 
 config VIDEO_GC2145
         tristate "gc2145 sensor support"
-        depends on VIDEO_V4L2 && I2C
+		depends on OF
+		depends on GPIOLIB && VIDEO_DEV && I2C
+#       depends on VIDEO_V4L2 && I2C
         help
           This is a Video4Linux2 sensor driver for the gl2145 camera.
 

@@ -2154,7 +2154,7 @@ lock_destroy:
 	return ret;
 }
 
-static int gc2145_remove(struct i2c_client *client)
+static void gc2145_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct gc2145_dev *sensor = to_gc2145_dev(sd);
@@ -2164,7 +2164,6 @@ static int gc2145_remove(struct i2c_client *client)
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 
-	return 0;
 }
 
 static int __maybe_unused gc2145_suspend(struct device *dev)
