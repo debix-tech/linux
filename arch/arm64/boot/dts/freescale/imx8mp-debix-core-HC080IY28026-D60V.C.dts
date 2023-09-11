@@ -38,7 +38,7 @@ mipi_backlight: mipi_backlight {
 		compatible = "debix,HC080IY28026-D60";
 		reg = <0>;
 		backlight = <&mipi_backlight>;
-		pinctrl-0 = <&pinctrl_mipi_dsi_en>;
+	//	pinctrl-0 = <&pinctrl_mipi_dsi_en>;
 		reset-gpio = <&gpio1 8 GPIO_ACTIVE_HIGH>;
 		dsi-lanes = <4>;
 		video-mode = <2>;	/* 0: burst mode
