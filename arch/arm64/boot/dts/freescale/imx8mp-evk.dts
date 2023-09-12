@@ -458,7 +458,7 @@
 	pinctrl-0 = <&pinctrl_i2c2>;
 	status = "okay";
 
-#if 1
+#if 0
 	imx219: imx219@10 {
 		compatible = "sony,imx219";
 		reg = <0x10>;
@@ -927,12 +927,15 @@
 
 &usb_dwc3_0 {
 	//dr_mode = "device"; //otg
-	//dr_mode = "host"; 
+#if 1
+	dr_mode = "host"; 
+#else
 	dr_mode = "otg"; 
 	hnp-disable;
 	srp-disable;
 	adp-disable;
 	usb-role-switch;
+#endif
 	//role-switch-default-mode = "none";
 	status = "okay";
 #if 0
@@ -1431,7 +1434,7 @@
 
 	pinctrl_csi0_pwn: csi0_pwn_grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_GPIO1_IO15__GPIO1_IO15	0x19
+			MX8MP_IOMUXC_SD1_STROBE__GPIO2_IO11 0x19
 		>;
 	};
 
@@ -1488,7 +1491,8 @@
 	port@0 {
 		reg = <0>;
 		mipi_csi0_ep: endpoint {
-			remote-endpoint = <&imx219_mipi_0_ep>;
+			//remote-endpoint = <&imx219_mipi_0_ep>;
+			remote-endpoint = <&ov5640_mipi_0_ep>;
 			data-lanes = <2>;
 			csis-hs-settle = <13>;
 			csis-clk-settle = <2>;
@@ -1520,14 +1524,15 @@
 };
 
 &isi_0 {
-	status = "disabled";
+	status = "okay";
+	//status = "disabled";
 
 	cap_device {
 		status = "okay";
 	};
 
 	m2m_device {
-		status = "okay";
+		status = "disabled";
 	};
 };
 
@@ -1541,11 +1546,11 @@
 
 
 &isp_0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &dewarp {
-	status = "okay";
+	status = "disabled";
 };
 
 
