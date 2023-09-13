@@ -863,8 +863,8 @@ static void ch943x_break_ctl(struct uart_port *port, int break_state)
 }
 
 static void ch943x_set_termios(struct uart_port *port,
-				  struct ktermios *termios,
-				  struct ktermios *old)
+				 const struct ktermios *termios,
+				 const struct ktermios *old)
 {
 	struct ch943x_port *s = dev_get_drvdata(port->dev);
 	struct ch943x_one *one = to_ch943x_one(port, port);
@@ -1337,7 +1337,7 @@ static int ch943x_spi_probe(struct spi_device *spi)
 }
 
 
-static int ch943x_spi_remove(struct spi_device *spi)
+static void ch943x_spi_remove(struct spi_device *spi)
 {
 	return ch943x_remove(&spi->dev);
 }

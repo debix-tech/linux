@@ -7177,7 +7177,7 @@ int stmmac_dvr_probe(struct device *device,
 	//add by polyhex
 	if(is_multicast_ether_addr(priv->dev->dev_addr)){
 		dev_err(priv->device, "Ether Addr is Multicast Address,Mac[0]=0x%x\n",priv->dev->dev_addr[0]); 
-		// priv->dev->dev_addr[0] &= 0xFE;  // priv->dev->dev_addr is a [const] type in L6.1.22
+		 priv->dev->dev_addr[0] &= 0xFE;  // priv->dev->dev_addr is a [const] type in L6.1.22
 	}
 	//end add by polyhex
 
