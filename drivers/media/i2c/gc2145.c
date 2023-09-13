@@ -81,8 +81,8 @@ struct gc2145_dev {
 	struct v4l2_subdev		sd;
 
 	struct media_pad		pad;
-	struct clk			*xclk;
-	u32				xclk_freq;
+	//struct clk			*xclk;
+	//u32				xclk_freq;
 //	struct regulator_bulk_data	supplies[gc2145_NUM_SUPPLIES];
 
 	//struct gpio_desc		*reset_gpio;
@@ -1422,7 +1422,7 @@ GLS("%s >>> \n",__func__);
 	//if (!sensor->is_enabled)
 	//	return 0;
 
-	clk_disable_unprepare(sensor->xclk);  //fix soar at 20210906
+	//clk_disable_unprepare(sensor->xclk);  //fix soar at 20210906
 	gc2145_power_down(sensor);
 	//regulator_bulk_disable(gc2145_NUM_SUPPLIES, sensor->supplies);
 	//sensor->is_enabled = false;
@@ -1447,11 +1447,11 @@ GLS("%s >>> \n",__func__);
 	} */
 
 
-	ret = clk_prepare_enable(sensor->xclk);   //fix soar at 20210906
+	/*ret = clk_prepare_enable(sensor->xclk);   //fix soar at 20210906
 	if (ret < 0){
 		printk("gc2415 open clk err\n");
 		return ret;
-	}
+	}*/
 
 	//gc2145_power_down(sensor);
 	gc2145_power_up(sensor);
@@ -2035,7 +2035,7 @@ GLS("%s >>> \n",__func__);
         	return ret;
         }
     }
-
+#if 0
 /* get system clock (xclk) */
         sensor->xclk = devm_clk_get(dev, "xclk");
         if (IS_ERR(sensor->xclk)) {
@@ -2045,7 +2045,7 @@ GLS("%s >>> \n",__func__);
 
         sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	GLS("%s xclk_freq=%u \n",__func__,sensor->xclk_freq);
-
+#endif
 
     /* request reset pin */
     sensor->reset_gpio = of_get_named_gpio(dev->of_node, "reset-gpios", 0);
@@ -2154,7 +2154,7 @@ lock_destroy:
 	return ret;
 }
 
-static void gc2145_remove(struct i2c_client *client)
+static int gc2145_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct gc2145_dev *sensor = to_gc2145_dev(sd);
@@ -2164,6 +2164,7 @@ static void gc2145_remove(struct i2c_client *client)
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(&sensor->ctrls.handler);
 
+	return 0;
 }
 
 static int __maybe_unused gc2145_suspend(struct device *dev)
@@ -2227,7 +2228,22 @@ static struct i2c_driver gc2145_i2c_driver = {
 	.probe_new	= gc2145_probe,
 	.remove		= gc2145_remove,
 };
+#if 0
 module_i2c_driver(gc2145_i2c_driver);
+#else
+static int __init gc2145_i2c_driver_init(void)
+{
+	return i2c_add_driver(&gc2145_i2c_driver);
+}
+static void __exit gc2145_i2c_driver_exit(void)
+{
+	i2c_del_driver(&gc2145_i2c_driver);
+}
+
+late_initcall(gc2145_i2c_driver_init);
+module_exit(gc2145_i2c_driver_exit);
+
+#endif
 
 MODULE_AUTHOR("gaoliang");
 MODULE_DESCRIPTION("A low-level driver for GalaxyCore gc2145 sensors");

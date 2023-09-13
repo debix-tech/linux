@@ -1963,39 +1963,14 @@ static int fec_get_mac(struct net_device *ndev)
 //John_gao
 static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 {
-	int phy_id1 = 0;
-	int phy_id2 = 0;
-	//page 0
+	/*switch to extension page44*/
+	phy_write(phydev, 0x1f, 0xd04);
+	phy_write(phydev, 0x10, 0x6d60);
+
+	/*set led1(yellow) act*/
+	phy_write(phydev, 0x11, 0x8);
 	phy_write(phydev, 0x1f, 0);
 
-	phy_id1 = phy_read(phydev, 0x02);
-	phy_id2 = phy_read(phydev, 0x03);
-	
-	printk("debix ens34 phy_id1=0x%x,phy_id2=0x%x\n", phy_id1,phy_id2);
-	
-	if(phy_id1 == 0x1c && phy_id2 == 0xc916){ //RTL8211f 0xc916 
-		/*switch to extension page44*/
-		phy_write(phydev, 0x1f, 0xd04);
-		phy_write(phydev, 0x10, 0x6d60);
-
-		/*set led1(yellow) act*/
-		phy_write(phydev, 0x11, 0x8);
-
-		phy_write(phydev, 0x1f, 0);
-		
-	}else if(phy_id1 == 0x1c && phy_id2 == 0xc915) { // RTL8211E 0xc915
-		/*switch to extension page44*/
-		phy_write(phydev, 0x1f, 0x007);
-		phy_write(phydev, 0x1e, 0x02c);
-
-		/*set led0(green) 100M/1000M link,led1(yellow) 10M/100M/1000M link+act */
-		phy_write(phydev, 0x1a, 0x0020);
-		phy_write(phydev, 0x1c, 0x76);
-		
-		phy_write(phydev, 0x1f, 0);
-		/* Do not advertise 100Base-TX/1000Base-T EEE Capability.*/
-		phy_modify_mmd(phydev,MDIO_MMD_AN,MDIO_AN_EEE_ADV,6,0);
-	}
 	
 	return 0;
 }
@@ -4301,6 +4276,55 @@ out:
 
 	return ret;
 }
+
+#ifndef MODULE
+static int __init ens34_mac_cmdline_opt(char *mac_str)
+{
+	int i;
+	unsigned char mac_addr_tmp[ETH_ALEN] = {0};
+	unsigned long value;
+	char *star;
+	char *end;
+
+	if(mac_str == NULL || mac_str[0] == 0){
+		pr_warn("%s mac_str Empty", __func__);
+		return 1;
+	}
+	
+	star = mac_str;
+	for(i = 0;i < ETH_ALEN;i++){
+		value = simple_strtoul(star, &end, 16);
+		if(value > 0xFF){
+			i = 0;
+			break;
+		}
+		mac_addr_tmp[i] =  value;
+		
+		if(end == NULL || *end  == 0)
+			break;
+		if(i < (ETH_ALEN - 1) &&  *end != ':')
+			break;
+		
+		star = end +1;
+	}
+	if(i < (ETH_ALEN - 1)){
+		pr_warn("%s str=%s resolve Error i=%d\n",__func__,mac_str,i);	
+		return 1;
+	}
+	
+	if (!is_valid_ether_addr(mac_addr_tmp)){
+		pr_warn("%s Invalid MAC address: %pM\n",__func__, mac_addr_tmp);
+		return 1;
+	}
+	
+	memcpy(macaddr, mac_addr_tmp, ETH_ALEN);
+	pr_info("%s resolve MAC address: %pM\n",__func__, macaddr);
+	return 1;
+}
+
+__setup("ens34_mac=", ens34_mac_cmdline_opt);
+#endif
+
 
 static int
 fec_probe(struct platform_device *pdev)

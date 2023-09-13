@@ -93,6 +93,7 @@ struct es8316_priv {
 };
 //struct snd_soc_component *component_es8316;
 
+extern void set_gpio_spk(int mute);
 #if 0
 static int gpio_open(struct inode *inode, struct file *filp)
 {
@@ -931,6 +932,7 @@ static int es8316_mute(struct snd_soc_dai *dai, int mute, int direction)
 	struct es8316_priv *es8316 = snd_soc_component_get_drvdata(component);
 
 	es8316->muted = mute;
+	set_gpio_spk(mute);
 	#if 0
 	if (mute) {
 		//es8316_enable_spk(es8316, false);

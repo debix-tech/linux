@@ -73,6 +73,7 @@ MODULE_PARM_DESC(debug, "Message Level (-1: default, 0: no output, 16: all)");
 static int phyaddr = -1;
 module_param(phyaddr, int, 0444);
 MODULE_PARM_DESC(phyaddr, "Physical device address");
+static unsigned char macaddr_at_uboot[ETH_ALEN] = {0};
 
 #define STMMAC_TX_THRESH(x)	((x)->dma_conf.dma_tx_size / 4)
 #define STMMAC_RX_THRESH(x)	((x)->dma_conf.dma_rx_size / 4)
@@ -983,41 +984,16 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 //John_gao
 static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 {
-	int phy_id1 = 0;
-	int phy_id2 = 0;
-	//page 0
-	phy_write(phydev, 0x1f, 0);
+	 /*switch to extension page44*/
+       phy_write(phydev, 0x1f, 0xd04);
+       phy_write(phydev, 0x10, 0x6d60);
 
-	phy_id1 = phy_read(phydev, 0x02);
-	phy_id2 = phy_read(phydev, 0x03);
- 
-	printk("debix ens33 phy_id1=0x%x,phy_id2=0x%x\n", phy_id1,phy_id2);
- 
-	if(phy_id1 == 0x1c && phy_id2 == 0xc916){ //RTL8211f 0xc916 
-		/*switch to extension page44*/
-		phy_write(phydev, 0x1f, 0xd04);
-		phy_write(phydev, 0x10, 0x6d60);
+       /*set led1(yellow) act*/
+       phy_write(phydev, 0x11, 0x8);
+        phy_write(phydev, 0x1f, 0);
 
-		/*set led1(yellow) act*/
-		phy_write(phydev, 0x11, 0x8);
 
-		phy_write(phydev, 0x1f, 0);
-	 
-	}else if(phy_id1 == 0x1c && phy_id2 == 0xc915) { // RTL8211E 0xc915
-		/*switch to extension page44*/
-		phy_write(phydev, 0x1f, 0x007);
-		phy_write(phydev, 0x1e, 0x02c);
-
-		/*set led0(green) 100M/1000M link,led1(yellow) 10M/100M/1000M link+act */
-		phy_write(phydev, 0x1a, 0x0020);
-		phy_write(phydev, 0x1c, 0x76);
-
-		phy_write(phydev, 0x1f, 0);
-		/* Do not advertise 100Base-TX/1000Base-T EEE Capability.*/
-		phy_modify_mmd(phydev,MDIO_MMD_AN,MDIO_AN_EEE_ADV,6,0);
-	}
- 
-	return 0;
+       return 0;
 }
 
 
@@ -7209,7 +7185,29 @@ int stmmac_dvr_probe(struct device *device,
 	 */
 	if (priv->synopsys_id < DWMAC_CORE_5_20)
 		priv->plat->dma_cfg->dche = false;
-
+		/*
+	* polyhex John_gao get eeprom mac
+	*/
+	if (!is_valid_ether_addr(macaddr_at_uboot))
+	{
+		extern void get_eeprom_mac(int index, char *mac);
+		char eeprom_mac[6];
+		get_eeprom_mac(1, eeprom_mac);
+		//printk("GLS_MAC 01 : %pM \n", eeprom_mac);
+		if(eeprom_mac[0] == 0x10 &&
+				eeprom_mac[1] == 0x07 &&
+				eeprom_mac[2] == 0x23){
+			priv->dev->dev_addr[0] = eeprom_mac[0];
+			priv->dev->dev_addr[1] = eeprom_mac[1];
+			priv->dev->dev_addr[2] = eeprom_mac[2];
+			priv->dev->dev_addr[3] = eeprom_mac[3];
+			priv->dev->dev_addr[4] = eeprom_mac[4];
+			priv->dev->dev_addr[5] = eeprom_mac[5];
+			netdev_err(ndev, "Use Polyhex MAC1 address: %pM\n", priv->dev->dev_addr);
+		}
+	}else {
+		memcpy(priv->dev->dev_addr, macaddr_at_uboot, ETH_ALEN);
+	}
 	stmmac_check_ether_addr(priv);
 
 	ndev->netdev_ops = &stmmac_netdev_ops;
@@ -7686,6 +7684,57 @@ err:
 }
 
 __setup("stmmaceth=", stmmac_cmdline_opt);
+
+//add by groot
+
+static int __init ens33_mac_cmdline_opt(char *mac_str)
+{
+	int i;
+	unsigned char mac_addr_tmp[ETH_ALEN] = {0};
+	unsigned long value;
+	char *star;
+	char *end;
+
+	if(mac_str == NULL || mac_str[0] == 0){
+		pr_warn("%s mac_str Empty", __func__);
+		return 1;
+	}
+	
+	star = mac_str;
+	for(i = 0;i < ETH_ALEN;i++){
+		value = simple_strtoul(star, &end, 16);
+		if(value > 0xFF){
+			i = 0;
+			break;
+		}
+		mac_addr_tmp[i] =  value;
+		
+		if(end == NULL || *end  == 0)
+			break;
+		if(i < (ETH_ALEN - 1) &&  *end != ':')
+			break;
+		
+		star = end +1;
+	}
+	if(i < (ETH_ALEN - 1)){
+		pr_warn("%s str=%s resolve Error i=%d\n",__func__,mac_str,i);	
+		return 1;
+	}
+	
+	if (!is_valid_ether_addr(mac_addr_tmp)){
+		pr_warn("%s Invalid MAC address: %pM\n",__func__, mac_addr_tmp);
+		return 1;
+	}
+	
+	memcpy(macaddr_at_uboot, mac_addr_tmp, ETH_ALEN);
+	pr_info("%s resolve MAC address: %pM\n",__func__, macaddr_at_uboot);
+	return 1;
+}
+
+__setup("ens33_mac=", ens33_mac_cmdline_opt);
+
+//end add by groot
+
 #endif /* MODULE */
 
 static int __init stmmac_init(void)
@@ -7708,7 +7757,7 @@ static void __exit stmmac_exit(void)
 #endif
 }
 
-module_init(stmmac_init)
+late_initcall(stmmac_init)
 module_exit(stmmac_exit)
 
 MODULE_DESCRIPTION("STMMAC 10/100/1000 Ethernet device driver");

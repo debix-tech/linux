@@ -11,6 +11,8 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/module.h>
@@ -441,8 +443,11 @@ struct ov5640_dev {
 	u32 xclk_freq;
 
 	struct regulator_bulk_data supplies[OV5640_NUM_SUPPLIES];
-	struct gpio_desc *reset_gpio;
-	struct gpio_desc *pwdn_gpio;
+	//struct gpio_desc *reset_gpio;
+	//struct gpio_desc *pwdn_gpio;
+
+	int reset_gpio;
+	int pwdn_gpio;
 	bool   upside_down;
 
 	/* lock to protect all members below */
@@ -2596,7 +2601,8 @@ static int ov5640_restore_mode(struct ov5640_dev *sensor)
 
 static void ov5640_power(struct ov5640_dev *sensor, bool enable)
 {
-	gpiod_set_value_cansleep(sensor->pwdn_gpio, enable ? 0 : 1);
+	//gpiod_set_value_cansleep(sensor->pwdn_gpio, enable ? 0 : 1);
+	gpio_direction_output(sensor->pwdn_gpio, enable ? 0 : 1 );
 }
 
 /*
@@ -2616,18 +2622,21 @@ static void ov5640_power(struct ov5640_dev *sensor, bool enable)
 static void ov5640_powerup_sequence(struct ov5640_dev *sensor)
 {
 	if (sensor->pwdn_gpio) {
-		gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-
+	//gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		gpio_direction_output(sensor->reset_gpio, 1);
+	
 		/* camera power cycle */
 		ov5640_power(sensor, false);
 		usleep_range(5000, 10000);
 		ov5640_power(sensor, true);
 		usleep_range(5000, 10000);
 
-		gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+		//gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+		gpio_direction_output(sensor->reset_gpio, 0);
 		usleep_range(1000, 2000);
 
-		gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		//gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		gpio_direction_output(sensor->reset_gpio, 1);
 	} else {
 		/* software reset */
 		ov5640_write_reg(sensor, OV5640_REG_SYS_CTRL0,
@@ -3554,7 +3563,8 @@ static int ov5640_s_ctrl(struct v4l2_ctrl *ctrl)
 	 * not apply any controls to H/W at this time. Instead
 	 * the controls will be restored right after power-up.
 	 */
-	if (sensor->power_count == 0)
+	//if (sensor->power_count == 0)
+		if(1)
 		return 0;
 
 	switch (ctrl->id) {
@@ -4072,16 +4082,39 @@ static int ov5640_probe(struct i2c_client *client)
 	}
 
 	/* request optional power down pin */
+	/*
 	sensor->pwdn_gpio = devm_gpiod_get_optional(dev, "powerdown",
 						    GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->pwdn_gpio))
 		return PTR_ERR(sensor->pwdn_gpio);
+	*/
+	sensor->pwdn_gpio = of_get_named_gpio(dev->of_node, "powerdown-gpios", 0);
+	if (!gpio_is_valid(sensor->pwdn_gpio))
+		dev_warn(dev, "No sensor pwdn pin available");
+	else {
+		ret = devm_gpio_request_one(dev, sensor->pwdn_gpio,  GPIOD_OUT_HIGH, "ov5640_mipi_pwdn");
+		if (ret < 0) {
+			dev_warn(dev, "Failed to set power pin\n");
+			dev_warn(dev, "retval=%d\n", ret);
+			return ret;
+		}
+	}
 
+	sensor->reset_gpio = of_get_named_gpio(dev->of_node, "reset-gpios", 0);
+	if (!gpio_is_valid(sensor->reset_gpio))
+		dev_warn(dev, "No sensor reset pin available");
+	else {
+		ret = devm_gpio_request_one(dev, sensor->reset_gpio, GPIOD_OUT_HIGH, "ov5640_mipi_reset");
+		if (ret < 0) {
+			dev_warn(dev, "Failed to set reset pin\n");
+			return ret;
+		}
+	}
 	/* request optional reset pin */
-	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+	/*sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
 						     GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
-		return PTR_ERR(sensor->reset_gpio);
+		return PTR_ERR(sensor->reset_gpio);*/
 
 	v4l2_i2c_subdev_init(&sensor->sd, client, &ov5640_subdev_ops);
 
@@ -4155,7 +4188,23 @@ static struct i2c_driver ov5640_i2c_driver = {
 	.remove   = ov5640_remove,
 };
 
+#if 0
 module_i2c_driver(ov5640_i2c_driver);
+#else
+static int __init ov5640_i2c_driver_init(void)
+{
+	return i2c_add_driver(&ov5640_i2c_driver);
+}
+static void __exit ov5640_i2c_driver_exit(void)
+{
+	i2c_del_driver(&ov5640_i2c_driver);
+}
+
+late_initcall(ov5640_i2c_driver_init);
+module_exit(ov5640_i2c_driver_exit);
+
+
+#endif
 
 MODULE_DESCRIPTION("OV5640 MIPI Camera Subdev Driver");
 MODULE_LICENSE("GPL");

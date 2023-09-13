@@ -44,7 +44,15 @@ config SERIAL_AMBA_PL010_CONSOLE
 	  "console=ttyAM0". (Try "man bootparam" or see the documentation of
 	  your boot loader (lilo or loadlin) about how to pass options to the
 	  kernel at boot time.)
-
+	  
+#John_gao 
+config SERIAL_CH9434
+	tristate "SERIAL_CH9434 serial support"
+	depends on SPI
+	select SERIAL_CORE
+	help
+	  This selects support for ch9434 serial ports.
+	  
 config SERIAL_AMBA_PL011
 	tristate "ARM AMBA PL011 serial port support"
 	depends on ARM_AMBA
