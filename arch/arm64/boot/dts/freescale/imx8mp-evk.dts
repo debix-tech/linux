@@ -645,11 +645,11 @@
 		clock-frequency = <32768>;
 		clock-output-names = "xin32k";
 		init_date="2022/04/12";
-		interrupt-parent = <&gpio2>;
-		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
+//		interrupt-parent = <&gpio2>;
+//		interrupts = <11 IRQ_TYPE_EDGE_FALLING>;
 		
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_rtc_int>;
+	//	pinctrl-names = "default";
+	//	pinctrl-0 = <&pinctrl_rtc_int>;
 	};
 	ads1115: ads1115@48 {
 		 compatible = "ti,ads1115";
