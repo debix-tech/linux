@@ -58,7 +58,7 @@
 	};
 
 
-// 不确定 {
+//  {
 		pcie0_refclk: pcie0-refclk {
 			compatible = "fixed-clock";
 			#clock-cells = <0>;
@@ -76,7 +76,7 @@
 			enable-active-high;
 			regulator-always-on;
 		};
-// 不确定 }
+//  }
 	reg_usdhc2_vmmc: regulator-usdhc2 {
 		compatible = "regulator-fixed";
 		pinctrl-names = "default";
@@ -719,7 +719,7 @@
 	fsl,uart-has-rtscts;
 	status = "okay";
 
-	// bluetooth {   // 不确定  L5.15.71 没有该节点
+	// bluetooth {   
 	// 	compatible = "nxp,88w8997-bt";
 	// };
 };

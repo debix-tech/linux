@@ -261,7 +261,6 @@ static void write_footer(void)
     }
     fprintf(out, "\t.data\t\t= %s_data\n", logoname);
     fputs("};\n\n", out);
-
     /* close logo file */
     if (outputname)
 	fclose(out);
