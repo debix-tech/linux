@@ -394,7 +394,7 @@ endif
 dtb-$(CONFIG_ARCH_MXC) += imx8mp-evk.dtb  \
 			  imx8mp-debix-core-board.dtb \
 			  imx8mp-debix-core-ov5640.dtb \
-			  imx8mp-debix-core-ar1335.dts \
+			  imx8mp-debix-core-ar1335.dtb \
 			  imx8mp-debix-core-gc2145.dtb \
 			  imx8mp-debix-core-HC050IG40029-D58V.C.dtb \
 			  imx8mp-debix-core-HC080IY28026-D60V.C.dtb \
