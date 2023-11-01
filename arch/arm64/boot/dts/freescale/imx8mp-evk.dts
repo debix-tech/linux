@@ -29,17 +29,17 @@
 		};
 	};
 
-	reg_usb_vbus: regulator-vbus {
-		compatible = "regulator-fixed";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_usb1_vbus>;
-		regulator-name = "USB_VBUS";
-		regulator-min-microvolt = <5000000>;
-		regulator-max-microvolt = <5000000>;
-		gpio = <&gpio1 14 GPIO_ACTIVE_HIGH>;
-		enable-active-high;
-		regulator-always-on;
-	};
+	// reg_usb_vbus: regulator-vbus {
+	// 	compatible = "regulator-fixed";
+	// 	pinctrl-names = "default";
+	// 	pinctrl-0 = <&pinctrl_usb1_vbus>;
+	// 	regulator-name = "USB_VBUS";
+	// 	regulator-min-microvolt = <5000000>;
+	// 	regulator-max-microvolt = <5000000>;
+	// 	gpio = <&gpio1 14 GPIO_ACTIVE_HIGH>;
+	// 	enable-active-high;
+	// 	regulator-always-on;
+	// };
 	usdhc1_pwrseq: usdhc1_pwrseq {
 		compatible = "mmc-pwrseq-simple";
 		pinctrl-names = "default";
@@ -143,11 +143,6 @@
 				    100>;
 		default-brightness-level = <80>;
 	};
-};
-
-&{/reserved-memory/linux,cma} {
-	size = <0 0x3c000000>;
-	alloc-ranges = <0 0x40000000 0 0x80000000>;
 };
 
 &flexspi {
@@ -651,7 +646,7 @@
 &pcie {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pcie0>;
-	reset-gpio = <&gpio2 7 GPIO_ACTIVE_LOW>;
+	reset-gpio = <&gpio4 27 GPIO_ACTIVE_LOW>;
 	clocks = <&clk IMX8MP_CLK_HSIO_ROOT>,
 		<&clk IMX8MP_CLK_PCIE_ROOT>,
 		<&clk IMX8MP_CLK_HSIO_AXI>;
@@ -662,12 +657,12 @@
 	vpcie-supply = <&reg_pcie0>;
 	status = "disabled";
 
-	wifi_wake_host {
-		compatible = "nxp,wifi-wake-host";
-		interrupt-parent = <&gpio5>;
-		interrupts = <21 IRQ_TYPE_LEVEL_LOW>;
-		interrupt-names = "host-wake";
-	};
+	// wifi_wake_host {
+	// 	compatible = "nxp,wifi-wake-host";
+	// 	interrupt-parent = <&gpio5>;
+	// 	interrupts = <21 IRQ_TYPE_LEVEL_LOW>;
+	// 	interrupt-names = "host-wake";
+	// };
 };
 
 &pcie_ep{
@@ -751,7 +746,6 @@
 };
 
 &usb3_0 {
-	dma-ranges = <0x40000000 0x40000000 0x80000000>;
 	status = "okay";
 };
 
@@ -776,12 +770,13 @@
 
 &usb3_1 {
 	status = "okay";
-	dma-ranges = <0x40000000 0x40000000 0x80000000>;
 };
 
 &usb_dwc3_1 {
-	vbus-supply = <&reg_usb_vbus>;
-	hub-pwd-gpio = <&gpio4 26 GPIO_ACTIVE_HIGH>;
+	// vbus-supply = <&reg_usb_vbus>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usb1_vbus>;
+	hub-pwd-gpio = <&gpio4 26 GPIO_ACTIVE_LOW>;
 	hub-reset-gpio = <&gpio4 25 GPIO_ACTIVE_LOW>;
 	dr_mode = "host";
 	status = "okay";
@@ -1316,7 +1311,6 @@
 };
 
 &mix_gpu_ml {
-	reg = <0x0 0x40000000 0x0 0x80000000>, <0x0 0x0 0x0 0x10000000>;
 	status = "okay";
 };
 

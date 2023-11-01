@@ -2947,6 +2947,8 @@ alias usb:v0AF0p6200d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v0AF0p6100d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v0AF0p6000d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v0AF0p5000d*dc*dsc*dp*ic*isc*ip*in* option
+alias usb:v0BDAp5411d*dc*dsc*dp*ic*isc*ip*in* option
+alias usb:v0BDAp0411d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v2C7Cp0435d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v2C7Cp0296d*dc*dsc*dp*ic*isc*ip*in* option
 alias usb:v2C7Cp0306d*dc*dsc*dp*ic*isc*ip*in* option

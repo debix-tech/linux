@@ -40,8 +40,6 @@
 				    100>;
 		default-brightness-level = <80>;
 	};
-
-
 };
 
 &pwm2 {
@@ -77,10 +75,10 @@
 	status = "okay";
 
 	lvds-channel@0 {
-		fsl,data-mapping = "jeida";
+		//fsl,data-mapping = "jeida";//y
                 //fsl,data-mappin  = "spwg";
 		//fsl,data-width = <18>;
-		fsl,data-width = <24>;
+		//fsl,data-width = <24>;//y
 		status = "okay";
 
 		/delete-node/ port@1;

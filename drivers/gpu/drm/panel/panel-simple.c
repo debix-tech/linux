@@ -2581,7 +2581,7 @@ static const struct panel_desc debix_JW070R0520B02= {
 	//.bus_format = MEDIA_BUS_FMT_RGB888_3X8,
 	//.bus_format = MEDIA_BUS_FMT_RBG888_1X24,
         //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
-        //.bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
         //.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
         //       DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
         //       DISPLAY_FLAGS_SYNC_POSEDGE,
@@ -2640,7 +2640,7 @@ static const struct panel_desc debix_JW080R1120B02= {
 	//.bus_format = MEDIA_BUS_FMT_RGB888_3X8,
 	//.bus_format = MEDIA_BUS_FMT_RBG888_1X24,
         //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
-        //.bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
         //.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
         //       DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
         //       DISPLAY_FLAGS_SYNC_POSEDGE,
@@ -2699,7 +2699,7 @@ static const struct panel_desc debix_JW101HD_X00= {
 	//.bus_format = MEDIA_BUS_FMT_RGB888_3X8,
 	//.bus_format = MEDIA_BUS_FMT_RBG888_1X24,
         //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
-        //.bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
         //.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
         //       DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
         //       DISPLAY_FLAGS_SYNC_POSEDGE,
@@ -2766,11 +2766,11 @@ static const struct panel_desc debix_HC101IK25050_D59= {
         },
         //.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
         //.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
-        //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
+        .bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,//n
 	//.bus_format = MEDIA_BUS_FMT_RGB888_3X8,
 	//.bus_format = MEDIA_BUS_FMT_RBG888_1X24,
-        .bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
-        //.bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        //.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,///y
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,///n
         //.bus_flags = DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW |
         //       DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_POSEDGE |
         //       DISPLAY_FLAGS_SYNC_POSEDGE,

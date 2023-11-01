@@ -625,6 +625,8 @@ static const struct usb_device_id option_ids[] = {
 	{ USB_DEVICE(0x2C7C, 0x0306) }, /* Quectel EG06/EP06/EM06 */
 	{ USB_DEVICE(0x2C7C, 0x0296) }, /* Quectel BG96 */
 	{ USB_DEVICE(0x2C7C, 0x0435) }, /* Quectel AG35 */
+	{ USB_DEVICE(0x0BDA, 0x0411) }, /* RTL5411E */
+	{ USB_DEVICE(0x0BDA, 0x5411) }, /* RTL5411E */
 #endif
 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
