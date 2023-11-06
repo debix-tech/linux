@@ -440,7 +440,7 @@ int ads1015_get_adc_result(struct ads1015_data *data, int chan, int *val)
 	ret = regmap_read(data->regmap, ADS1015_CFG_REG, &old);
 	if (ret)
 		return ret;
-
+	printk("GLS_ADS chan=%d 0x%x old=0x%x\n", chan,ADS1015_CFG_REG, old);
 	pga = data->channel_data[chan].pga;
 	dr = data->channel_data[chan].data_rate;
 	mask = ADS1015_CFG_MUX_MASK | ADS1015_CFG_PGA_MASK |

@@ -17,6 +17,19 @@
 
 #include <dt-bindings/power/imx8mp-power.h>
 
+#include <linux/bitfield.h>
+#include <linux/clk-provider.h>
+
+#define GPR_REG1		0x4
+#define  PLL_LOCK		BIT(13)
+#define GPR_REG2		0x8
+#define  P_PLL_MASK		GENMASK(5, 0)
+#define  M_PLL_MASK		GENMASK(15, 6)
+#define  S_PLL_MASK		GENMASK(18, 16)
+#define GPR_REG3		0xc
+#define  PLL_CKE		BIT(17)
+#define  PLL_RST		BIT(31)
+
 #define GPR_REG0		0x0
 #define  PCIE_CLOCK_MODULE_EN	BIT(0)
 #define  USB_CLOCK_MODULE_EN	BIT(1)
@@ -74,6 +87,7 @@ struct imx8mp_blk_ctrl_domain {
 
 struct imx8mp_blk_ctrl_data {
 	int max_reg;
+	int (*probe) (struct imx8mp_blk_ctrl *bc);
 	notifier_fn_t power_notifier_fn;
 	void (*power_off) (struct imx8mp_blk_ctrl *bc, struct imx8mp_blk_ctrl_domain *domain);
 	void (*power_on) (struct imx8mp_blk_ctrl *bc, struct imx8mp_blk_ctrl_domain *domain);
@@ -112,6 +126,92 @@ static int imx8mp_qos_set(struct imx8mp_blk_ctrl_domain *domain)
 	}
 
 	return 0;
+}
+
+struct clk_hsio_pll {
+	struct clk_hw	hw;
+	struct regmap *regmap;
+};
+
+static inline struct clk_hsio_pll *to_clk_hsio_pll(struct clk_hw *hw)
+{
+	return container_of(hw, struct clk_hsio_pll, hw);
+}
+
+static int clk_hsio_pll_prepare(struct clk_hw *hw)
+{
+	struct clk_hsio_pll *clk = to_clk_hsio_pll(hw);
+	u32 val;
+
+	/* set the PLL configuration */
+	regmap_update_bits(clk->regmap, GPR_REG2,
+			   P_PLL_MASK | M_PLL_MASK | S_PLL_MASK,
+			   FIELD_PREP(P_PLL_MASK, 12) |
+			   FIELD_PREP(M_PLL_MASK, 800) |
+			   FIELD_PREP(S_PLL_MASK, 4));
+
+	/* de-assert PLL reset */
+	regmap_update_bits(clk->regmap, GPR_REG3, PLL_RST, PLL_RST);
+
+	/* enable PLL */
+	regmap_update_bits(clk->regmap, GPR_REG3, PLL_CKE, PLL_CKE);
+
+	return regmap_read_poll_timeout(clk->regmap, GPR_REG1, val,
+					val & PLL_LOCK, 10, 100);
+}
+
+static void clk_hsio_pll_unprepare(struct clk_hw *hw)
+{
+	struct clk_hsio_pll *clk = to_clk_hsio_pll(hw);
+
+	regmap_update_bits(clk->regmap, GPR_REG3, PLL_RST | PLL_CKE, 0);
+}
+
+static int clk_hsio_pll_is_prepared(struct clk_hw *hw)
+{
+	struct clk_hsio_pll *clk = to_clk_hsio_pll(hw);
+
+	return regmap_test_bits(clk->regmap, GPR_REG1, PLL_LOCK);
+}
+
+static unsigned long clk_hsio_pll_recalc_rate(struct clk_hw *hw,
+					      unsigned long parent_rate)
+{
+	return 100000000;
+}
+
+static const struct clk_ops clk_hsio_pll_ops = {
+	.prepare = clk_hsio_pll_prepare,
+	.unprepare = clk_hsio_pll_unprepare,
+	.is_prepared = clk_hsio_pll_is_prepared,
+	.recalc_rate = clk_hsio_pll_recalc_rate,
+};
+
+int imx8mp_hsio_blk_ctrl_probe(struct imx8mp_blk_ctrl *bc)
+{
+	struct clk_hsio_pll *clk_hsio_pll;
+	struct clk_hw *hw;
+	struct clk_init_data init = {};
+	int ret;
+
+	clk_hsio_pll = devm_kzalloc(bc->dev, sizeof(*clk_hsio_pll), GFP_KERNEL);
+	if (!clk_hsio_pll)
+		return -ENOMEM;
+
+	init.name = "hsio_pll";
+	init.ops = &clk_hsio_pll_ops;
+	init.parent_names = (const char *[]){"osc_24m"};
+	init.num_parents = 1;
+
+	clk_hsio_pll->regmap = bc->regmap;
+	clk_hsio_pll->hw.init = &init;
+
+	hw = &clk_hsio_pll->hw;
+	ret = devm_clk_hw_register(bc->dev, hw);
+	if (ret)
+		return ret;
+
+	return devm_of_clk_add_hw_provider(bc->dev, of_clk_hw_simple_get, hw);
 }
 
 static void imx8mp_hsio_blk_ctrl_power_on(struct imx8mp_blk_ctrl *bc,
@@ -262,6 +362,7 @@ static const struct imx8mp_blk_ctrl_data imx8mp_hsio_blk_ctl_dev_data = {
 	.power_off = imx8mp_hsio_blk_ctrl_power_off,
 	.power_notifier_fn = imx8mp_hsio_power_notifier,
 	.domains = imx8mp_hsio_domain_data,
+	.probe = imx8mp_hsio_blk_ctrl_probe,
 	.num_domains = ARRAY_SIZE(imx8mp_hsio_domain_data),
 };
 
@@ -707,7 +808,11 @@ static int imx8mp_blk_ctrl_probe(struct platform_device *pdev)
 		dev_err_probe(dev, ret, "failed to add power notifier\n");
 		goto cleanup_provider;
 	}
-
+ 	if (bc_data->probe) {
+ 		ret = bc_data->probe(bc);
+ 		if (ret)
+ 			goto cleanup_provider;
+ 	}
 	dev_set_drvdata(dev, bc);
 
 	return 0;

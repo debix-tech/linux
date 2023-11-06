@@ -22,7 +22,7 @@
 	};
 	lvds_backlight: lvds_backlight {
 		compatible = "pwm-backlight";
-		pwms = <&pwm2 0 100000>;
+		pwms = <&pwm2 0 100000 0>;
 		status = "okay";
 		pinctrl-0 = <&pinctrl_pwm_en>;
 		enable-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
@@ -78,9 +78,9 @@
 
 	lvds-channel@0 {
 		//fsl,data-mapping = "jeida";
-                fsl,data-mappin  = "spwg";
+               // fsl,data-mapping  = "spwg";
 		//fsl,data-width = <18>;
-		fsl,data-width = <24>;
+		//fsl,data-width = <24>;
 		status = "okay";
 
 		/delete-node/ port@1;

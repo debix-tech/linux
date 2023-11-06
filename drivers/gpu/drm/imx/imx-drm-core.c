@@ -430,11 +430,9 @@ static int __init imx_drm_init(void)
 {
 	if (drm_firmware_drivers_only())
 		return -ENODEV;
-
 	return platform_driver_register(&imx_drm_pdrv);
 }
 module_init(imx_drm_init);
-
 static void __exit imx_drm_exit(void)
 {
 	platform_driver_unregister(&imx_drm_pdrv);

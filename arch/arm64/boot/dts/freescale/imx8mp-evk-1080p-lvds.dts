@@ -23,7 +23,7 @@
 	};
         lvds_backlight: lvds_backlight {
                 compatible = "pwm-backlight";
-                pwms = <&pwm2 0 100000>;
+                pwms = <&pwm2 0 100000 0>;
                 status = "okay";
                 pinctrl-0 = <&pinctrl_pwm_en>;
                 enable-gpios = <&gpio1 12 GPIO_ACTIVE_HIGH>;
