@@ -863,8 +863,8 @@ static void ch943x_break_ctl(struct uart_port *port, int break_state)
 }
 
 static void ch943x_set_termios(struct uart_port *port,
-				 const struct ktermios *termios,
-				 const struct ktermios *old)
+				  struct ktermios *termios,
+				  struct ktermios *old)
 {
 	struct ch943x_port *s = dev_get_drvdata(port->dev);
 	struct ch943x_one *one = to_ch943x_one(port, port);
