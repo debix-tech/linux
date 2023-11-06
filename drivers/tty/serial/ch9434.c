@@ -864,7 +864,7 @@ static void ch943x_break_ctl(struct uart_port *port, int break_state)
 
 static void ch943x_set_termios(struct uart_port *port,
 				  struct ktermios *termios,
-				  struct ktermios *old)
+				  const struct ktermios *old)
 {
 	struct ch943x_port *s = dev_get_drvdata(port->dev);
 	struct ch943x_one *one = to_ch943x_one(port, port);
@@ -1268,7 +1268,7 @@ out_clk:
 	return ret;
 }
 
-static int ch943x_remove(struct device *dev)
+static void ch943x_remove(struct device *dev)
 {
 	struct ch943x_port *s = dev_get_drvdata(dev);
 	int i;
@@ -1290,7 +1290,7 @@ static int ch943x_remove(struct device *dev)
 	if (!IS_ERR(s->clk))
 		/*clk_disable_unprepare(s->clk)*/;
 
-	return 0;
+	//return 0;
 }
 
 static const struct of_device_id __maybe_unused ch943x_dt_ids[] = {

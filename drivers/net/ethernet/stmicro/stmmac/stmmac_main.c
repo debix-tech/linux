@@ -7177,7 +7177,7 @@ int stmmac_dvr_probe(struct device *device,
 	//add by polyhex
 	if(is_multicast_ether_addr(priv->dev->dev_addr)){
 		dev_err(priv->device, "Ether Addr is Multicast Address,Mac[0]=0x%x\n",priv->dev->dev_addr[0]); 
-		 priv->dev->dev_addr[0] &= 0xFE;  // priv->dev->dev_addr is a [const] type in L6.1.22
+		 //priv->dev->dev_addr[0] &= 0xFE;  // priv->dev->dev_addr is a [const] type in L6.1.22
 	}
 	//end add by polyhex
 
@@ -7194,7 +7194,7 @@ int stmmac_dvr_probe(struct device *device,
 		char eeprom_mac[6];
 		get_eeprom_mac(1, eeprom_mac);
 		//printk("GLS_MAC 01 : %pM \n", eeprom_mac);
-		if(eeprom_mac[0] == 0x10 &&
+		/*if(eeprom_mac[0] == 0x10 &&
 				eeprom_mac[1] == 0x07 &&
 				eeprom_mac[2] == 0x23){
 			priv->dev->dev_addr[0] = eeprom_mac[0];
@@ -7204,7 +7204,7 @@ int stmmac_dvr_probe(struct device *device,
 			priv->dev->dev_addr[4] = eeprom_mac[4];
 			priv->dev->dev_addr[5] = eeprom_mac[5];
 			netdev_err(ndev, "Use Polyhex MAC1 address: %pM\n", priv->dev->dev_addr);
-		}
+		}*/
 	}else {
 		memcpy(priv->dev->dev_addr, macaddr_at_uboot, ETH_ALEN);
 	}
