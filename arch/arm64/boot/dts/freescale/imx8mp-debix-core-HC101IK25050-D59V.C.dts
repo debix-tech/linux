@@ -75,10 +75,10 @@
 	status = "okay";
 
 	lvds-channel@0 {
-		//fsl,data-mapping = "jeida";//y
+		fsl,data-mapping = "jeida";
                 //fsl,data-mappin  = "spwg";
 		//fsl,data-width = <18>;
-		//fsl,data-width = <24>;//y
+		fsl,data-width = <24>;
 		status = "okay";
 
 		/delete-node/ port@1;
