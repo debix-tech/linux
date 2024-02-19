@@ -69,7 +69,7 @@ static struct lcdifv3_soc_pdata imx8mp_lcdif1_pdata = {
 static struct lcdifv3_soc_pdata imx8mp_lcdif2_pdata = {
 	.hsync_invert = false,
 	.vsync_invert = false,
-	.de_invert    = true,
+	.de_invert    = false,
 };
 
 static const struct of_device_id imx_lcdifv3_dt_ids[] = {
@@ -376,6 +376,8 @@ void lcdifv3_set_mode(struct lcdifv3_soc *lcdifv3, struct videomode *vmode)
 	clk_disable_unprepare(lcdifv3->clk_pix);
 	clk_set_rate(lcdifv3->clk_pix, vmode->pixelclock);
 	clk_prepare_enable(lcdifv3->clk_pix);
+	printk("GLS_CLK clk_pix = %ld \n", clk_get_rate(lcdifv3->clk_pix));
+	printk("GLS_CLK pixelclock = %ld \n", vmode->pixelclock);
 
 	/* config display timings */
 	disp_size = DISP_SIZE_DELTA_Y(vmode->vactive) |

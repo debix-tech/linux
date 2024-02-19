@@ -56,9 +56,9 @@ EXPORT_SYMBOL(registered_fb);
 int num_registered_fb __read_mostly;
 EXPORT_SYMBOL(num_registered_fb);
 
-//John_gao modify for debix logo
+//John_gao Setting the image to be centered
 bool fb_center_logo __read_mostly = true;
-
+//John_gao Doesn't display images based on kernel count
 int fb_logo_count __read_mostly = 1;
 
 static struct fb_info *get_fb_info(unsigned int idx)
@@ -1454,6 +1454,10 @@ __releases(&info->lock)
 	struct fb_info * const info = file->private_data;
 
 	lock_fb_info(info);
+#if IS_ENABLED(CONFIG_FB_DEFERRED_IO)
+	if (info->fbdefio)
+		fb_deferred_io_release(info);
+#endif
 	if (info->fbops->fb_release)
 		info->fbops->fb_release(info,1);
 	module_put(info->fbops->owner);

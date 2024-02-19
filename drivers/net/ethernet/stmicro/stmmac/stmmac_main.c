@@ -979,6 +979,66 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 		stmmac_fpe_link_state_handle(priv, false);
 }
 
+//John_gao set eth led
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+        int ret = 0;
+        int ret2 = 0;
+	//page 0
+        phy_write(phydev, 0x1f, 0);
+
+        ret = phy_read(phydev, 0x02);
+        //printk("GLS_PHY 02 id=0x%x\n", ret);
+        ret2 = phy_read(phydev, 0x03);
+        //printk("GLS_PHY 03 id=0x%x\n", ret2);
+        //rtl8211f
+        if(ret == 0x1c && ret2 == 0xc916){
+                /*switch to extension page44*/
+                phy_write(phydev, 0x1f, 0xd04);
+                phy_write(phydev, 0x10, 0x6d60);
+
+                /*set led1(yellow) act*/
+                phy_write(phydev, 0x11, 0x8);
+                phy_write(phydev, 0x1f, 0);
+        //rtl8211e
+        }else if(ret == 0x1c && ret2 == 0xc915){
+                 /*switch to extension page44*/
+                int vv = 0;
+                //printk("GLS_PHY stmmac use rtl8211e\n");
+
+                phy_write(phydev, 31, 0x07);
+                phy_write(phydev, 30, 0x2c);
+
+                /*set led1(yellow) act*/
+                vv = phy_read(phydev,26);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv &= 0xFFEF;// bit4=0
+                vv |= 0x20;// bit5=1
+                vv &= 0xFFBF;// bit6=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 26, vv);
+
+
+                /*set led0(green) link*/
+                vv = phy_read(phydev,28);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv |= 0x7;// bit0,1,2=1
+                vv &= 0xFF8F;// bit4,5,6=0
+                vv &= 0xF8FF;// bit8,9,10=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 28, vv);
+
+                /*switch back to page0*/
+                phy_write(phydev,31,0x00);
+
+                phy_modify_mmd_changed(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV,6, 0);
+
+        }
+       return 0;
+}
+
+
+
 static void stmmac_mac_link_up(struct phylink_config *config,
 			       struct phy_device *phy,
 			       unsigned int mode, phy_interface_t interface,
@@ -1085,6 +1145,10 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 
 	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, true);
+
+	//John_gao set eth led
+        phy_rtl8211f_led_fixup(phy);
+
 }
 
 static const struct phylink_mac_ops stmmac_phylink_mac_ops = {
@@ -1148,6 +1212,11 @@ static int stmmac_init_phy(struct net_device *dev)
 		int addr = priv->plat->phy_addr;
 		struct phy_device *phydev;
 
+		if (addr < 0) {
+			netdev_err(priv->dev, "no phy found\n");
+			return -ENODEV;
+		}
+
 		phydev = mdiobus_get_phy(priv->mii, addr);
 		if (!phydev) {
 			netdev_err(priv->dev, "no phy at addr %d\n", addr);
@@ -1162,6 +1231,7 @@ static int stmmac_init_phy(struct net_device *dev)
 
 		phylink_ethtool_get_wol(priv->phylink, &wol);
 		device_set_wakeup_capable(priv->device, !!wol.supported);
+		device_set_wakeup_enable(priv->device, !!wol.wolopts);
 	}
 
 	return ret;
@@ -1422,7 +1492,7 @@ static int stmmac_init_rx_buffers(struct stmmac_priv *priv,
 	struct stmmac_rx_buffer *buf = &rx_q->buf_pool[i];
 	gfp_t gfp = (GFP_ATOMIC | __GFP_NOWARN);
 
-	if (priv->dma_cap.addr64 <= 32)
+	if (priv->dma_cap.host_dma_width <= 32)
 		gfp |= GFP_DMA32;
 
 	if (!buf->page) {
@@ -4580,7 +4650,7 @@ static inline void stmmac_rx_refill(struct stmmac_priv *priv, u32 queue)
 	unsigned int entry = rx_q->dirty_rx;
 	gfp_t gfp = (GFP_ATOMIC | __GFP_NOWARN);
 
-	if (priv->dma_cap.addr64 <= 32)
+	if (priv->dma_cap.host_dma_width <= 32)
 		gfp |= GFP_DMA32;
 
 	while (dirty-- > 0) {
@@ -6196,7 +6266,7 @@ static int stmmac_dma_cap_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "\tFlexible RX Parser: %s\n",
 		   priv->dma_cap.frpsel ? "Y" : "N");
 	seq_printf(seq, "\tEnhanced Addressing: %d\n",
-		   priv->dma_cap.addr64);
+		   priv->dma_cap.host_dma_width);
 	seq_printf(seq, "\tReceive Side Scaling: %s\n",
 		   priv->dma_cap.rssen ? "Y" : "N");
 	seq_printf(seq, "\tVLAN Hash Filtering: %s\n",
@@ -6620,6 +6690,8 @@ int stmmac_xdp_open(struct net_device *dev)
 			   __func__);
 		goto init_error;
 	}
+
+	stmmac_reset_queues_param(priv);
 
 	/* DMA CSR Channel configuration */
 	for (chan = 0; chan < dma_csr_ch; chan++) {
@@ -7068,6 +7140,10 @@ int stmmac_dvr_probe(struct device *device,
 	if (!ndev)
 		return -ENOMEM;
 
+	//add by polyhex
+        strcpy(ndev->name, "eth1");
+        //end add by polyhex
+
 	SET_NETDEV_DEV(ndev, device);
 
 	priv = netdev_priv(ndev);
@@ -7107,7 +7183,8 @@ int stmmac_dvr_probe(struct device *device,
 	priv->wq = create_singlethread_workqueue("stmmac_wq");
 	if (!priv->wq) {
 		dev_err(priv->device, "failed to create workqueue\n");
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto error_wq_init;
 	}
 
 	INIT_WORK(&priv->service_task, stmmac_service_task);
@@ -7173,20 +7250,22 @@ int stmmac_dvr_probe(struct device *device,
 		dev_info(priv->device, "SPH feature enabled\n");
 	}
 
-	/* The current IP register MAC_HW_Feature1[ADDR64] only define
-	 * 32/40/64 bit width, but some SOC support others like i.MX8MP
-	 * support 34 bits but it map to 40 bits width in MAC_HW_Feature1[ADDR64].
-	 * So overwrite dma_cap.addr64 according to HW real design.
+	/* Ideally our host DMA address width is the same as for the
+	 * device. However, it may differ and then we have to use our
+	 * host DMA width for allocation and the device DMA width for
+	 * register handling.
 	 */
-	if (priv->plat->addr64)
-		priv->dma_cap.addr64 = priv->plat->addr64;
+	if (priv->plat->host_dma_width)
+		priv->dma_cap.host_dma_width = priv->plat->host_dma_width;
+	else
+		priv->dma_cap.host_dma_width = priv->dma_cap.addr64;
 
-	if (priv->dma_cap.addr64) {
+	if (priv->dma_cap.host_dma_width) {
 		ret = dma_set_mask_and_coherent(device,
-				DMA_BIT_MASK(priv->dma_cap.addr64));
+				DMA_BIT_MASK(priv->dma_cap.host_dma_width));
 		if (!ret) {
-			dev_info(priv->device, "Using %d bits DMA width\n",
-				 priv->dma_cap.addr64);
+			dev_info(priv->device, "Using %d/%d bits DMA host/device width\n",
+				 priv->dma_cap.host_dma_width, priv->dma_cap.addr64);
 
 			/*
 			 * If more than 32 bits can be addressed, make sure to
@@ -7201,7 +7280,7 @@ int stmmac_dvr_probe(struct device *device,
 				goto error_hw_init;
 			}
 
-			priv->dma_cap.addr64 = 32;
+			priv->dma_cap.host_dma_width = 32;
 		}
 	}
 
@@ -7335,6 +7414,7 @@ error_mdio_register:
 	stmmac_napi_del(ndev);
 error_hw_init:
 	destroy_workqueue(priv->wq);
+error_wq_init:
 	bitmap_free(priv->af_xdp_zc_qps);
 
 	return ret;

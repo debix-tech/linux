@@ -26,6 +26,7 @@
 #include <linux/clocksource.h>
 #include <linux/of_clk.h>
 #include <linux/acpi.h>
+#include <linux/gpio.h>
 
 #include <clocksource/arm_arch_timer.h>
 
@@ -55,7 +56,67 @@ EXPORT_SYMBOL(profile_pc);
 void __init time_init(void)
 {
 	u32 arch_timer_rate;
+//John_gao add for uefi
+#if 0
+	void __iomem *regs = ioremap(0x4ac10000, 4);
+	writeb(0, regs);
+	iounmap(regs);
 
+	regs = ioremap(0x4ac10001, 4);
+	writeb(0, (regs));
+	iounmap(regs);
+
+	regs = ioremap(0x4ac10004, 4);
+	writeb(0xFF, (regs));
+	iounmap(regs);
+
+	regs = ioremap(0x4ac10005, 4);
+	writeb(0x1F, (regs));
+	iounmap(regs);
+
+	regs = ioremap(0x4ae30013, 4);
+	writeb(0, (regs));
+	iounmap(regs);
+
+	mdelay(10);
+
+	regs = ioremap(0x4ae30217, 4);
+	writeb(0x9, (regs));
+	iounmap(regs);
+
+#endif
+#if 0
+	int ret = 0;
+	void __iomem *regs;
+	//John_gao set pwm down
+	regs = ioremap(0x443C01F4, 4);
+	printk("GLS 0x443C01F4 = 0x%x \n", readl((regs)));
+	writel(0x51E , (regs));
+	iounmap(regs);
+	printk("GLS 0x443C01F4 = 0x%x \n", readl((regs)));
+
+	regs = ioremap(0x443C01F0, 4);
+	printk("GLS 0x443C01F0 = 0x%x \n", readl((regs)));
+	writel(0x51E , (regs));
+	iounmap(regs);
+	printk("GLS 0x443C01F0 = 0x%x \n", readl((regs)));
+
+	regs = ioremap(0x43810080, 4);
+	printk("GLS 01 0x43810080 = 0x%x \n", readl((regs)));
+
+	ret = gpio_request(45, "pwm-gpio-01");
+	printk("GLS 01 45 gpio request ret = %d\n", ret);
+	ret = gpio_direction_output(45, 1);
+	gpio_set_value(45,1);
+	printk("GLS 02 0x43810080 = 0x%x ret = %d\n", readl((regs)), ret);
+	ret = gpio_get_value(45);
+	printk("GLS 03 0x43810080 = 0x%x ret = %d\n", readl((regs)), ret);
+	ret = gpio_request(44, "power-gpio-02");
+	printk("GLS 02 44 gpio request ret = %d\n", ret);
+	ret = gpio_direction_output(44, 0);
+	iounmap(regs);
+#endif
+//end John_gao add for uefi
 	of_clk_init(NULL);
 	timer_probe();
 

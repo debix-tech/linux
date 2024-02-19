@@ -95,7 +95,62 @@ static int read_nwords_via_fsb(void __iomem *regs, u32 *buf, u32 fuse_base, u32 
 
 	return 0;
 }
+static int is_write_lock = 1;
+static int fsb_s400_fuse_write(void *priv, unsigned int offset, void *val,
+			      size_t bytes)
+{
+	struct imx_fsb_s400_fuse *fuse = priv;
+	void __iomem *regs = fuse->regs + fuse->hw->fsb_otp_shadow;
+	u32 rbuf[32];
+	u8 *buf = (u8 *)rbuf; 
+	int ret = 0  ; 
+	//printk("GLS_FUSE %s offset(%d) bytes=(%ld) \n", __func__, offset,bytes);
+	if(is_write_lock==1){
+		if( bytes > 32){
+			printk("GLS_FUSE write err \n");	
+			return -1;
+		}
+		memset(buf,0 ,32*4);
+		memcpy(buf, val, bytes);
+		buf[bytes]='\0';
+		//printk("GLS_FUSE input : (%s) \n", buf);
+		if(strcmp(buf, "polyhex")!=0){
+			printk("GLS_FUSE input err \n");	
+			return -1;
+		}
+		is_write_lock = 0;
+	}else{
+		if(bytes == 17){
+			memset(buf,0 ,32*4);
+			memcpy(buf, val, bytes);
+			buf[bytes]='\0';
+			if(strcmp(buf,"polyhex_lock_fuse")==0){
+				printk("GLS_FUSE lock \n");
+				is_write_lock = 1;
+				return 0;
+			}
+		}
 
+		if(bytes == 4){
+			//int i = 0 ;
+			memset(buf,0 ,32*4);
+			memcpy(buf, val, bytes);
+			//printk("GLS_FUSE 0x%02x 0x%02x 0x%02x 0x%02x\n", buf[0],buf[1],buf[2],buf[3]);
+#if 1
+			mutex_lock(&fuse->lock);
+			//for (i = 0 ; i < 10; i++){	
+		        //writel_relaxed(rbuf[0] ,regs + (offset*4));
+			//}
+			ret = ele_write_fuse(offset, rbuf[0], false);
+			//printk("GLS_FUSE rbuf=0x%x offset=%d ret = %d\n", rbuf[0],offset, ret);
+			mutex_unlock(&fuse->lock);
+#endif
+			//printk("GLS_FUSE write mac \n");
+		}
+	
+	}
+	return ret;
+}
 static int fsb_s400_fuse_read(void *priv, unsigned int offset, void *val,
 			      size_t bytes)
 {
@@ -220,6 +275,10 @@ static int imx_fsb_s400_fuse_probe(struct platform_device *pdev)
 	fuse->config.owner = THIS_MODULE;
 	fuse->config.size = 2048; /* 64 Banks */
 	fuse->config.reg_read = fsb_s400_fuse_read;
+	//John_gao add for imx93 fuse mac
+	if(of_device_is_compatible(pdev->dev.of_node, "fsl,imx93-ocotp")){
+		fuse->config.reg_write = fsb_s400_fuse_write;
+	}
 	fuse->config.priv = fuse;
 	mutex_init(&fuse->lock);
 	fuse->hw = of_device_get_match_data(&pdev->dev);

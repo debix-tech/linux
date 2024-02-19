@@ -120,6 +120,16 @@ static const struct flash_info winbond_nor_parts[] = {
 		NO_SFDP_FLAGS(SECT_4K) },
 	{ "w25q80bl", INFO(0xef4014, 0, 64 * 1024,  16)
 		NO_SFDP_FLAGS(SECT_4K) },
+
+	//John_gao Puya 4M P25Q32L
+	{ "p25q32l", INFO(0x856016, 0, 4 * 1024,  1024)
+		NO_SFDP_FLAGS(SECT_4K | 
+			      SPI_NOR_OCTAL_DTR_READ |
+                              SPI_NOR_OCTAL_DTR_PP |
+			      SPI_NOR_4B_OPCODES) },
+	//	NO_SFDP_FLAGS(SECT_4K ) },
+	//end John_gao Puya 4M P25Q32L
+	
 	{ "w25q128", INFO(0xef4018, 0, 64 * 1024, 256)
 		NO_SFDP_FLAGS(SECT_4K) },
 	{ "w25q256", INFO(0xef4019, 0, 64 * 1024, 512)
