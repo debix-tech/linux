@@ -34,7 +34,7 @@ static int __init early_hostname(char *arg)
 early_param("hostname", early_hostname);
 
 //John_gao set linux version
-#define polyhex_version "Debix Model C V0.1.2"
+#define polyhex_version "Debix Model C V0.1.3"
 
 #if 1
 const char linux_proc_banner[] =

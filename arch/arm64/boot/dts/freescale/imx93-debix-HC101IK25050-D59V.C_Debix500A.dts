@@ -50,6 +50,7 @@
 		power-gpios = <&gpio2 12 0>;           /* pwm en gpio */
 		pwm-gpios = <&gpio2 13 0>;           /* pwm输出gpio */
 		npwm = <1>;                     /* pwm通道个数 */
+		status = "disabled";
 	};
 };
 
