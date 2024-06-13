@@ -14,6 +14,9 @@
 
 #define MAX_FILENAME_SIZE	256
 
+//John_gao aet uefi
+#define SET_UEFI_BOOT 0
+
 /*
  * Some firmware implementations have problems reading files in one go.
  * A read chunk size of 1MB seems to work for most platforms.
@@ -153,8 +156,17 @@ efi_status_t handle_cmdline_files(efi_loaded_image_t *image,
 				  unsigned long *load_addr,
 				  unsigned long *load_size)
 {
+	//John_gao add for UEFI
+#if SET_UEFI_BOOT
+	char* cmdline_ptr = "console=ttyLP0,115200 earlycon dtb=imx93-11x11-evk.dtb root=/dev/mmcblk1p2 rootwait rw";
+	u16* temp;
+
+	int cmdline_len = 160;
+	efi_char16_t cmdline[cmdline_len];
+#else
 	const efi_char16_t *cmdline = image->load_options;
 	u32 cmdline_len = image->load_options_size;
+#endif
 	unsigned long efi_chunk_size = ULONG_MAX;
 	efi_file_protocol_t *volume = NULL;
 	efi_file_protocol_t *file;
@@ -162,6 +174,16 @@ efi_status_t handle_cmdline_files(efi_loaded_image_t *image,
 	unsigned long alloc_size;
 	efi_status_t status;
 	int offset;
+	//John_gao add for UEFI
+#if SET_UEFI_BOOT
+	int i = 0;
+
+	temp = cmdline;
+
+	while(i++ < cmdline_len){
+		*temp++ = *cmdline_ptr++;
+	}
+#endif
 
 	if (!load_addr || !load_size)
 		return EFI_INVALID_PARAMETER;
@@ -173,19 +195,33 @@ efi_status_t handle_cmdline_files(efi_loaded_image_t *image,
 		efi_chunk_size = EFI_READ_CHUNK_SIZE;
 
 	alloc_addr = alloc_size = 0;
+	//John_gao add for UEFI
+#if SET_UEFI_BOOT
+	i = 0;
+#endif
 	do {
 		struct finfo fi;
 		unsigned long size;
 		void *addr;
 
+	//John_gao add for UEFI
+#if SET_UEFI_BOOT
+		offset = find_file_option(&(cmdline[i]), cmdline_len,
+#else
 		offset = find_file_option(cmdline, cmdline_len,
+#endif
 					  optstr, optstr_size,
 					  fi.filename, ARRAY_SIZE(fi.filename));
 
 		if (!offset)
 			break;
 
+	//John_gao add for UEFI
+#if SET_UEFI_BOOT
+		i += offset;
+#else
 		cmdline += offset;
+#endif
 		cmdline_len -= offset;
 
 		if (!volume) {

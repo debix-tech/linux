@@ -1211,6 +1211,71 @@ static const struct panel_desc bananapi_s070wv20_ct16 = {
 	},
 };
 
+//polyhex John_gao add HC101
+static const struct drm_display_mode debix_HC101IK25050_D59_mode= {
+        .clock = 42850,
+        .hdisplay = 1024,
+        .hsync_start = 1024 + 160,
+        .hsync_end = 1024 + 160 + 20,
+        .htotal = 1024 + 160 + 20 + 140,
+        .vdisplay = 600,
+        .vsync_start = 600 + 12,
+        .vsync_end = 600 + 12 + 3,
+        .vtotal = 600 + 12 + 3 + 20,
+};
+
+static const struct panel_desc debix_HC101IK25050_D59= {
+        .modes = &debix_HC101IK25050_D59_mode,
+        .num_modes = 1,
+        .bpc = 8,
+        .size = {
+                .width = 223,
+                .height = 125,
+        },
+        .delay = {
+                .prepare = 100,
+                .enable = 100,
+                .unprepare = 100,
+                .disable = 100,
+        },
+        .bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        .connector_type = DRM_MODE_CONNECTOR_LVDS,
+};
+//end polyhex John_gao add HC101
+//polyhex John_gao add JW050R0320I01
+static const struct drm_display_mode debix_JW050R0320I01_mode= {
+        .clock = 24858,
+        .hdisplay = 800,
+        .hsync_start = 800 + 3,
+        .hsync_end = 800 + 3 + 8,
+        .htotal = 800 + 3 + 8 + 8,
+        .vdisplay = 480,
+        .vsync_start = 480 + 8,
+        .vsync_end = 480 + 8 + 15,
+        .vtotal = 480 + 8 + 15 + 5,
+};
+
+static const struct panel_desc debix_JW050R0320I01= {
+        .modes = &debix_JW050R0320I01_mode,
+        .num_modes = 1,
+        .bpc = 8,
+        .size = {
+                .width = 223,
+                .height = 125,
+        },
+        .delay = {
+                .prepare = 100,
+                .enable = 100,
+                .unprepare = 100,
+                .disable = 100,
+        },
+        .bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_JEIDA,
+        .bus_flags = DRM_BUS_FLAG_DE_HIGH,
+        .connector_type = DRM_MODE_CONNECTOR_LVDS,
+};
+//end polyhex John_gao add JW050R0320I01
+
 static const struct drm_display_mode boe_ev121wxm_n10_1850_mode = {
 	.clock = 71143,
 	.hdisplay = 1280,
@@ -4089,6 +4154,18 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "boe,ev121wxm-n10-1850",
 		.data = &boe_ev121wxm_n10_1850,
 	}, {
+//polyhex John_gao add HC101
+        //John_gao polyhex 1024x600
+                .compatible = "debix,HC101IK25050-D59V.C",
+                .data = &debix_HC101IK25050_D59,
+        }, {
+//end polyhex John_gao add HC101
+//polyhex John_gao add JW050R0320I01
+                .compatible = "debix,JW050R0320I01",
+                .data = &debix_JW050R0320I01,
+        }, {
+		//end polyhex John_gao add JW050R0320I01
+
 		.compatible = "boe,hv070wsa-100",
 		.data = &boe_hv070wsa
 	}, {

@@ -1880,6 +1880,7 @@ static int fec_enet_rx_napi(struct napi_struct *napi, int budget)
 }
 
 /* ------------------------------------------------------------------------- */
+extern int polyhex_get_mac(int index, char *addr);
 static int fec_get_mac(struct net_device *ndev)
 {
 	struct fec_enet_private *fep = netdev_priv(ndev);
@@ -1892,7 +1893,15 @@ static int fec_get_mac(struct net_device *ndev)
 	 * 1) module parameter via kernel command line in form
 	 *    fec.macaddr=0x00,0x04,0x9f,0x01,0x30,0xe0
 	 */
-	iap = macaddr;
+	polyhex_get_mac(2, tmpaddr);
+	//printk("GLS_MAC Using get fuse MAC address: %pM\n",tmpaddr);
+
+	if(tmpaddr[0]==0x10 && tmpaddr[1]==0x07 && tmpaddr[2]==0x23){
+		iap = tmpaddr;
+		//printk("GLS_MAC Using fuse MAC address: %pM\n",iap);
+	}else{
+		iap = macaddr;
+	}
 
 	/*
 	 * 2) from device tree data
@@ -1952,6 +1961,64 @@ static int fec_get_mac(struct net_device *ndev)
 	return 0;
 }
 
+//John_gao
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+        int ret = 0;
+        int ret2 = 0;
+        //page 0
+        phy_write(phydev, 0x1f, 0);
+
+        ret = phy_read(phydev, 0x02);
+        //printk("GLS_PHY 02 id=0x%x\n", ret);
+        ret2 = phy_read(phydev, 0x03);
+        //printk("GLS_PHY 03 id=0x%x\n", ret2);
+        //rtl8211f
+        if(ret == 0x1c && ret2 == 0xc916){
+                /*switch to extension page44*/
+                phy_write(phydev, 0x1f, 0xd04);
+                phy_write(phydev, 0x10, 0x6d60);
+
+                /*set led1(yellow) act*/
+                phy_write(phydev, 0x11, 0x8);
+                phy_write(phydev, 0x1f, 0);
+        //rtl8211e
+        }else if(ret == 0x1c && ret2 == 0xc915){
+                 /*switch to extension page44*/
+                int vv = 0;
+                //printk("GLS_PHY fec use rtl8211e\n");
+
+                phy_write(phydev, 31, 0x07);
+                phy_write(phydev, 30, 0x2c);
+
+                /*set led1(yellow) act*/
+                vv = phy_read(phydev,26);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv &= 0xFFEF;// bit4=0
+                vv |= 0x20;// bit5=1
+                vv &= 0xFFBF;// bit6=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 26, vv);
+
+
+                /*set led0(green) link*/
+                vv = phy_read(phydev,28);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv |= 0x7;// bit0,1,2=1
+                vv &= 0xFF8F;// bit4,5,6=0
+                vv &= 0xF8FF;// bit8,9,10=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 28, vv);
+
+                /*switch back to page0*/
+                phy_write(phydev,31,0x00);
+
+                phy_modify_mmd_changed(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV,6, 0);
+
+        }
+       return 0;
+}
+
 /* ------------------------------------------------------------------------- */
 
 /*
@@ -2009,6 +2076,9 @@ static void fec_enet_adjust_link(struct net_device *ndev)
 
 	if (status_change)
 		phy_print_status(phy_dev);
+
+	//John_gao
+        phy_rtl8211f_led_fixup(phy_dev);
 }
 
 static int fec_enet_mdio_wait(struct fec_enet_private *fep)
@@ -4277,6 +4347,10 @@ fec_probe(struct platform_device *pdev)
 				  FEC_STATS_SIZE, num_tx_qs, num_rx_qs);
 	if (!ndev)
 		return -ENOMEM;
+
+        //add by polyhex
+        strcpy(ndev->name, "eth2");
+        //end add by polyhex
 
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 

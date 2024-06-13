@@ -8820,6 +8820,7 @@ int dev_set_mac_address_user(struct net_device *dev, struct sockaddr *sa,
 {
 	int ret;
 
+	printk("GLS_MAC set mac sa : %pM\n", sa->sa_data);
 	down_write(&dev_addr_sem);
 	ret = dev_set_mac_address(dev, sa, extack);
 	up_write(&dev_addr_sem);

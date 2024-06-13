@@ -979,6 +979,66 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 		stmmac_fpe_link_state_handle(priv, false);
 }
 
+//John_gao set eth led
+static int phy_rtl8211f_led_fixup(struct phy_device *phydev)
+{
+        int ret = 0;
+        int ret2 = 0;
+	//page 0
+        phy_write(phydev, 0x1f, 0);
+
+        ret = phy_read(phydev, 0x02);
+        //printk("GLS_PHY 02 id=0x%x\n", ret);
+        ret2 = phy_read(phydev, 0x03);
+        //printk("GLS_PHY 03 id=0x%x\n", ret2);
+        //rtl8211f
+        if(ret == 0x1c && ret2 == 0xc916){
+                /*switch to extension page44*/
+                phy_write(phydev, 0x1f, 0xd04);
+                phy_write(phydev, 0x10, 0x6d60);
+
+                /*set led1(yellow) act*/
+                phy_write(phydev, 0x11, 0x8);
+                phy_write(phydev, 0x1f, 0);
+        //rtl8211e
+        }else if(ret == 0x1c && ret2 == 0xc915){
+                 /*switch to extension page44*/
+                int vv = 0;
+                //printk("GLS_PHY stmmac use rtl8211e\n");
+
+                phy_write(phydev, 31, 0x07);
+                phy_write(phydev, 30, 0x2c);
+
+                /*set led1(yellow) act*/
+                vv = phy_read(phydev,26);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv &= 0xFFEF;// bit4=0
+                vv |= 0x20;// bit5=1
+                vv &= 0xFFBF;// bit6=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 26, vv);
+
+
+                /*set led0(green) link*/
+                vv = phy_read(phydev,28);
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                vv |= 0x7;// bit0,1,2=1
+                vv &= 0xFF8F;// bit4,5,6=0
+                vv &= 0xF8FF;// bit8,9,10=0
+                //printk("GLS_PHY fec vv=0x%04x\n", vv);
+                phy_write(phydev, 28, vv);
+
+                /*switch back to page0*/
+                phy_write(phydev,31,0x00);
+
+                phy_modify_mmd_changed(phydev, MDIO_MMD_AN, MDIO_AN_EEE_ADV,6, 0);
+
+        }
+       return 0;
+}
+
+
+
 static void stmmac_mac_link_up(struct phylink_config *config,
 			       struct phy_device *phy,
 			       unsigned int mode, phy_interface_t interface,
@@ -1085,6 +1145,10 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 
 	if (priv->dma_cap.fpesel)
 		stmmac_fpe_link_state_handle(priv, true);
+
+	//John_gao set eth led
+        phy_rtl8211f_led_fixup(phy);
+
 }
 
 static const struct phylink_mac_ops stmmac_phylink_mac_ops = {
@@ -2882,9 +2946,15 @@ static int stmmac_get_hw_features(struct stmmac_priv *priv)
  * it is to verify if the MAC address is valid, in case of failures it
  * generates a random MAC address
  */
+extern int polyhex_get_mac(int index, char *addr);
 static void stmmac_check_ether_addr(struct stmmac_priv *priv)
 {
 	u8 addr[ETH_ALEN];
+
+	polyhex_get_mac(1, addr);
+	if(addr[0]==0x10 && addr[1]==0x07 && addr[2]==0x23){
+		eth_hw_addr_set(priv->dev, addr);
+	}
 
 	if (!is_valid_ether_addr(priv->dev->dev_addr)) {
 		stmmac_get_umac_addr(priv, priv->hw, addr, 0);
@@ -7099,6 +7169,10 @@ int stmmac_dvr_probe(struct device *device,
 				       MTL_MAX_TX_QUEUES, MTL_MAX_RX_QUEUES);
 	if (!ndev)
 		return -ENOMEM;
+
+	//add by polyhex
+        strcpy(ndev->name, "eth1");
+        //end add by polyhex
 
 	SET_NETDEV_DEV(ndev, device);
 

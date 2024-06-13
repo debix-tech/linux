@@ -113,7 +113,7 @@ static int read_fuse_word(struct ele_mu_priv *priv, u32 *value)
 	return -EINVAL;
 }
 
-int read_common_fuse(uint16_t fuse_id, u32 *value, bool special_id)
+int read_common_fuse(uint16_t fuse_id, u32 *value)
 {
 	struct ele_mu_priv *priv = NULL;
 	int err;
@@ -136,11 +136,7 @@ int read_common_fuse(uint16_t fuse_id, u32 *value, bool special_id)
 
 	switch (fuse_id) {
 	case OTP_UNIQ_ID:
-		if (special_id)
-			err = read_otp_uniq_id(priv, value);
-		else
-			err = read_fuse_word(priv, value);
-
+		err = read_otp_uniq_id(priv, value);
 		break;
 	default:
 		err = read_fuse_word(priv, value);
@@ -150,6 +146,45 @@ int read_common_fuse(uint16_t fuse_id, u32 *value, bool special_id)
 	return err;
 }
 EXPORT_SYMBOL_GPL(read_common_fuse);
+
+//John_gao add for efuse mac 
+int ele_write_fuse(uint16_t fuse_id, u32 value, bool lock)
+{
+	struct ele_mu_priv *priv = NULL;
+	unsigned int tag, command, size, ver, status;
+	int err;
+
+	err = get_ele_mu_priv(&priv);
+	if (err) {
+		pr_err("Error: iMX EdgeLock Enclave MU is not probed successfully.\n");
+		return err;
+	}
+	err = plat_fill_cmd_msg_hdr((struct mu_hdr *)&priv->tx_msg.header, ELE_WRITE_FUSE, 12);
+	if (err) {
+		pr_err("Error: plat_fill_cmd_msg_hdr failed.\n");
+		return err;
+	}
+
+	priv->tx_msg.data[0] = (32 << 16) | (fuse_id << 5);
+	priv->tx_msg.data[1] = value;
+
+	err = imx_ele_msg_send_rcv(priv);
+	if (err < 0)
+		return err;
+
+	tag = MSG_TAG(priv->rx_msg.header);
+	command = MSG_COMMAND(priv->rx_msg.header);
+	size = MSG_SIZE(priv->rx_msg.header);
+	ver = MSG_VER(priv->rx_msg.header);
+	status = RES_STATUS(priv->rx_msg.data[0]);
+	if (tag == 0xe1 && command == ELE_WRITE_FUSE && size == 0x03 &&
+	    ver == 0x06 && status == 0xd6)
+		return 0;
+
+	return -EIO;
+}
+EXPORT_SYMBOL_GPL(ele_write_fuse);
+//end efuse mac
 
 int ele_ping(void)
 {

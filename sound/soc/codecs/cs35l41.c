@@ -356,19 +356,6 @@ static const struct snd_kcontrol_new cs35l41_aud_controls[] = {
 	WM_ADSP_FW_CONTROL("DSP1", 0),
 };
 
-static void cs35l41_boost_enable(struct cs35l41_private *cs35l41, unsigned int enable)
-{
-	switch (cs35l41->hw_cfg.bst_type) {
-	case CS35L41_INT_BOOST:
-		enable = enable ? CS35L41_BST_EN_DEFAULT : CS35L41_BST_DIS_FET_OFF;
-		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2, CS35L41_BST_EN_MASK,
-				enable << CS35L41_BST_EN_SHIFT);
-		break;
-	default:
-		break;
-	}
-}
-
 static irqreturn_t cs35l41_irq(int irq, void *data)
 {
 	struct cs35l41_private *cs35l41 = data;
@@ -444,7 +431,8 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 
 	if (status[0] & CS35L41_BST_OVP_ERR) {
 		dev_crit_ratelimited(cs35l41->dev, "VBST Over Voltage error\n");
-		cs35l41_boost_enable(cs35l41, 0);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK, 0);
 		regmap_write(cs35l41->regmap, CS35L41_IRQ1_STATUS1,
 			     CS35L41_BST_OVP_ERR);
 		regmap_write(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, 0);
@@ -453,13 +441,16 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 				   CS35L41_BST_OVP_ERR_RLS);
 		regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN,
 				   CS35L41_BST_OVP_ERR_RLS, 0);
-		cs35l41_boost_enable(cs35l41, 1);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK,
+				   CS35L41_BST_EN_DEFAULT << CS35L41_BST_EN_SHIFT);
 		ret = IRQ_HANDLED;
 	}
 
 	if (status[0] & CS35L41_BST_DCM_UVP_ERR) {
 		dev_crit_ratelimited(cs35l41->dev, "DCM VBST Under Voltage Error\n");
-		cs35l41_boost_enable(cs35l41, 0);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK, 0);
 		regmap_write(cs35l41->regmap, CS35L41_IRQ1_STATUS1,
 			     CS35L41_BST_DCM_UVP_ERR);
 		regmap_write(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, 0);
@@ -468,13 +459,16 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 				   CS35L41_BST_UVP_ERR_RLS);
 		regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN,
 				   CS35L41_BST_UVP_ERR_RLS, 0);
-		cs35l41_boost_enable(cs35l41, 1);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK,
+				   CS35L41_BST_EN_DEFAULT << CS35L41_BST_EN_SHIFT);
 		ret = IRQ_HANDLED;
 	}
 
 	if (status[0] & CS35L41_BST_SHORT_ERR) {
 		dev_crit_ratelimited(cs35l41->dev, "LBST error: powering off!\n");
-		cs35l41_boost_enable(cs35l41, 0);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK, 0);
 		regmap_write(cs35l41->regmap, CS35L41_IRQ1_STATUS1,
 			     CS35L41_BST_SHORT_ERR);
 		regmap_write(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN, 0);
@@ -483,7 +477,9 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 				   CS35L41_BST_SHORT_ERR_RLS);
 		regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN,
 				   CS35L41_BST_SHORT_ERR_RLS, 0);
-		cs35l41_boost_enable(cs35l41, 1);
+		regmap_update_bits(cs35l41->regmap, CS35L41_PWR_CTRL2,
+				   CS35L41_BST_EN_MASK,
+				   CS35L41_BST_EN_DEFAULT << CS35L41_BST_EN_SHIFT);
 		ret = IRQ_HANDLED;
 	}
 

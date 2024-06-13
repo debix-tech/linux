@@ -56,9 +56,10 @@ EXPORT_SYMBOL(registered_fb);
 int num_registered_fb __read_mostly;
 EXPORT_SYMBOL(num_registered_fb);
 
-bool fb_center_logo __read_mostly;
-
-int fb_logo_count __read_mostly = -1;
+//John_gao Setting the image to be centered
+bool fb_center_logo __read_mostly = true;
+//John_gao Doesn't display images based on kernel count
+int fb_logo_count __read_mostly = 1;
 
 static struct fb_info *get_fb_info(unsigned int idx)
 {
@@ -1117,7 +1118,7 @@ static long do_fb_ioctl(struct fb_info *info, unsigned int cmd,
 		if (copy_from_user(&var, argp, sizeof(var)))
 			return -EFAULT;
 		/* only for kernel-internal use */
-		var.activate &= ~FB_ACTIVATE_KD_TEXT;
+		//var.activate &= ~FB_ACTIVATE_KD_TEXT;
 		console_lock();
 		lock_fb_info(info);
 		ret = fbcon_modechange_possible(info, &var);

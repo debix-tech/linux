@@ -2392,27 +2392,23 @@ static int snd_vt1724_spdif_build_controls(struct snd_ice1712 *ice)
 	if (err < 0)
 		return err;
 
-	kctl = snd_ctl_new1(&snd_vt1724_spdif_default, ice);
-	kctl->id.device = ice->pcm->device;
-	err = snd_ctl_add(ice->card, kctl);
+	err = snd_ctl_add(ice->card, kctl = snd_ctl_new1(&snd_vt1724_spdif_default, ice));
 	if (err < 0)
 		return err;
-	kctl = snd_ctl_new1(&snd_vt1724_spdif_maskc, ice);
 	kctl->id.device = ice->pcm->device;
-	err = snd_ctl_add(ice->card, kctl);
+	err = snd_ctl_add(ice->card, kctl = snd_ctl_new1(&snd_vt1724_spdif_maskc, ice));
 	if (err < 0)
 		return err;
-	kctl = snd_ctl_new1(&snd_vt1724_spdif_maskp, ice);
 	kctl->id.device = ice->pcm->device;
-	err = snd_ctl_add(ice->card, kctl);
+	err = snd_ctl_add(ice->card, kctl = snd_ctl_new1(&snd_vt1724_spdif_maskp, ice));
 	if (err < 0)
 		return err;
+	kctl->id.device = ice->pcm->device;
 #if 0 /* use default only */
-	kctl = snd_ctl_new1(&snd_vt1724_spdif_stream, ice);
-	kctl->id.device = ice->pcm->device;
-	err = snd_ctl_add(ice->card, kctl);
+	err = snd_ctl_add(ice->card, kctl = snd_ctl_new1(&snd_vt1724_spdif_stream, ice));
 	if (err < 0)
 		return err;
+	kctl->id.device = ice->pcm->device;
 	ice->spdif.stream_ctl = kctl;
 #endif
 	return 0;
