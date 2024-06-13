@@ -1,1 +1,1 @@
-# polyhex-kernel
+# polyhex-kernel ModelC_linux-6.1.36_2.1.0
