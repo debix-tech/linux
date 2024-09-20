@@ -34,10 +34,10 @@
 		};
 
 		//John_gao set to 1GB
-		ethosu_mem: ethosu_region@b8000000 {
+		ethosu_mem: ethosu_region@a5000000 {
 			compatible = "shared-dma-pool";
 			reusable;
-			reg = <0x0 0xb8000000 0x0 0x0800000>;
+			reg = <0x0 0xa5000000 0x0 0x08000000>;
 		};
 
 		vdev0vring0: vdev0vring0@a4000000 {
@@ -60,8 +60,8 @@
 			no-map;
 		};
 
-		rsc_table: rsc-table@2021f000 {
-			reg = <0 0x2021f000 0 0x1000>;
+		rsc_table: rsc-table@2021e000 {
+			reg = <0 0x2021e000 0 0x1000>;
 			no-map;
 		};
 

@@ -6,14 +6,13 @@
 #include "imx93-11x11-evk.dts"
 
 / {
-/*
-	lvds_backlight: lvds_backlight {
+	backlight: backlight {
 		compatible = "pwm-backlight";
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_lvds>;
-		//pwms = <&adp5585pwm 0 100000 0>;
-		enable-gpios = <&gpio2 12 GPIO_ACTIVE_HIGH>;
-		power-supply = <&reg_vdd_12v>;
+                //pinctrl-names = "default";
+		//pinctrl-0 = <&pinctrl_pwm>;
+		pwms = <&tpm6 2 100000 0>;
+		//enable-gpios = <&gpio2 20 GPIO_ACTIVE_HIGH>;
+		//power-supply = <&reg_vdd_12v>;
 		status = "okay";
 
 		brightness-levels = < 0  1  2  3  4  5  6  7  8  9
@@ -29,16 +28,15 @@
 				    100>;
 		default-brightness-level = <80>;
 	};
-*/
 
-	debix-pwm {
-		compatible = "debix,debix-pwm";    /* compatible属性 */
-                pinctrl-0 = <&pinctrl_debix_pwm>;
+//	debix-pwm {
+//		compatible = "debix,debix-pwm";    /* compatible属性 */
+ //               pinctrl-0 = <&pinctrl_debix_pwm>;
 		//power-gpios = <&gpio2 12 0>;           /* pwm en gpio */
-		pwm-gpios = <&gpio2 19 0>;           /* pwm输出gpio */
-		npwm = <1>;                     /* pwm通道个数 */
-		status = "disabled";
-	};
+//		pwm-gpios = <&gpio2 19 0>;           /* pwm输出gpio */
+//		npwm = <1>;                     /* pwm通道个数 */
+//		status = "disabled";
+//	};
 };
 
 /*
@@ -59,7 +57,7 @@
         panel@0 {
                 compatible = "debix,TD080B";
                 reg = <0>;
-                //backlight = <&mipi_backlight>;
+                backlight = <&backlight>;
                 pinctrl-0 = <&pinctrl_mipi_dsi_en>;
                 reset-gpio = <&gpio2 20 GPIO_ACTIVE_HIGH>;
                 dsi-lanes = <4>;
@@ -102,7 +100,11 @@
 &ldb_phy {
 	status = "disabled";
 };
-
+&tpm6 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_pwm6>;
+	status = "okay";
+};
 &cameradev {
 	status = "okay";
 };
@@ -194,12 +196,12 @@
 			MX93_PAD_GPIO_IO20__GPIO2_IO20 0x139e
                 >;
         };
-        pinctrl_debix_pwm: debixpwmgrp {
-                fsl,pins = <
-			MX93_PAD_GPIO_IO19__GPIO2_IO19	0x139e
-			//MX93_PAD_GPIO_IO13__GPIO2_IO13	0x139e
-                >;
-        };
+        pinctrl_pwm6: pwm6grp {
+		fsl,pins = <
+			MX93_PAD_GPIO_IO19__TPM6_CH2 0x39e
+			//MX93_PAD_GPIO_IO13__TPM4_CH2 0x39e
+		>;
+	};
 	        pinctrl_csi0_pwn: csi0_pwn_grp {
                 fsl,pins = <
                          MX93_PAD_GPIO_IO18__GPIO2_IO18		0x31e

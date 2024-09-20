@@ -115,13 +115,30 @@ static int pwm_backlight_update_status(struct backlight_device *bl)
 	if (pb->notify)
 		brightness = pb->notify(pb->dev, brightness);
 
-	if (brightness > 0) {
+	if (brightness >= 0) {
 		pwm_get_state(pb->pwm, &state);
 		state.duty_cycle = compute_duty_cycle(pb, brightness);
 		pwm_apply_state(pb->pwm, &state);
 		pwm_backlight_power_on(pb);
 	} else {
+		//John_gao add for set pwm 0 
+		//if(brightness==0){
+		//	printk("GLS_PWM set 0\n");
+		//	pwm_get_state(pb->pwm, &state);
+		//	state.duty_cycle = compute_duty_cycle(pb, brightness);
+		//	pwm_apply_state(pb->pwm, &state);
+		//}
 		pwm_backlight_power_off(pb);
+	}
+
+	//John_gao  0 close en , other open en 
+	if(brightness==0){
+		if (pb->enable_gpio)
+			gpiod_set_value_cansleep(pb->enable_gpio, 0);
+	}else{
+		if (pb->enable_gpio)
+			gpiod_set_value_cansleep(pb->enable_gpio, 1);
+	
 	}
 
 	if (pb->notify_after)

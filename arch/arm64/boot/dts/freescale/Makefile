@@ -359,6 +359,9 @@ imx8qm-mek-revd-root-dtbs := imx8qm-mek-root.dtb imx8qm-mek-revd.dtbo
 ## John_gao Add Model C dts 
 dtb-$(CONFIG_ARCH_MXC) += imx93-11x11-evk.dtb \
 			  imx93-debix-base.dtb \
+			  imx93-debix-TD101A.dtb \
+			  imx93-debix-TD101A_Debix200A.dtb \
+			  imx93-debix-TD101A_Debix500A.dtb \
 			  imx93-debix-TD070A.dtb \
 			  imx93-debix-TD070A_Debix200A.dtb \
 			  imx93-debix-TD070A_Debix500A.dtb \

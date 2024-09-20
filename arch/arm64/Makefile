@@ -150,7 +150,7 @@ libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 boot		:= arch/arm64/boot
 
 ifeq ($(CONFIG_EFI_ZBOOT),)
-KBUILD_IMAGE	:= $(boot)/Image.gz
+KBUILD_IMAGE	:= $(boot)/Image.gz $(boot)/yocto_sd.efi $(boot)/yocto.efi
 else
 KBUILD_IMAGE	:= $(boot)/vmlinuz.efi
 endif
@@ -158,13 +158,14 @@ endif
 all:	$(notdir $(KBUILD_IMAGE))
 
 
-Image vmlinuz.efi: vmlinux
+Image vmlinuz.efi yocto_sd.efi yocto.efi: vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 Image.%: Image
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
 install: KBUILD_IMAGE := $(boot)/Image
+
 install zinstall:
 	$(call cmd,install)
 

@@ -33,8 +33,8 @@
 	lvds_panel {
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_lvds>;
-		//compatible = "boe,ev121wxm-n10-1850";
-		compatible = "debix,HC101IK25050-D59V.C";
+		compatible = "boe,ev121wxm-n10-1850";
+		//compatible = "debix,HC101IK25050-D59V.C";
                 backlight = <&lvds_backlight>;
 		enable-gpios = <&gpio1 10 GPIO_ACTIVE_HIGH>;
 
@@ -69,7 +69,8 @@
 };
 
 &lcdif {
-	assigned-clock-rates = <300000000>, <42858000>, <400000000>, <133333333>;
+	//assigned-clock-rates = <300000000>, <42858000>, <400000000>, <133333333>;
+	assigned-clock-rates = <498000000>, <71142857>, <400000000>, <133333333>;
 };
 
 &ldb {

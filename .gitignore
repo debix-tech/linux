@@ -10,6 +10,8 @@
 #
 # Normal rules (sorted alphabetically)
 #
+arch/arm64/boot/yocto.efi
+arch/arm64/boot/yocto_sd.efi
 image_out
 .*
 *.a

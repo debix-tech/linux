@@ -502,6 +502,7 @@ struct rad_panel {
 
 	struct gpio_desc *reset;
 	struct backlight_device *backlight;
+	struct backlight_device *backlight2;
 
 	struct regulator_bulk_data *supplies;
 	unsigned int num_supplies;
@@ -685,6 +686,7 @@ static int mipi_enable(struct rad_panel *panel)
 	
 
 	backlight_enable(panel->backlight);
+	backlight_enable(panel->backlight2);
 
 	panel->enabled = true;
 
@@ -715,6 +717,7 @@ static int rad_panel_disable(struct drm_panel *panel)
 	dsi->mode_flags |= MIPI_DSI_MODE_LPM;
 
 	backlight_disable(rad->backlight);
+	backlight_disable(rad->backlight2);
 
 	usleep_range(10000, 12000);
 
@@ -764,6 +767,27 @@ static int rad_panel_get_modes(struct drm_panel *panel,
 	return 1;
 }
 
+static int rad_bl_get_brightness(struct backlight_device *bl)
+{
+	struct mipi_dsi_device *dsi = bl_get_data(bl);
+	struct rad_panel *rad = mipi_dsi_get_drvdata(dsi);
+	u16 brightness;
+	int ret;
+
+	if (!rad->prepared)
+		return 0;
+
+	dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
+
+	ret = mipi_dsi_dcs_get_display_brightness(dsi, &brightness);
+	if (ret < 0)
+		return ret;
+
+	bl->props.brightness = brightness;
+
+	return brightness & 0xff;
+}
+static int delayBright = 1;
 static int rad_bl_update_status(struct backlight_device *bl)
 {
 	struct mipi_dsi_device *dsi = bl_get_data(bl);
@@ -780,11 +804,24 @@ static int rad_bl_update_status(struct backlight_device *bl)
 	if (ret < 0)
 		return ret;
 
+	if (rad->backlight2) {
+		if(delayBright==1){
+			delayBright = 0;
+			msleep(100);
+		}
+                rad->backlight2->props.power = FB_BLANK_UNBLANK;
+		
+		rad->backlight2->props.brightness = bl->props.brightness;
+                backlight_update_status(rad->backlight2);
+        }
+
+
 	return 0;
 }
 
 static const struct backlight_ops rad_bl_ops = {
 	.update_status = rad_bl_update_status,
+	.get_brightness = rad_bl_get_brightness,
 };
 
 static const struct drm_panel_funcs rad_panel_funcs = {
@@ -835,6 +872,7 @@ static int rad_panel_probe(struct mipi_dsi_device *dsi)
 	struct rad_panel *panel;
 	struct backlight_properties bl_props;
 	int ret;
+	struct device_node *backlight2;
 	u32 video_mode;
 
 	if (!of_id || !of_id->data)
@@ -851,6 +889,11 @@ static int rad_panel_probe(struct mipi_dsi_device *dsi)
 
 	dsi->format = MIPI_DSI_FMT_RGB888;
 	dsi->mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_NO_EOT_PACKET;
+	backlight2 = of_parse_phandle(dev->of_node, "backlight", 0);
+        if (backlight2) {
+                panel->backlight2 = of_find_backlight_by_node(backlight2);
+                of_node_put(backlight2);
+        }
 
 	ret = of_property_read_u32(np, "video-mode", &video_mode);
 	if (!ret) {
