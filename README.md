@@ -1,5 +1,5 @@
 ### System SDK Download
-- Yocto-Linux 6.6.23_2.0.0    
+- Yocto-Linux 6.6.36_2.1.0    
      https://www.nxp.com/design/software/embedded-software/i-mx-software/embedded-linux-for-i-mx-applications-processors:IMXLINUX?   
      
 ### Building the Kernel
