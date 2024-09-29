@@ -422,9 +422,8 @@ static struct regulator *analog_regulator;
 static struct regulator *gpo_regulator;
 static DEFINE_MUTEX(ov5640_mutex);
 
-static int ov5640_probe(struct i2c_client *adapter,
-				const struct i2c_device_id *device_id);
-static int ov5640_remove(struct i2c_client *client);
+static int ov5640_probe(struct i2c_client *adapter);
+static void ov5640_remove(struct i2c_client *client);
 
 static s32 ov5640_read_reg(struct ov5640 *sensor, u16 reg, u8 *val);
 static s32 ov5640_write_reg(struct ov5640 *sensor, u16 reg, u8 val);
@@ -1220,7 +1219,6 @@ static int ov5640_init_mode(struct ov5640 *sensor,
 	struct reg_value *pModeSetting = NULL;
 	s32 ArySize = 0;
 	int retval = 0;
-	u32 msec_wait4stable = 0;
 	enum ov5640_downsize_mode dn_mode, orig_dn_mode;
 
 	if ((mode > ov5640_mode_MAX || mode < ov5640_mode_MIN)
@@ -1229,8 +1227,14 @@ static int ov5640_init_mode(struct ov5640 *sensor,
 		return -1;
 	}
 
-	dn_mode = ov5640_mode_info_data[frame_rate][mode].dn_mode;
-	orig_dn_mode = ov5640_mode_info_data[frame_rate][orig_mode].dn_mode;
+	if (mode == ov5640_mode_INIT) {
+		dn_mode = 0;
+		orig_dn_mode = 0;
+	} else {
+		dn_mode = ov5640_mode_info_data[frame_rate][mode].dn_mode;
+		orig_dn_mode = ov5640_mode_info_data[frame_rate][orig_mode].dn_mode;
+	}
+
 	if (mode == ov5640_mode_INIT) {
 		pModeSetting = ov5640_init_setting_30fps_VGA;
 		ArySize = ARRAY_SIZE(ov5640_init_setting_30fps_VGA);
@@ -1265,18 +1269,7 @@ static int ov5640_init_mode(struct ov5640 *sensor,
 	OV5640_get_light_freq(sensor);
 	OV5640_set_bandingfilter(sensor);
 	ov5640_set_virtual_channel(sensor, sensor->csi);
-
-	/* add delay to wait for sensor stable */
-	if (mode == ov5640_mode_QSXGA_2592_1944) {
-		/* dump the first two frames: 1/7.5*2
-		 * the frame rate of QSXGA is 7.5fps */
-		msec_wait4stable = 267;
-	} else {
-		/* dump the first eighteen frames: 1/30*18 */
-		msec_wait4stable = 600;
-	}
-	msleep(msec_wait4stable);
-
+	msleep(10);
 err:
 	return retval;
 }
@@ -1450,7 +1443,7 @@ static int ov5640_s_parm(struct v4l2_subdev *sd, struct v4l2_streamparm *a)
 }
 
 static int ov5640_set_fmt(struct v4l2_subdev *sd,
-			struct v4l2_subdev_pad_config *cfg,
+			struct v4l2_subdev_state *sd_state,
 			struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *mf = &format->format;
@@ -1487,7 +1480,7 @@ static int ov5640_set_fmt(struct v4l2_subdev *sd,
 
 
 static int ov5640_get_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_pad_config *cfg,
+			  struct v4l2_subdev_state *sd_state,
 			  struct v4l2_subdev_format *format)
 {
 	struct v4l2_mbus_framefmt *mf = &format->format;
@@ -1509,7 +1502,7 @@ static int ov5640_get_fmt(struct v4l2_subdev *sd,
 }
 
 static int ov5640_enum_mbus_code(struct v4l2_subdev *sd,
-				 struct v4l2_subdev_pad_config *cfg,
+				 struct v4l2_subdev_state *sd_state,
 				 struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->pad || code->index >= ARRAY_SIZE(ov5640_colour_fmts))
@@ -1528,7 +1521,7 @@ static int ov5640_enum_mbus_code(struct v4l2_subdev *sd,
  * Return 0 if successful, otherwise -EINVAL.
  */
 static int ov5640_enum_framesizes(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_pad_config *cfg,
+			       struct v4l2_subdev_state *sd_state,
 			       struct v4l2_subdev_frame_size_enum *fse)
 {
 	if (fse->index > ov5640_mode_MAX)
@@ -1554,7 +1547,7 @@ static int ov5640_enum_framesizes(struct v4l2_subdev *sd,
  * Return 0 if successful, otherwise -EINVAL.
  */
 static int ov5640_enum_frameintervals(struct v4l2_subdev *sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
@@ -1693,8 +1686,7 @@ static void ov5640_adjust_setting_20mhz(void)
  * @param adapter            struct i2c_adapter *
  * @return  Error code indicating success or failure
  */
-static int ov5640_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int ov5640_probe(struct i2c_client *client)
 {
 	struct pinctrl *pinctrl;
 	struct device *dev = &client->dev;
@@ -1843,7 +1835,7 @@ static int ov5640_probe(struct i2c_client *client,
  * @param client            struct i2c_client *
  * @return  Error code indicating success or failure
  */
-static int ov5640_remove(struct i2c_client *client)
+static void ov5640_remove(struct i2c_client *client)
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct ov5640 *sensor = to_ov5640(client);
@@ -1855,8 +1847,6 @@ static int ov5640_remove(struct i2c_client *client)
 	ov5640_power_down(sensor, 1);
 
 	ov5640_regualtor_disable();
-
-	return 0;
 }
 
 module_i2c_driver(ov5640_i2c_driver);

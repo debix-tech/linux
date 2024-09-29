@@ -39,6 +39,7 @@
 #define DEFAULT_GOP_SIZE	1
 #define DEFAULT_INTRA_PIC_RATE	30
 #define DEFAULT_QP			30
+#define DEFAULT_CHROMA_QP_INDEX_OFFSET	0
 
 #define DEFAULT_PIXELDEPTH		10		//set outputPixelDepth to this will make daemon return default pixeldepth
 
@@ -142,7 +143,6 @@ enum VCEncColorConversionType {
 #define V4L2_COLORSPACE_GENERIC_FILM  (V4L2_COLORSPACE_DCI_P3+1)
 #define V4L2_COLORSPACE_ST428			(V4L2_COLORSPACE_DCI_P3+2)
 
-#define V4L2_XFER_FUNC_LINEAR			(V4L2_XFER_FUNC_SMPTE2084+1)
 #define V4L2_XFER_FUNC_GAMMA22		(V4L2_XFER_FUNC_SMPTE2084+2)
 #define V4L2_XFER_FUNC_GAMMA28		(V4L2_XFER_FUNC_SMPTE2084+3)
 #define V4L2_XFER_FUNC_HLG				(V4L2_XFER_FUNC_SMPTE2084+4)
@@ -151,6 +151,8 @@ enum VCEncColorConversionType {
 #define V4L2_XFER_FUNC_ST428			(V4L2_XFER_FUNC_SMPTE2084+7)
 
 #define V4L2_YCBCR_ENC_BT470_6M		(V4L2_YCBCR_ENC_SMPTE240M+1)
+
+#define VSI_EXTRA_CAPTURE_BUFFER_COUNT		2
 
 /*V4L2 status*/
 enum CTX_STATUS {
@@ -168,19 +170,15 @@ enum CTX_STATUS {
 	DEC_STATUS_ENDSTREAM,
 };
 
-struct vsi_v4l2_mem_info_internal {
-	ulong size;
-	dma_addr_t  busaddr;
-	void *vaddr;
-	struct page *pageaddr;
-};
-
 struct vsi_video_fmt {
 	char *name;
 	u32 fourcc;	//V4L2 video format defines
 	s32 enc_fmt;	//our own enc video format defines
 	s32 dec_fmt;	//our own dec video format defines
 	u32 flag;
+	u32 num_planes;
+	u32 comp_planes;
+	u32 mask;
 };
 
 struct vsi_v4l2_mediacfg {
@@ -298,13 +296,15 @@ enum {
 	BUF_FLAG_QUEUED = 0,		/*buf queued from app*/
 	BUF_FLAG_DONE,			/*buf returned from daemon*/
 	BUF_FLAG_CROPCHANGE,		/*crop area update not sent to app but buffed */
+	BUF_FLAG_TIMESTAMP_INVALID,
 };
 
 struct vsi_v4l2_ctx {
 	struct v4l2_fh fh;
 	struct vsi_v4l2_device *dev;
-	ulong ctxid;
+	u64 ctxid;
 	struct mutex ctxlock;
+	atomic_t refcnt;
 
 	s32 status;		/*hold current status*/
 	s32 error;
@@ -343,7 +343,12 @@ struct vsi_v4l2_ctx {
 
 	u32 reschange_cnt;
 	bool reschanged_need_notify;
+	bool reschange_notified;
 	bool need_capture_on;
+	bool need_output_on;
+
+	u32 out_sequence;
+	u32 cap_sequence;
 };
 
 int vsi_v4l2_release(struct file *filp);
@@ -382,13 +387,14 @@ int vsi_v4l2_daemonalive(void);
 
 void vsi_dec_update_reso(struct vsi_v4l2_ctx *ctx);
 int vsi_dec_capture_on(struct vsi_v4l2_ctx *ctx);
+int vsi_dec_output_on(struct vsi_v4l2_ctx *ctx);
 void vsi_dec_updatevui(struct v4l2_daemon_dec_info *src, struct v4l2_daemon_dec_info *dst);
 void vsi_dec_getvui(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt);
 void vsi_enum_encfsize(struct v4l2_frmsizeenum *f, u32 pixel_format);
 int vsiv4l2_enc_getalign(u32 srcfmt, u32 dstfmt, int width);
 void vsiv4l2_initcfg(struct vsi_v4l2_ctx *ctx);
 int vsi_get_Level(struct vsi_v4l2_ctx *ctx, int mediatype, int dir, int level);
-int vsiv4l2_verifyfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt);
+int vsiv4l2_verifyfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt, int try_only);
 int vsiv4l2_setfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt);
 int vsiv4l2_getfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt);
 void vsi_v4l2_update_decfmt(struct vsi_v4l2_ctx *ctx);
@@ -402,6 +408,7 @@ int vsiv4l2_buffer_config(
 struct vsi_video_fmt *vsi_find_format(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f);
 struct vsi_video_fmt *vsi_enum_dec_format(int idx, int braw, struct vsi_v4l2_ctx *ctx);
 struct vsi_video_fmt *vsi_enum_encformat(int idx, int braw);
+struct vsi_video_fmt *vsi_get_fmt_by_fourcc(u32 fourcc);
 int vsi_set_profile(struct vsi_v4l2_ctx *ctx, int type, int profile);
 int vsi_get_profile(struct vsi_v4l2_ctx *ctx, int type);
 void vsiv4l2_set_hwinfo(struct vsi_v4l2_dev_info *hwinfo);

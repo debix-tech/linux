@@ -179,9 +179,10 @@ static int vboxsf_dir_iterate(struct file *dir, struct dir_context *ctx)
 	return 0;
 }
 
+WRAP_DIR_ITER(vboxsf_dir_iterate) // FIXME!
 const struct file_operations vboxsf_dir_fops = {
 	.open = vboxsf_dir_open,
-	.iterate = vboxsf_dir_iterate,
+	.iterate_shared = shared_vboxsf_dir_iterate,
 	.release = vboxsf_dir_release,
 	.read = generic_read_dir,
 	.llseek = generic_file_llseek,
@@ -225,7 +226,7 @@ static struct dentry *vboxsf_dir_lookup(struct inode *parent,
 	} else {
 		inode = vboxsf_new_inode(parent->i_sb);
 		if (!IS_ERR(inode))
-			vboxsf_init_inode(sbi, inode, &fsinfo);
+			vboxsf_init_inode(sbi, inode, &fsinfo, false);
 	}
 
 	return d_splice_alias(inode, dentry);
@@ -245,7 +246,7 @@ static int vboxsf_dir_instantiate(struct inode *parent, struct dentry *dentry,
 	sf_i = VBOXSF_I(inode);
 	/* The host may have given us different attr then requested */
 	sf_i->force_restat = 1;
-	vboxsf_init_inode(sbi, inode, info);
+	vboxsf_init_inode(sbi, inode, info, false);
 
 	d_instantiate(dentry, inode);
 
@@ -294,13 +295,15 @@ out:
 	return err;
 }
 
-static int vboxsf_dir_mkfile(struct inode *parent, struct dentry *dentry,
+static int vboxsf_dir_mkfile(struct mnt_idmap *idmap,
+			     struct inode *parent, struct dentry *dentry,
 			     umode_t mode, bool excl)
 {
 	return vboxsf_dir_create(parent, dentry, mode, false, excl, NULL);
 }
 
-static int vboxsf_dir_mkdir(struct inode *parent, struct dentry *dentry,
+static int vboxsf_dir_mkdir(struct mnt_idmap *idmap,
+			    struct inode *parent, struct dentry *dentry,
 			    umode_t mode)
 {
 	return vboxsf_dir_create(parent, dentry, mode, true, true, NULL);
@@ -385,7 +388,8 @@ static int vboxsf_dir_unlink(struct inode *parent, struct dentry *dentry)
 	return 0;
 }
 
-static int vboxsf_dir_rename(struct inode *old_parent,
+static int vboxsf_dir_rename(struct mnt_idmap *idmap,
+			     struct inode *old_parent,
 			     struct dentry *old_dentry,
 			     struct inode *new_parent,
 			     struct dentry *new_dentry,
@@ -427,7 +431,8 @@ err_put_old_path:
 	return err;
 }
 
-static int vboxsf_dir_symlink(struct inode *parent, struct dentry *dentry,
+static int vboxsf_dir_symlink(struct mnt_idmap *idmap,
+			      struct inode *parent, struct dentry *dentry,
 			      const char *symname)
 {
 	struct vboxsf_inode *sf_parent_i = VBOXSF_I(parent);

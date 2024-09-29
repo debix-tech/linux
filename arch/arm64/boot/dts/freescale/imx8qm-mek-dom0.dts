@@ -37,7 +37,7 @@
 		 */
 		#address-cells = <1>;
 		#size-cells = <0>;
-		doma {
+		doma@0 {
 			compatible = "xen,domu";
 			/*
 			 * The name entry in VM configuration file
@@ -310,17 +310,18 @@
 
 	/* Interrupt 33 is not used, use it virtual PL031 */
 	rtc0: rtc@23000000 {
+		reg = <0x0 0x23000000 0x0 0x10000>;
 		interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>;
 		xen,passthrough;
 	};
 
-	gpio4_dummy: gpio4_dummy@0{
+	gpio4_dummy: gpio4_dummy {
 		/* Passthrough gpio4 interrupt to DomU */
 		interrupts = <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>;
 		xen,passthrough;
 	};
 
-	gpio1_dummy: gpio1_dummy@0{
+	gpio1_dummy: gpio1_dummy {
 		/* Passthrough gpio1 interrupt to DomU */
 		interrupts = <GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
 		xen,passthrough;
@@ -331,42 +332,47 @@
 		#size-cells = <2>;
 		ranges;
 
-		decoder_boot@0x84000000 {
+		decoder_boot@84000000 {
 			no-map;
 			reg = <0 0x84000000 0 0x2000000>;
 			xen,passthrough;
 		};
-		encoder_boot@0x86000000 {
+		encoder1_boot@86000000 {
 			no-map;
-			reg = <0 0x86000000 0 0x400000>;
+			reg = <0 0x86000000 0 0x200000>;
 			xen,passthrough;
 		};
-		m4@0x88000000 {
+		encoder2_boot@86200000 {
+			no-map;
+			reg = <0 0x86200000 0 0x200000>;
+			xen,passthrough;
+		};
+		m4@88000000 {
 			no-map;
 			reg = <0 0x88000000 0 0x8000000>;
 			xen,passthrough;
 		};
-		decoder_rpc@0x92000000 {
+		decoder_rpc@92000000 {
 			no-map;
-			reg = <0 0x92000000 0 0x200000>;
+			reg = <0 0x92000000 0 0x100000>;
 			xen,passthrough;
 		};
-		encoder_rpc@0x92200000 {
+		dsp@92200000 {
 			no-map;
-			reg = <0 0x92200000 0 0x200000>;
+			reg = <0 0x92200000 0 0x2000000>;
 			xen,passthrough;
 		};
-		dsp@0x92400000 {
+		encoder1_rpc@94200000 {
 			no-map;
-			reg = <0 0x92400000 0 0x2000000>;
+			reg = <0 0x94200000 0 0x700000>;
 			xen,passthrough;
 		};
-		encoder_reserved@0x94400000 {
+		encoder2_rpc@94900000 {
 			no-map;
-			reg = <0 0x94400000 0 0x800000>;
+			reg = <0 0x94900000 0 0x700000>;
 			xen,passthrough;
 		};
-		ts_boot@0x95000000 {
+		ts_boot@95000000 {
 			no-map;
 			reg = <0 0x95000000 0 0x400000>;
 			xen,passthrough;
@@ -387,7 +393,7 @@
 
 &smmu {
 	mmu-masters = <&dpu1 0x13>, <&gpu_3d0 0x15>, <&usdhc1 0x12>, <&edma0 0x14>,
-		      <&vpu_decoder 0x7>, <&usbotg1 0x11>, <&usbotg3 0x4>,
+		      <&vpu_core0 0x7>, <&usbotg1 0x11>, <&usbotg3 0x4>,
 		      <&pciea 0x8>, <&edma214 0x10>, <&isi_0 0x5>;
 };
 
@@ -575,7 +581,11 @@
 	xen,passthrough;
 };
 
-&vpu_decoder {
+&vpu {
+	xen,passthrough;
+};
+
+&vpu_core0 {
 	xen,passthrough;
 	#stream-id-cells = <1>;
 	iommus = <&smmu>;
@@ -591,7 +601,11 @@
 			 <IMX_SC_R_VPU_PID7>;
 };
 
-&vpu_encoder {
+&vpu_core1 {
+	xen,passthrough;
+};
+
+&vpu_core2 {
 	xen,passthrough;
 };
 
@@ -626,14 +640,6 @@
 	xen,passthrough;
 };
 */
-
-&vpu_enc_core0 {
-	xen,passthrough;
-};
-
-&vpu_enc_core1 {
-	xen,passthrough;
-};
 
 &usbotg1 {
 	xen,passthrough;
@@ -718,10 +724,6 @@
        xen,passthrough;
 };
 
-&epdev_on {
-	status = "disabled";
-};
-
 &lpuart1 {
 	xen,passthrough;
 };
@@ -778,7 +780,7 @@
 			 <IMX_SC_R_MJPEG_ENC_S3>;
 };
 
-&sc_pwrkey {
+&scu_key {
 	status = "disabled";
 };
 

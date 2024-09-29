@@ -49,8 +49,8 @@
 		mu2 = &lsio_mu2;
 		dphy0 = &mipi0_dphy;
 		dphy1 = &mipi1_dphy;
-		mipi_dsi0 = &mipi0_dsi_host;
-		mipi_dsi1 = &mipi1_dsi_host;
+		mipi-dsi0 = &mipi0_dsi_host;
+		mipi-dsi1 = &mipi1_dsi_host;
 	};
 
 	cpus {
@@ -108,7 +108,7 @@
 		ranges;
 		passthrough;
 
-		decoder_boot: decoder_boot@0x84000000 {
+		decoder_boot: decoder_boot@84000000 {
 			no-map;
 			reg = <0 0x84000000 0 0x2000000>;
 		};
@@ -116,7 +116,7 @@
 			reg = <0 0x92400000 0 0x1000000>;
 			no-map;
 		};
-		dsp_reserved_heap: dsp_reserved_heap {
+		dsp_reserved_heap: dsp_reserved_heap@93400000 {
 			reg = <0 0x93400000 0 0xef0000>;
 			no-map;
 		};
@@ -133,23 +133,27 @@
 			reg = <0 0x94300000 0 0x100000>;
 			no-map;
 		};
-		encoder_boot: encoder_boot@0x86000000 {
+		encoder1_boot: encoder1_boot@86000000 {
 			no-map;
-			reg = <0 0x86000000 0 0x400000>;
+			reg = <0 0x86000000 0 0x200000>;
 		};
-		decoder_rpc: decoder_rpc@0x92000000 {
+		encoder2_boot: encoder2_boot@86200000 {
 			no-map;
-			reg = <0 0x92000000 0 0x200000>;
+			reg = <0 0x86200000 0 0x200000>;
 		};
-		encoder_rpc: encoder_rpc@0x92200000 {
+		decoder_rpc: decoder_rpc@92000000 {
 			no-map;
-			reg = <0 0x92200000 0 0x200000>;
+			reg = <0 0x92000000 0 0x100000>;
 		};
-		encoder_reserved: encoder_reserved@0x94400000 {
+		encoder1_rpc: encoder1_rpc@94200000 {
 			no-map;
-			reg = <0 0x94400000 0 0x800000>;
+			reg = <0 0x94200000 0 0x700000>;
 		};
-		ts_boot: ts_boot@0x95000000 {
+		encoder2_rpc: encoder2_rpc@94900000 {
+			no-map;
+			reg = <0 0x94900000 0 0x700000>;
+		};
+		ts_boot: ts_boot@95000000 {
 			no-map;
 			reg = <0 0x95000000 0 0x400000>;
 		};
@@ -255,7 +259,7 @@
 			clock-output-names = "xtal_24MHz";
 		};
 
-		scu {
+		system-controller {
 			compatible = "fsl,imx-scu";
 			mbox-names = "tx0", "tx1", "tx2", "tx3",
 				     "rx0", "rx1", "rx2", "rx3",
@@ -270,7 +274,7 @@
 				  &lsio_mu2 1 3
 				  &lsio_mu2 3 3>;
 
-			pd: imx8qx-pd {
+			pd: power-controller {
 				compatible = "fsl,imx8qm-scu-pd", "fsl,scu-pd";
 				#power-domain-cells = <1>;
 			};
@@ -278,8 +282,6 @@
 			clk: clock-controller {
 				compatible = "fsl,imx8qm-clk", "fsl,scu-clk";
 				#clock-cells = <2>;
-				clocks = <&xtal32k &xtal24m>;
-				clock-names = "xtal_32KHz", "xtal_24Mhz";
 			};
 
 			iomuxc: pinctrl {
@@ -302,7 +304,7 @@
 			pinctrl-2 = <&pinctrl_wifi>;
 		};
 
-		lvds_backlight0: lvds_backlight@0 {
+		lvds_backlight0: lvds_backlight-0 {
 			compatible = "pwm-backlight";
 			pwms = <&pwm_lvds0 0 100000 0>;
 
@@ -328,13 +330,13 @@
 	#include "imx8-ss-dma.dtsi"
 	#include "imx8-ss-img.dtsi"
 
-	sc_pwrkey: sc-powerkey {
-		compatible = "fsl,imx8-pwrkey";
+	scu_key: keys {
+		compatible = "fsl,imx8qm-sc-key", "fsl,imx-sc-key";
 		linux,keycode = <KEY_POWER>;
 		xen,passthrough;
 	};
 
-	reg_audio: fixedregulator@2 {
+	reg_audio: fixedregulator-audio {
 		compatible = "regulator-fixed";
 		regulator-name = "cs42888_supply";
 		regulator-min-microvolt = <3300000>;
@@ -343,7 +345,7 @@
 		xen,passthrough;
 	};
 
-	epdev_on: fixedregulator@100 {
+	epdev_on: fixedregulator-epdev {
 		compatible = "regulator-fixed";
 		pinctrl-names = "default", "sleep";
 		pinctrl-0 = <&pinctrl_wlreg_on>;
@@ -354,6 +356,17 @@
 		gpio = <&lsio_gpio1 13 0>;
 		enable-active-high;
 		xen,passthrough;
+	};
+
+	reg_pciea: regulator-pcie {
+		compatible = "regulator-fixed";
+		pinctrl-names = "default";
+		pinctrl-0 = <&pinctrl_pciea_reg>;
+		regulator-name = "mpcie_3v3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&lsio_gpio4 9 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
 	};
 
 	sound-cs42888 {
@@ -367,14 +380,14 @@
 		xen,passthrough;
 	};
 
-	xen_i2c0: xen_i2c@0 {
+	xen_i2c0: xen_i2c-0 {
 		compatible = "xen,i2c";
 		be-adapter = "5a800000.i2c";
 		status = "okay";
 		xen,passthrough;
 	};
 
-	xen_i2c1: xen_i2c@1 {
+	xen_i2c1: xen_i2c-1 {
 		compatible = "xen,i2c";
 		be-adapter = "3b230000.i2c";
 		xen,passthrough;
@@ -410,7 +423,7 @@
 			clocks = <&clk_dummy>,
 				 <&clk_dummy>,
 				 <&clk_dummy>;
-			clock-names = "dsp_clk1", "dsp_clk2", "dsp_clk3";
+			clock-names = "core", "ipg", "ocram";
 			firmware-name = "imx/dsp/hifi4.bin";
 			power-domains = <&pd IMX_SC_R_MU_13A>,
 					<&pd IMX_SC_R_MU_13B>,
@@ -460,7 +473,6 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 	ranges = <0x5a000000 0x0 0x5a000000 0x1000000>;
-
 
 	edma214: dma-controller@5a2e0000 {
 		compatible = "fsl,imx8qm-edma";
@@ -716,6 +728,11 @@
 		fsl,pins = <
 			IMX8QM_PCIE_CTRL0_WAKE_B_LSIO_GPIO4_IO28		0x04000021
 			IMX8QM_PCIE_CTRL0_PERST_B_LSIO_GPIO4_IO29		0x06000021
+		>;
+	};
+
+	pinctrl_pciea_reg: pcieareggrp {
+		fsl,pins = <
 			IMX8QM_USDHC2_RESET_B_LSIO_GPIO4_IO09			0x06000021
 		>;
 	};
@@ -876,7 +893,7 @@
 	isl29023@44 {
 		pinctrl-names = "default";
 		pinctrl-0 = <&pinctrl_isl29023>;
-		compatible = "fsl,isl29023";
+		compatible = "isil,isl29023";
 		reg = <0x44>;
 		rext = <499>;
 		interrupt-parent = <&lsio_gpio4>;
@@ -884,13 +901,13 @@
 	};
 
 	fxos8700@1e {
-		compatible = "fsl,fxos8700";
+		compatible = "nxp,fxos8700";
 		reg = <0x1e>;
 		interrupt-open-drain;
 	};
 
 	fxas2100x@20 {
-		compatible = "fsl,fxas2100x";
+		compatible = "nxp,fxas21002c";
 		reg = <0x20>;
 		interrupt-open-drain;
 	};
@@ -959,12 +976,26 @@
 };
 */
 
-&vpu_decoder {
-	compatible = "nxp,imx8qm-b0-vpudec";
-	boot-region = <&decoder_boot>;
-	rpc-region = <&decoder_rpc>;
-	reg-csr = <0x2d080000>;
-	core_type = <2>;
+&vpu {
+	compatible = "nxp,imx8qm-vpu";
+	status = "okay";
+};
+
+&vpu_core0 {
+	reg = <0x2d080000 0x10000>;
+	memory-region = <&decoder_boot>, <&decoder_rpc>;
+	status = "okay";
+};
+
+&vpu_core1 {
+	reg = <0x2d090000 0x10000>;
+	memory-region = <&encoder1_boot>, <&encoder1_rpc>;
+	status = "okay";
+};
+
+&vpu_core2 {
+	reg = <0x2d0a0000 0x10000>;
+	memory-region = <&encoder2_boot>, <&encoder2_rpc>;
 	status = "okay";
 };
 
@@ -976,49 +1007,6 @@
 	status = "okay";
 };
 */
-
-&vpu_encoder {
-	compatible = "nxp,imx8qm-b0-vpuenc";
-	boot-region = <&encoder_boot>;
-	rpc-region = <&encoder_rpc>;
-	reserved-region = <&encoder_reserved>;
-	reg-rpc-system = <0x40000000>;
-	resolution-max = <1920 1920>;
-	power-domains = <&pd IMX_SC_R_VPU_ENC_0>, <&pd IMX_SC_R_VPU_ENC_1>,
-			<&pd IMX_SC_R_VPU>;
-	power-domain-names = "vpuenc1", "vpuenc2", "vpu";
-	mbox-names = "enc1_tx0", "enc1_tx1", "enc1_rx",
-		     "enc2_tx0", "enc2_tx1", "enc2_rx";
-	mboxes = <&mu1_m0 0 0
-		  &mu1_m0 0 1
-		  &mu1_m0 1 0
-		  &mu2_m0 0 0
-		  &mu2_m0 0 1
-		  &mu2_m0 1 0>;
-	status = "okay";
-
-	vpu_enc_core0: core0@1020000 {
-		compatible = "fsl,imx8-mu1-vpu-m0";
-		reg = <0x1020000 0x20000>;
-		reg-csr = <0x1090000 0x10000>;
-		interrupts = <GIC_SPI 473 IRQ_TYPE_LEVEL_HIGH>;
-		fsl,vpu_ap_mu_id = <17>;
-		fw-buf-size = <0x200000>;
-		rpc-buf-size = <0x80000>;
-		print-buf-size = <0x80000>;
-	};
-
-	vpu_enc_core1: core1@1040000 {
-		compatible = "fsl,imx8-mu2-vpu-m0";
-		reg = <0x1040000 0x20000>;
-		reg-csr = <0x10A0000 0x10000>;
-		interrupts = <GIC_SPI 474 IRQ_TYPE_LEVEL_HIGH>;
-		fsl,vpu_ap_mu_id = <18>;
-		fw-buf-size = <0x200000>;
-		rpc-buf-size = <0x80000>;
-		print-buf-size = <0x80000>;
-	};
-};
 
 &lsio_gpio4 {
 	/delete-property/ power-domains;
@@ -1158,9 +1146,9 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_pciea>;
 	reset-gpio = <&lsio_gpio4 29 GPIO_ACTIVE_LOW>;
-	disable-gpio = <&lsio_gpio4 9 GPIO_ACTIVE_LOW>;
 	ext_osc = <1>;
 	epdev_on-supply = <&epdev_on>;
+	vpcie-supply = <&reg_pciea>;
 	status = "okay";
 };
 
@@ -1213,9 +1201,6 @@
 	status = "okay";
 
 	adv_bridge0: adv7535@3d {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		compatible = "adi,adv7535";
 		reg = <0x3d>;
 		adi,addr-cec = <0x3b>;
@@ -1225,8 +1210,7 @@
 		interrupts = <19 IRQ_TYPE_LEVEL_LOW>;
 		status = "okay";
 
-		port@0 {
-			reg = <0>;
+		port {
 			adv7535_0_in: endpoint {
 				remote-endpoint = <&mipi0_adv_out>;
 			};
@@ -1260,9 +1244,6 @@
 	status = "okay";
 
 	adv_bridge1: adv7535@3d {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		compatible = "adi,adv7535";
 		reg = <0x3d>;
 		adi,addr-cec = <0x3b>;
@@ -1272,8 +1253,7 @@
 		interrupts = <23 IRQ_TYPE_LEVEL_LOW>;
 		status = "okay";
 
-		port@0 {
-			reg = <0>;
+		port {
 			adv7535_1_in: endpoint {
 				remote-endpoint = <&mipi1_adv_out>;
 			};
@@ -1375,14 +1355,11 @@
 };
 
 &mipi_csi_0 {
-	#address-cells = <1>;
-	#size-cells = <0>;
 	virtual-channel;
 	status = "okay";
 
 	/* Camera 0  MIPI CSI-2 (CSIS0) */
-	port@0 {
-		reg = <0>;
+	port {
 		mipi_csi0_ep: endpoint {
 			remote-endpoint = <&max9286_0_ep>;
 			data-lanes = <1 2 3 4>;

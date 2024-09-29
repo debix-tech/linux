@@ -4,6 +4,7 @@
  * Copyright 2017-2018 NXP.
  */
 
+#include <linux/clk/imx.h>
 #include <linux/busfreq-imx.h>
 #include <linux/cpuidle.h>
 #include <linux/module.h>
@@ -71,8 +72,8 @@ static void (*imx6sl_wfi_in_iram_fn)(void __iomem *iram_vbase,
 	 (1 << PSCI_0_2_POWER_STATE_AFFL_SHIFT) | \
 	 (PSCI_POWER_STATE_TYPE_POWER_DOWN << PSCI_0_2_POWER_STATE_TYPE_SHIFT))
 
-static int imx6sl_enter_wait(struct cpuidle_device *dev,
-			    struct cpuidle_driver *drv, int index)
+static __cpuidle int imx6sl_enter_wait(struct cpuidle_device *dev,
+				       struct cpuidle_driver *drv, int index)
 {
 	int mode = get_bus_freq_mode();
 
@@ -207,7 +208,7 @@ static int ldo2p5_dummy_probe(struct platform_device *pdev)
 	config.init_data = &ldo2p5_dummy_initdata;
 	config.of_node = pdev->dev.of_node;
 
-	ldo2p5_dummy_regulator_rdev = regulator_register(&ldo2p5_dummy_desc, &config);
+	ldo2p5_dummy_regulator_rdev = regulator_register(&pdev->dev, &ldo2p5_dummy_desc, &config);
 	if (IS_ERR(ldo2p5_dummy_regulator_rdev)) {
 		ret = PTR_ERR(ldo2p5_dummy_regulator_rdev);
 		dev_err(&pdev->dev, "Failed to register dummy ldo2p5 regulator: %d\n", ret);

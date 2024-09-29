@@ -15,10 +15,12 @@ adis_lib-$(CONFIG_IIO_ADIS_LIB_BUFFER) += adis_buffer.o
 obj-$(CONFIG_IIO_ADIS_LIB) += adis_lib.o
 
 obj-y += bmi160/
+obj-y += bno055/
 
 obj-$(CONFIG_FXOS8700) += fxos8700_core.o
 obj-$(CONFIG_FXOS8700_I2C) += fxos8700_i2c.o
 obj-$(CONFIG_FXOS8700_SPI) += fxos8700_spi.o
+obj-$(CONFIG_RPMSG_IIO_PEDOMETER) += rpmsg_iio_pedometer.o
 
 obj-y += inv_icm42600/
 obj-y += inv_mpu6050/
@@ -26,3 +28,4 @@ obj-y += inv_mpu6050/
 obj-$(CONFIG_KMX61) += kmx61.o
 
 obj-y += st_lsm6dsx/
+obj-y += st_lsm9ds0/

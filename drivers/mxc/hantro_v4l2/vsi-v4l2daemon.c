@@ -54,7 +54,7 @@ module_param(invoke_vsidaemon, bool, 0644);
 static int loglevel;
 module_param(loglevel, int, 0644);
 
-static ulong g_seqid;
+static u64 g_seqid;
 static struct idr *cmdarray, *retarray;
 static atomic_t daemon_fn = ATOMIC_INIT(0);
 
@@ -136,7 +136,7 @@ int vsi_clear_daemonmsg(int instid)
 		if (obj) {
 			msg = (struct vsi_v4l2_msg *)obj;
 			if (msg->inst_id == instid) {
-				v4l2_klog(LOGLVL_WARNING, "clear unused cmd %x:%ld:%d", instid, msg->seq_id, msg->cmd_id);
+				v4l2_klog(LOGLVL_WARNING, "clear unused cmd %x:%lld:%d", instid, msg->seq_id, msg->cmd_id);
 				idr_remove(cmdarray, id);
 				kfree(obj);
 			}
@@ -149,7 +149,7 @@ int vsi_clear_daemonmsg(int instid)
 		if (obj) {
 			msg = (struct vsi_v4l2_msg *)obj;
 			if (msg->inst_id == instid) {
-				v4l2_klog(LOGLVL_WARNING, "clear unused msg %x:%ld:%d", instid, msg->seq_id, msg->cmd_id);
+				v4l2_klog(LOGLVL_WARNING, "clear unused msg %x:%lld:%d", instid, msg->seq_id, msg->cmd_id);
 				idr_remove(retarray, id);
 				kfree(obj);
 			}
@@ -172,7 +172,7 @@ static int getMsg(struct file *fh, char __user *buf, size_t size)
 		if (obj) {
 			if (copy_to_user((void __user *)buf + offset, (void *)obj, sizeof(struct vsi_v4l2_msg_hdr) + obj->size) != 0)
 				break;
-			v4l2_klog(LOGLVL_VERBOSE, "%lx send msg  id = %d", obj->inst_id, obj->cmd_id);
+			v4l2_klog(LOGLVL_VERBOSE, "%llx send msg  id = %d", obj->inst_id, obj->cmd_id);
 			offset += sizeof(struct vsi_v4l2_msg_hdr) + obj->size;
 			accubytes += sizeof(struct vsi_v4l2_msg_hdr) + obj->size;
 			idr_remove(cmdarray, id);
@@ -198,7 +198,7 @@ static int getRet(unsigned long seqid, int *error, s32 *retflag)
 	idr_for_each_entry(retarray, obj, id) {
 		if (obj) {
 			if (obj->seq_id == seqid) {
-				v4l2_klog(LOGLVL_VERBOSE, "%lx get ack %d", obj->inst_id, obj->cmd_id);
+				v4l2_klog(LOGLVL_VERBOSE, "%llx get ack %d", obj->inst_id, obj->cmd_id);
 				*error = obj->error;
 				*retflag = obj->param_type;
 				idr_remove(retarray, id);
@@ -277,8 +277,8 @@ static long vsi_v4l2_daemon_ioctl(
 	int error = 0;
 	struct vsi_v4l2_dev_info hwinfo;
 
-	switch (cmd) {
-	case VSI_IOCTL_CMD_INITDEV:
+	switch (_IOC_NR(cmd)) {
+	case _IOC_NR(VSI_IOCTL_CMD_INITDEV):
 		if (copy_from_user((void *)&hwinfo, (void __user *)arg, sizeof(hwinfo)) != 0) {
 			v4l2_klog(LOGLVL_ERROR, "%s fail to get data", __func__);
 			return -EINVAL;
@@ -321,7 +321,7 @@ static u32 format_bufinfo_enc(struct vsi_v4l2_ctx *ctx, struct vsi_v4l2_msg *pms
 {
 	u32 planeno, size;
 	struct v4l2_daemon_enc_buffers *encbufinfo;
-	dma_addr_t  busaddr[4];
+	dma_addr_t  busaddr[4] = { 0 };
 
 	vsi_convertROI(ctx);
 	vsi_convertIPCM(ctx);
@@ -346,19 +346,26 @@ static u32 format_bufinfo_enc(struct vsi_v4l2_ctx *ctx, struct vsi_v4l2_msg *pms
 	planeno = getbusaddr(ctx, busaddr, buf);
 	encbufinfo = &pmsg->params.enc_params.io_buffer;
 	if (binputqueue(buf->type)) {
+		struct vsi_video_fmt *fmt = vsi_get_fmt_by_fourcc(ctx->mediacfg.infmt_fourcc);
+
 		encbufinfo->busLumaOrig = encbufinfo->busLuma = busaddr[0] + buf->planes[0].data_offset;
 		encbufinfo->busLumaSize = ctx->mediacfg.sizeimagesrc[0];
 		encbufinfo->busChromaUOrig = encbufinfo->busChromaU = 0;
 		encbufinfo->busChromaUSize = 0;
 		encbufinfo->busChromaVOrig = encbufinfo->busChromaV = 0;
 		encbufinfo->busChromaVSize = 0;
-		if (planeno == 2) {
-			encbufinfo->busChromaUOrig = encbufinfo->busChromaU = busaddr[1] + buf->planes[1].data_offset;
+		if (fmt && fmt->comp_planes > 1) {
+			if (planeno > 1)
+				encbufinfo->busChromaUOrig = encbufinfo->busChromaU = busaddr[1] + buf->planes[1].data_offset;
+			else
+				encbufinfo->busChromaUOrig = encbufinfo->busLuma + ctx->mediacfg.sizeimagesrc[0];
 			encbufinfo->busChromaUSize = ctx->mediacfg.sizeimagesrc[1];
-		} else if (planeno == 3) {
-			encbufinfo->busChromaUOrig = encbufinfo->busChromaU = busaddr[1] + buf->planes[1].data_offset;
-			encbufinfo->busChromaUSize = ctx->mediacfg.sizeimagesrc[1];
-			encbufinfo->busChromaVOrig = encbufinfo->busChromaV = busaddr[2] + buf->planes[2].data_offset;
+		}
+		if (fmt && fmt->comp_planes > 2) {
+			if (planeno > 2)
+				encbufinfo->busChromaVOrig = encbufinfo->busChromaV = busaddr[2] + buf->planes[2].data_offset;
+			else
+				encbufinfo->busChromaVOrig = encbufinfo->busChromaUOrig + ctx->mediacfg.sizeimagesrc[1];
 			encbufinfo->busChromaVSize = ctx->mediacfg.sizeimagesrc[2];
 		}
 		encbufinfo->busOutBuf = 0;
@@ -386,11 +393,15 @@ static u32 format_bufinfo_enc(struct vsi_v4l2_ctx *ctx, struct vsi_v4l2_msg *pms
 static void format_bufinfo_dec(struct vsi_v4l2_ctx *ctx, struct vsi_v4l2_msg *pmsg, struct vb2_buffer *buf)
 {
 	struct v4l2_daemon_dec_buffers *decbufinfo;
-	dma_addr_t  busaddr[4];
+	dma_addr_t  busaddr[4] = { 0 };
 
 	memcpy((void *)&pmsg->params.dec_params.io_buffer, (void *)&ctx->mediacfg.decparams.io_buffer, sizeof(struct v4l2_daemon_dec_buffers));
-	if (binputqueue(buf->type))
-		pmsg->params.dec_params.dec_info.io_buffer.timestamp = buf->timestamp;
+	if (binputqueue(buf->type)) {
+		if (test_and_clear_bit(BUF_FLAG_TIMESTAMP_INVALID, &ctx->srcvbufflag[buf->index]))
+			pmsg->params.dec_params.dec_info.io_buffer.timestamp = -1;
+		else
+			pmsg->params.dec_params.dec_info.io_buffer.timestamp = buf->timestamp;
+	}
 	getbusaddr(ctx, busaddr, buf);
 	decbufinfo = &pmsg->params.dec_params.io_buffer;
 	if (!binputqueue(buf->type)) {
@@ -505,7 +516,7 @@ tail:
 	if (ctx) {
 		if (ret < 0) {
 			vsi_set_ctx_error(ctx, ret);
-			v4l2_klog(LOGLVL_ERROR, "%lx fail to communicate with daemon, error=%d, cmd=%d", ctx->ctxid, ret, id);
+			v4l2_klog(LOGLVL_ERROR, "%llx fail to communicate with daemon, error=%d, cmd=%d", ctx->ctxid, ret, id);
 		} else
 			set_bit(CTX_FLAG_DAEMONLIVE_BIT, &ctx->flag);
 	}
@@ -533,7 +544,7 @@ static int invoke_daemonapp(void)
 			return ret;
 
 		ret = wait_event_interruptible_timeout(instance_queue,
-				atomic_read(&daemon_fn) > 0, msecs_to_jiffies(1000));
+				atomic_read(&daemon_fn) > 0, msecs_to_jiffies(10000));
 		if (ret == -ERESTARTSYS || ret == 0)
 			ret = -ERESTARTSYS;
 
@@ -656,7 +667,7 @@ static ssize_t v4l2_msg_write(struct file *fh, const char __user *buf, size_t si
 		return size;
 	if (size < sizeof(struct vsi_v4l2_msg_hdr))
 		return size;
-	if (!access_ok((void *) buf, size)) {
+	if (!access_ok((void __user *) buf, size)) {
 		v4l2_klog(LOGLVL_ERROR, "input data unaccessable");
 		return size;
 	}
@@ -678,11 +689,11 @@ static ssize_t v4l2_msg_write(struct file *fh, const char __user *buf, size_t si
 			goto error;
 		}
 	}
-	v4l2_klog(LOGLVL_VERBOSE, "get msg  id = %d, flag = %x, seqid = %lx, err = %d",
+	v4l2_klog(LOGLVL_VERBOSE, "get msg  id = %d, flag = %x, seqid = %llx, err = %d",
 		pmsg->cmd_id, pmsg->param_type, pmsg->seq_id, pmsg->error);
 	accubytes += sizeof(struct vsi_v4l2_msg_hdr) + msgsize;
 
-	if (pmsg->seq_id == NO_RESPONSE_SEQID) {
+	if (pmsg->seq_id == (u64)NO_RESPONSE_SEQID) {
 		vsi_handle_daemonmsg(pmsg);
 		kfree(pmsg);
 		return size;
@@ -760,6 +771,9 @@ static const struct file_operations daemon_fops = {
 	.open = v4l2_daemon_open,
 	.release = v4l2_daemon_release,
 	.unlocked_ioctl = vsi_v4l2_daemon_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = compat_ptr_ioctl,
+#endif
 	.read = v4l2_msg_read,
 	.write = v4l2_msg_write,
 	.mmap = vsi_v4l2_mmap,

@@ -3,7 +3,7 @@
  * Device Tree Include file for Freescale Layerscape-1043A family SoC.
  *
  * Copyright 2014-2015 Freescale Semiconductor, Inc.
- * Copyright 2018-2019 NXP
+ * Copyright 2018-2021 NXP
  *
  * Mingkai Hu <Mingkai.hu@freescale.com>
  */
@@ -78,7 +78,7 @@
 	};
 
 	fpga: board-control@2,0 {
-		compatible = "fsl,ls1043aqds-fpga", "fsl,fpga-qixis", "simple-bus";
+		compatible = "fsl,ls1043aqds-fpga", "fsl,fpga-qixis", "simple-mfd";
 		reg = <0x2 0x0 0x0000100>;
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -89,7 +89,7 @@
 &i2c0 {
 	status = "okay";
 
-	pca9547@77 {
+	i2c-mux@77 {
 		compatible = "nxp,pca9547";
 		reg = <0x77>;
 		#address-cells = <1>;
@@ -211,7 +211,7 @@
 };
 
 &fpga {
-	mdio-mux-emi1 {
+	mdio-mux-emi1@54 {
 		compatible = "mdio-mux-mmioreg", "mdio-mux";
 		mdio-parent-bus = <&mdio0>;
 		#address-cells = <1>;
@@ -227,24 +227,22 @@
 
 			rgmii_phy1: ethernet-phy@1 { /* MAC3 */
 				reg = <0x1>;
-				rtl821x,aldps-disable;
 			};
 		};
 
 		/* On-board RGMII2 PHY */
-		ls1043mdio1: mdio@1 {
+		ls1043mdio1: mdio@20 {
 			reg = <0x20>;
 			#address-cells = <1>;
 			#size-cells = <0>;
 
 			rgmii_phy2: ethernet-phy@2 { /* MAC4 */
 				reg = <0x2>;
-				rtl821x,aldps-disable;
 			};
 		};
 
 		/* Slot 1 */
-		ls1043mdio_s1: mdio@2 {
+		ls1043mdio_s1: mdio@40 {
 			reg = <0x40>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -253,12 +251,15 @@
 			qsgmii_phy_s1_p1: ethernet-phy@4 {
 				reg = <0x4>;
 			};
+
 			qsgmii_phy_s1_p2: ethernet-phy@5 {
 				reg = <0x5>;
 			};
+
 			qsgmii_phy_s1_p3: ethernet-phy@6 {
 				reg = <0x6>;
 			};
+
 			qsgmii_phy_s1_p4: ethernet-phy@7 {
 				reg = <0x7>;
 			};
@@ -269,7 +270,7 @@
 		};
 
 		/* Slot 2 */
-		ls1043mdio_s2: mdio@3 {
+		ls1043mdio_s2: mdio@60 {
 			reg = <0x60>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -278,12 +279,15 @@
 			qsgmii_phy_s2_p1: ethernet-phy@8 {
 				reg = <0x8>;
 			};
+
 			qsgmii_phy_s2_p2: ethernet-phy@9 {
 				reg = <0x9>;
 			};
+
 			qsgmii_phy_s2_p3: ethernet-phy@a {
 				reg = <0xa>;
 			};
+
 			qsgmii_phy_s2_p4: ethernet-phy@b {
 				reg = <0xb>;
 			};
@@ -294,7 +298,7 @@
 		};
 
 		/* Slot 3 */
-		ls1043mdio_s3: mdio@4 {
+		ls1043mdio_s3: mdio@80 {
 			reg = <0x80>;
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -306,7 +310,7 @@
 		};
 
 		/* Slot 4 */
-		ls1043mdio_s4: mdio@5 {
+		ls1043mdio_s4: mdio@a0 {
 			reg = <0xa0>;
 			#address-cells = <1>;
 			#size-cells = <0>;

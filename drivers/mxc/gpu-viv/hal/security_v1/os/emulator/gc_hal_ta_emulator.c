@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2023 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2023 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -60,7 +60,7 @@
 
 #define _GC_OBJ_ZONE    gcvZONE_OS
 
-gcTA globalTA[16] = { gcvNULL, gcvNULL, gcvNULL, gcvNULL,gcvNULL, gcvNULL, gcvNULL, gcvNULL };
+gcTA globalTA[gcvCORE_COUNT];
 gctaOS globalTAos;
 
 struct _gctaOS {
@@ -72,7 +72,7 @@ struct _gctaOS {
 gceSTATUS HALDECL
 TAEmulator(
     gceCORE Core,
-    void * Interface
+    void *Interface
     )
 {
     gckOS_AcquireMutex(globalTAos->os, globalTAos->dispatchMutex, gcvINFINITE);
@@ -98,6 +98,8 @@ gctaOS_ConstructOS(
 
     os = (gctaOS)pointer;
     os->os = Os;
+
+    gcmkONERROR(gckOS_ZeroMemory(globalTA, gcmSIZEOF(gcTA) * gcvCORE_COUNT));
 
     gcmkONERROR(gckOS_CreateMutex(Os, &os->dispatchMutex));
 
@@ -136,7 +138,7 @@ gctaOS_AllocateSecurityMemory(
 {
     gceSTATUS status;
 
-    gcmkONERROR(gckOS_AllocateNonPagedMemory(Os->os, gcvFALSE, gcvALLOC_FLAG_CONTIGUOUS, Bytes, (gctPHYS_ADDR *)Physical, Logical));
+    gcmkONERROR(gckOS_AllocateNonPagedMemory(Os->os, gcvNULL, gcvFALSE, gcvALLOC_FLAG_CONTIGUOUS, Bytes, (gctPHYS_ADDR *)Physical, Logical));
 
     return gcvSTATUS_OK;
 
@@ -166,7 +168,7 @@ gctaOS_AllocateNonSecurityMemory(
 {
     gceSTATUS status;
 
-    gcmkONERROR(gckOS_AllocateNonPagedMemory(Os->os, gcvFALSE, gcvALLOC_FLAG_CONTIGUOUS, Bytes, (gctPHYS_ADDR *)Physical, Logical));
+    gcmkONERROR(gckOS_AllocateNonPagedMemory(Os->os, gcvNULL, gcvFALSE, gcvALLOC_FLAG_CONTIGUOUS, Bytes, (gctPHYS_ADDR *)Physical, Logical));
 
     return gcvSTATUS_OK;
 
@@ -207,7 +209,7 @@ gceSTATUS
 gctaOS_GetPhysicalAddress(
     IN gctaOS Os,
     IN gctPOINTER Logical,
-    OUT gctPHYS_ADDR_T * Physical
+    OUT gctPHYS_ADDR_T *Physical
     )
 {
     gctPHYS_ADDR_T physical;
@@ -231,7 +233,7 @@ gceSTATUS gctaOS_WriteRegister(
     IN gctUINT32 Data
     )
 {
-    return gckOS_WriteRegisterEx(Os->os, Core, Address, Data);
+    return gcvSTATUS_OK;
 }
 
 gceSTATUS gctaOS_ReadRegister(
@@ -240,7 +242,7 @@ gceSTATUS gctaOS_ReadRegister(
     IN gctUINT32 *Data
     )
 {
-    return gckOS_ReadRegisterEx(Os->os, Core, Address, Data);
+    return gcvSTATUS_OK;
 }
 
 gceSTATUS
@@ -318,15 +320,7 @@ gctaOS_SetGPUPower(
     IN gctBOOL Power
     )
 {
-    return gckOS_SetGPUPower(Os->os, Core, Power, Clock);
+    return gcvSTATUS_OK;
 }
 
-gceSTATUS
-gctaOS_QueryOption(
-    IN gctaOS Os,
-    IN gctCONST_STRING Option,
-    OUT gctUINT64 * Value
-    )
-{
-    return gckOS_QueryOption(Os->os, Option, Value);
-}
+

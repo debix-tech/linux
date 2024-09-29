@@ -11,7 +11,7 @@
 
 #define BRCMF_FW_DEFAULT_PATH		"brcm/"
 
-#define CY_FW_DEFAULT_PATH		"cypress/"
+#define BRCMF_FW_MAX_BOARD_TYPES	8
 
 /**
  * struct brcmf_firmware_mapping - Used to map chipid/revmask to firmware
@@ -34,10 +34,12 @@ static const char BRCM_ ## fw_name ## _FIRMWARE_BASENAME[] = \
 	BRCMF_FW_DEFAULT_PATH fw_base; \
 MODULE_FIRMWARE(BRCMF_FW_DEFAULT_PATH fw_base ".bin")
 
-#define CY_FW_DEF(fw_name, fw_base) \
+/* Firmware and Country Local Matrix files */
+#define BRCMF_FW_CLM_DEF(fw_name, fw_base) \
 static const char BRCM_ ## fw_name ## _FIRMWARE_BASENAME[] = \
-	CY_FW_DEFAULT_PATH fw_base; \
-MODULE_FIRMWARE(CY_FW_DEFAULT_PATH fw_base ".bin")
+	BRCMF_FW_DEFAULT_PATH fw_base; \
+MODULE_FIRMWARE(BRCMF_FW_DEFAULT_PATH fw_base ".bin"); \
+MODULE_FIRMWARE(BRCMF_FW_DEFAULT_PATH fw_base ".clm_blob")
 
 #define BRCMF_FW_ENTRY(chipid, mask, name) \
 	{ chipid, mask, BRCM_ ## name ## _FIRMWARE_BASENAME }
@@ -66,7 +68,7 @@ struct brcmf_fw_request {
 	u16 domain_nr;
 	u16 bus_nr;
 	u32 n_items;
-	const char *board_type;
+	const char *board_types[BRCMF_FW_MAX_BOARD_TYPES];
 	struct brcmf_fw_item items[];
 };
 

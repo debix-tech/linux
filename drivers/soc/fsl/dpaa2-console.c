@@ -3,15 +3,16 @@
  * Freescale DPAA2 Platforms Console Driver
  *
  * Copyright 2015-2016 Freescale Semiconductor Inc.
- * Copyright 2021 NXP
+ * Copyright 2018 NXP
  */
 
 #define pr_fmt(fmt) "dpaa2-console: " fmt
 
 #include <linux/module.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/miscdevice.h>
+#include <linux/platform_device.h>
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/fs.h>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2019 NXP
+ * Copyright 2019-2021 NXP
  *	Dong Aisheng <aisheng.dong@nxp.com>
  */
 
@@ -9,7 +9,7 @@
 #include "clk-scu.h"
 
 /* Keep sorted in the ascending order */
-static u32 imx8qxp_clk_scu_rsrc_table[] = {
+static const u32 imx8qxp_clk_scu_rsrc_table[] = {
 	IMX_SC_R_DC_0_VIDEO0,
 	IMX_SC_R_DC_0_VIDEO1,
 	IMX_SC_R_DC_0,

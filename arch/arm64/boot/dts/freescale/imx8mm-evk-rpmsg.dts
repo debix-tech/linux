@@ -13,7 +13,7 @@
 		#size-cells = <2>;
 		ranges;
 
-		m4_reserved: m4@0x80000000 {
+		m4_reserved: m4@80000000 {
 			no-map;
 			reg = <0 0x80000000 0 0x1000000>;
 		};
@@ -28,7 +28,7 @@
 			no-map;
 		};
 
-		rsc_table: rsc_table@b80ff000 {
+		rsc_table: rsc-table@b80ff000 {
 			reg = <0 0xb80ff000 0 0x1000>;
 			no-map;
 		};
@@ -83,6 +83,7 @@
 			  &mu 3 1>;
 		memory-region = <&vdevbuffer>, <&vdev0vring0>, <&vdev0vring1>, <&rsc_table>;
 		syscon = <&src>;
+		fsl,startup-delay-ms = <500>;
 	};
 };
 
@@ -124,6 +125,10 @@
 };
 
 &sai2 {
+	status = "disabled";
+};
+
+&sai6 {
 	status = "disabled";
 };
 

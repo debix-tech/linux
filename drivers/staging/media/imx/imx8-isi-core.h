@@ -39,9 +39,9 @@
 
 #include "imx8-common.h"
 
-#define MXC_ISI_DRIVER_NAME	"mxc-isi"
-#define MXC_ISI_CAPTURE		"mxc-isi-cap"
-#define MXC_ISI_M2M		"mxc-isi-m2m"
+#define MXC_ISI_DRIVER_NAME	"mxc-isi_v1"
+#define MXC_ISI_CAPTURE		"mxc-isi-cap_v1"
+#define MXC_ISI_M2M		"mxc-isi-m2m_v1"
 #define MXC_MAX_PLANES		3
 
 struct mxc_isi_dev;
@@ -132,6 +132,7 @@ struct mxc_isi_fmt {
 	u8	depth[MXC_MAX_PLANES];
 	u16	mdataplanes;
 	u16	flags;
+	u16	align;
 };
 
 struct mxc_isi_ctrls {
@@ -142,18 +143,6 @@ struct mxc_isi_ctrls {
 	struct v4l2_ctrl *num_cap_buf;
 	struct v4l2_ctrl *num_out_buf;
 	bool ready;
-};
-
-/**
- * struct addr -  physical address set for DMA
- * @y:	 luminance plane physical address
- * @cb:	 Cb plane physical address
- * @cr:	 Cr plane physical address
- */
-struct frame_addr {
-	u32	y;
-	u32	cb;
-	u32	cr;
 };
 
 /**
@@ -192,7 +181,7 @@ struct mxc_isi_roi_alpha {
 struct mxc_isi_buffer {
 	struct vb2_v4l2_buffer  v4l2_buf;
 	struct list_head	list;
-	struct frame_addr	paddr;
+	dma_addr_t		dma_addrs[3];
 	enum mxc_isi_buf_id	id;
 	bool discard;
 };
@@ -215,6 +204,9 @@ struct mxc_isi_m2m_dev {
 	struct mutex lock;
 	spinlock_t   slock;
 
+	struct regmap *gpr;
+
+	u32 is_streaming[MXC_ISI_MAX_DEVS];
 	unsigned int aborting;
 	unsigned int frame_count;
 
@@ -225,6 +217,9 @@ struct mxc_isi_m2m_dev {
 
 	u32 req_cap_buf_num;
 	u32 req_out_buf_num;
+
+	u32 saved_axi_limit_isi_en;
+	u32 saved_axi_isi_thresh;
 
 	u8 id;
 	int refcnt;
@@ -331,6 +326,7 @@ struct mxc_isi_cap_dev {
 	u32 frame_count;
 	u32 id;
 	u32 is_streaming[MXC_ISI_MAX_DEVS];
+	bool runtime_suspend;
 	bool is_link_setup;
 
 	struct mutex lock;
@@ -398,6 +394,7 @@ struct mxc_isi_dev {
 
 	int interface[MAX_PORTS];
 	int id;
+	int irq;
 
 	unsigned int hflip:1;
 	unsigned int vflip:1;
@@ -453,5 +450,61 @@ static inline void bounds_adjust(struct mxc_isi_frame *f, struct v4l2_rect *r)
 		r->width = f->o_width - r->left;
 	if (r->top + r->height >= f->o_height)
 		r->height = f->o_height - r->top;
+}
+
+static inline int disp_mix_sft_rstn(struct mxc_isi_dev *mxc_isi, bool enable)
+{
+	struct mxc_isi_plat_data const *pdata = mxc_isi->pdata;
+	int ret;
+
+	if (mxc_isi->no_dispmix)
+		return 0;
+
+	if (!pdata->rst_ops ||
+	    !pdata->rst_ops->assert ||
+	    !pdata->rst_ops->deassert)
+		return -EINVAL;
+
+	ret = enable ? pdata->rst_ops->assert(mxc_isi) :
+		       pdata->rst_ops->deassert(mxc_isi);
+	return ret;
+}
+
+static inline int disp_mix_clks_enable(struct mxc_isi_dev *mxc_isi, bool enable)
+{
+	struct mxc_isi_plat_data const *pdata = mxc_isi->pdata;
+	int ret;
+
+	if (mxc_isi->no_dispmix)
+		return 0;
+
+	if (!pdata->gclk_ops ||
+	    !pdata->gclk_ops->gclk_enable ||
+	    !pdata->gclk_ops->gclk_disable)
+		return -EINVAL;
+
+	ret = enable ? pdata->gclk_ops->gclk_enable(mxc_isi) :
+		       pdata->gclk_ops->gclk_disable(mxc_isi);
+	return ret;
+}
+
+static inline int mxc_isi_clk_enable(struct mxc_isi_dev *mxc_isi)
+{
+	const struct mxc_isi_dev_ops *ops = mxc_isi->pdata->ops;
+
+	if (!ops || !ops->clk_enable)
+		return -EINVAL;
+
+	return ops->clk_enable(mxc_isi);
+}
+
+static inline void mxc_isi_clk_disable(struct mxc_isi_dev *mxc_isi)
+{
+	const struct mxc_isi_dev_ops *ops = mxc_isi->pdata->ops;
+
+	if (!ops || !ops->clk_disable)
+		return;
+
+	ops->clk_disable(mxc_isi);
 }
 #endif /* __MXC_ISI_CORE_H__ */

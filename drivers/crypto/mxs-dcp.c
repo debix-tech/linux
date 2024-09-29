@@ -3,6 +3,7 @@
  * Freescale i.MX23/i.MX28 Data Co-Processor driver
  *
  * Copyright (C) 2013 Marek Vasut <marex@denx.de>
+ * Copyright 2022 NXP
  */
 
 #include <linux/dma-mapping.h>
@@ -15,13 +16,17 @@
 #include <linux/platform_device.h>
 #include <linux/stmp_device.h>
 #include <linux/clk.h>
+#include <linux/libfdt.h>
+#include <linux/of_fdt.h>
+#include <soc/fsl/dcp-blob.h>
 
 #ifdef CONFIG_PM_SLEEP
 #include <linux/freezer.h>
 #endif
 
 #include <crypto/aes.h>
-#include <crypto/sha.h>
+#include <crypto/sha1.h>
+#include <crypto/sha2.h>
 #include <crypto/internal/hash.h>
 #include <crypto/internal/skcipher.h>
 #include <crypto/scatterwalk.h>
@@ -161,6 +166,7 @@ static int dcp_vmi_irq_bak, dcp_irq_bak;
 #define MXS_DCP_CONTROL0_HASH_TERM		(1 << 13)
 #define MXS_DCP_CONTROL0_HASH_INIT		(1 << 12)
 #define MXS_DCP_CONTROL0_PAYLOAD_KEY		(1 << 11)
+#define MXS_DCP_CONTROL0_OTP_KEY		(1 << 10)
 #define MXS_DCP_CONTROL0_CIPHER_ENCRYPT		(1 << 8)
 #define MXS_DCP_CONTROL0_CIPHER_INIT		(1 << 9)
 #define MXS_DCP_CONTROL0_ENABLE_HASH		(1 << 6)
@@ -170,6 +176,8 @@ static int dcp_vmi_irq_bak, dcp_irq_bak;
 
 #define MXS_DCP_CONTROL1_HASH_SELECT_SHA256	(2 << 16)
 #define MXS_DCP_CONTROL1_HASH_SELECT_SHA1	(0 << 16)
+#define MXS_DCP_CONTROL1_AES_OTP_CRYPTO_KEY	(0xff << 8)
+#define MXS_DCP_CONTROL1_AES_OTP_UNIQUE_KEY	(0xfe << 8)
 #define MXS_DCP_CONTROL1_CIPHER_MODE_CBC	(1 << 4)
 #define MXS_DCP_CONTROL1_CIPHER_MODE_ECB	(0 << 4)
 #define MXS_DCP_CONTROL1_CIPHER_SELECT_AES128	(0 << 0)
@@ -230,7 +238,14 @@ static int mxs_dcp_run_aes(struct dcp_async_ctx *actx,
 	struct dcp *sdcp = global_sdcp;
 	struct dcp_dma_desc *desc = &sdcp->coh->desc[actx->chan];
 	struct dcp_aes_req_ctx *rctx = skcipher_request_ctx(req);
-	int ret;
+	int ret, len_crypto_hdl, len_unique_hdl;
+	const struct fdt_property *prop_crypto, *prop_unique;
+	int nodeoff = fdt_node_offset_by_compatible(initial_boot_params, -1, "fsl,imx28-dcp");
+
+	if (nodeoff < 0) {
+		pr_info("node to update the SoC serial number is not found.\n");
+		return nodeoff;
+	}
 
 	key_phys = dma_map_single(sdcp->dev, sdcp->coh->aes_key,
 				  2 * AES_KEYSIZE_128, DMA_TO_DEVICE);
@@ -255,36 +270,51 @@ static int mxs_dcp_run_aes(struct dcp_async_ctx *actx,
 		ret = -EINVAL;
 		goto aes_done_run;
 	}
-
 	/* Fill in the DMA descriptor. */
 	desc->control0 = MXS_DCP_CONTROL0_DECR_SEMAPHORE |
-		    MXS_DCP_CONTROL0_INTERRUPT |
-		    MXS_DCP_CONTROL0_ENABLE_CIPHER;
-
-	/* Payload contains the key. */
-	desc->control0 |= MXS_DCP_CONTROL0_PAYLOAD_KEY;
-
+			MXS_DCP_CONTROL0_INTERRUPT |
+			MXS_DCP_CONTROL0_ENABLE_CIPHER;
 	if (rctx->enc)
 		desc->control0 |= MXS_DCP_CONTROL0_CIPHER_ENCRYPT;
-	if (init)
-		desc->control0 |= MXS_DCP_CONTROL0_CIPHER_INIT;
 
 	desc->control1 = MXS_DCP_CONTROL1_CIPHER_SELECT_AES128;
-
 	if (rctx->ecb)
 		desc->control1 |= MXS_DCP_CONTROL1_CIPHER_MODE_ECB;
 	else
 		desc->control1 |= MXS_DCP_CONTROL1_CIPHER_MODE_CBC;
+	if (init)
+		desc->control0 |= MXS_DCP_CONTROL0_CIPHER_INIT;
 
+	/*Read device property*/
+	prop_crypto = fdt_get_property(initial_boot_params, nodeoff,
+					"otp_crypto_key", &len_crypto_hdl);
+	prop_unique = fdt_get_property(initial_boot_params, nodeoff,
+					"otp_unique_key", &len_unique_hdl);
+
+	if (len_crypto_hdl > 0 && !memcmp(sdcp->coh->aes_key,
+				prop_crypto->data, AES_KEYSIZE_128)) {
+		/* Use AES_OTP CRYPTO_KEY. */
+		desc->control0 |= MXS_DCP_CONTROL0_OTP_KEY;
+		/* Use AES_OTP crypto key. */
+		desc->control1 |= MXS_DCP_CONTROL1_AES_OTP_CRYPTO_KEY;
+		desc->payload = 0;
+	} else if (len_unique_hdl > 0 && (!memcmp(sdcp->coh->aes_key,
+			prop_unique->data, AES_KEYSIZE_128))) {
+		/* Use AES_OTP unique key. */
+		desc->control1 |= MXS_DCP_CONTROL1_AES_OTP_UNIQUE_KEY;
+		desc->payload = 0;
+	} else {
+		/* Payload contains the key. */
+		desc->control0 |= MXS_DCP_CONTROL0_PAYLOAD_KEY;
+		desc->payload = key_phys;
+	}
 	desc->next_cmd_addr = 0;
 	desc->source = src_phys;
 	desc->destination = dst_phys;
 	desc->size = actx->fill;
-	desc->payload = key_phys;
 	desc->status = 0;
 
 	ret = mxs_dcp_start_dma(actx);
-
 aes_done_run:
 	dma_unmap_single(sdcp->dev, dst_phys, DCP_BUF_SZ, DMA_FROM_DEVICE);
 err_dst:
@@ -340,7 +370,7 @@ static int mxs_dcp_aes_block_crypt(struct crypto_async_request *arq)
 		memset(key + AES_KEYSIZE_128, 0, AES_KEYSIZE_128);
 	}
 
-	for_each_sg(req->src, src, sg_nents(src), i) {
+	for_each_sg(req->src, src, sg_nents(req->src), i) {
 		src_buf = sg_virt(src);
 		len = sg_dma_len(src);
 		tlen += len;
@@ -428,11 +458,11 @@ static int dcp_chan_thread_aes(void *data)
 		set_current_state(TASK_RUNNING);
 
 		if (backlog)
-			backlog->complete(backlog, -EINPROGRESS);
+			crypto_request_complete(backlog, -EINPROGRESS);
 
 		if (arq) {
 			ret = mxs_dcp_aes_block_crypt(arq);
-			arq->complete(arq, ret);
+			crypto_request_complete(arq, ret);
 		}
 	}
 
@@ -734,11 +764,11 @@ static int dcp_chan_thread_sha(void *data)
 		set_current_state(TASK_RUNNING);
 
 		if (backlog)
-			backlog->complete(backlog, -EINPROGRESS);
+			crypto_request_complete(backlog, -EINPROGRESS);
 
 		if (arq) {
 			ret = dcp_sha_req_to_buf(arq);
-			arq->complete(arq, ret);
+			crypto_request_complete(arq, ret);
 		}
 	}
 
@@ -1093,21 +1123,15 @@ static int mxs_dcp_probe(struct platform_device *pdev)
 	sdcp->coh = PTR_ALIGN(sdcp->coh, DCP_ALIGNMENT);
 
 	/* DCP clock is optional, only used on some SOCs */
-	sdcp->dcp_clk = devm_clk_get(dev, "dcp");
-	if (IS_ERR(sdcp->dcp_clk)) {
-		if (sdcp->dcp_clk != ERR_PTR(-ENOENT))
-			return PTR_ERR(sdcp->dcp_clk);
-		sdcp->dcp_clk = NULL;
-	}
-	ret = clk_prepare_enable(sdcp->dcp_clk);
-	if (ret)
-		return ret;
+	sdcp->dcp_clk = devm_clk_get_optional_enabled(dev, "dcp");
+	if (IS_ERR(sdcp->dcp_clk))
+		return PTR_ERR(sdcp->dcp_clk);
 
 	/* Restart the DCP block. */
 	ret = stmp_reset_block(sdcp->base);
 	if (ret) {
 		dev_err(dev, "Failed reset\n");
-		goto err_disable_unprepare_clk;
+		return ret;
 	}
 
 	/* Initialize control register. */
@@ -1147,7 +1171,7 @@ static int mxs_dcp_probe(struct platform_device *pdev)
 	if (IS_ERR(sdcp->thread[DCP_CHAN_HASH_SHA])) {
 		dev_err(dev, "Error starting SHA thread!\n");
 		ret = PTR_ERR(sdcp->thread[DCP_CHAN_HASH_SHA]);
-		goto err_disable_unprepare_clk;
+		return ret;
 	}
 
 	sdcp->thread[DCP_CHAN_CRYPTO] = kthread_run(dcp_chan_thread_aes,
@@ -1205,9 +1229,6 @@ err_destroy_aes_thread:
 err_destroy_sha_thread:
 	kthread_stop(sdcp->thread[DCP_CHAN_HASH_SHA]);
 
-err_disable_unprepare_clk:
-	clk_disable_unprepare(sdcp->dcp_clk);
-
 	return ret;
 }
 
@@ -1227,8 +1248,6 @@ static int mxs_dcp_remove(struct platform_device *pdev)
 	kthread_stop(sdcp->thread[DCP_CHAN_HASH_SHA]);
 	kthread_stop(sdcp->thread[DCP_CHAN_CRYPTO]);
 
-	clk_disable_unprepare(sdcp->dcp_clk);
-
 	platform_set_drvdata(pdev, NULL);
 
 	global_sdcp = NULL;
@@ -1236,6 +1255,36 @@ static int mxs_dcp_remove(struct platform_device *pdev)
 	return 0;
 }
 
+/*
+ * mxs_dcp_blob_to_key transfers content of hardware blob to key.
+ * Returns -EINVAL, if user wants to add hardware key other than
+ * otp_crypto_key & otp_unique_key.
+ * Returns 0, in case of success.
+ */
+int mxs_dcp_blob_to_key(struct dcp_key_payload *p)
+{
+	int len_crypto_hdl, len_unique_hdl;
+	const struct fdt_property *prop_crypto, *prop_unique;
+	int nodeoff = fdt_node_offset_by_compatible(initial_boot_params, -1, "fsl,imx28-dcp");
+
+	if (nodeoff < 0) {
+		pr_info("node to update the SoC serial number is not found.\n");
+		return nodeoff;
+	}
+
+	prop_crypto = fdt_get_property(initial_boot_params, nodeoff,
+					"otp_crypto_key", &len_crypto_hdl);
+	prop_unique = fdt_get_property(initial_boot_params, nodeoff,
+					"otp_unique_key", &len_unique_hdl);
+	memcpy(p->key, p->blob, p->blob_len);
+	p->key_len = p->blob_len;
+	if (memcmp(prop_crypto->data, p->blob, AES_KEYSIZE_128) &&
+		memcmp(prop_unique->data, p->blob, AES_KEYSIZE_128))
+		return -EINVAL;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(mxs_dcp_blob_to_key);
 static const struct of_device_id mxs_dcp_dt_ids[] = {
 	{ .compatible = "fsl,imx23-dcp", .data = NULL, },
 	{ .compatible = "fsl,imx28-dcp", .data = NULL, },

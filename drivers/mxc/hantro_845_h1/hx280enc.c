@@ -133,18 +133,21 @@ typedef struct {
 	u32 hw_id; //hw id to indicate project
 	u32 is_valid; //indicate this core is hantro's core or not
 	u32 is_reserved; //indicate this core is occupied by user or not
-	int pid; //indicate which process is occupying the core
+	struct file *filp;  //indicate which instance is occupying the core
 	u32 irq_received; //indicate this core receives irq
 	u32 irq_status;
 	int irq;
 	unsigned long iobaseaddr;
 	unsigned int iosize;
+	u32 reg_corrupt;
+	struct semaphore core_suspend_sem;
 
 	volatile u8 *hwregs;
 	struct fasync_struct *async_queue;
 	unsigned int mirror_regs[512];
 	struct device *dev;
-	struct mutex dev_mutex;
+	bool skip_blkctrl;
+	u32 statusShowReg;
 } hx280enc_t;
 
 /* dynamic allocation? */
@@ -189,6 +192,9 @@ static int hantro_h1_ctrlblk_reset(struct device *dev)
 	volatile u8 *iobase;
 	u32 val;
 
+	if (hx280enc_data.skip_blkctrl)
+		return 0;
+
 	//config H1
 	hantro_h1_clk_enable(dev);
 	iobase = (volatile u8 *)ioremap(BLK_CTL_BASE, 0x10000);
@@ -214,13 +220,7 @@ static int hantro_h1_ctrlblk_reset(struct device *dev)
 
 static int hantro_h1_power_on_disirq(hx280enc_t *hx280enc)
 {
-	//spin_lock_irq(&owner_lock);
-	mutex_lock(&hx280enc->dev_mutex);
-	disable_irq(hx280enc->irq);
 	pm_runtime_get_sync(hx280enc->dev);
-	enable_irq(hx280enc->irq);
-	mutex_unlock(&hx280enc->dev_mutex);
-	//spin_unlock_irq(&owner_lock);
 	return 0;
 }
 
@@ -240,7 +240,7 @@ static int hx280enc_mmap(struct file *filp, struct vm_area_struct *vm)
 	return result;
 #else
 	if (vm->vm_pgoff == (hx280enc_data.iobaseaddr >> PAGE_SHIFT)) {
-		vm->vm_flags |= VM_IO;
+		vm_flags_set(vm, VM_IO);
 		vm->vm_page_prot = pgprot_noncached(vm->vm_page_prot);
 		PDEBUG("hx280enc mmap: size=0x%lX, page off=0x%lX\n", (vm->vm_end - vm->vm_start), vm->vm_pgoff);
 		return remap_pfn_range(vm, vm->vm_start, vm->vm_pgoff, vm->vm_end - vm->vm_start,
@@ -285,11 +285,14 @@ unsigned int WaitEncReady(hx280enc_t *dev)
 
 		pr_err("%s: wait_event_timeout() timeout !\n", __func__);
 		writel(reg14 & (~1), dev->hwregs + 14*4);
+		up(&hx280enc_data.core_suspend_sem);
 	}
 
 	/* read register to mirror */
 	for (i = 0; i < dev->iosize; i += 4)
 		dev->mirror_regs[i/4] = readl(dev->hwregs + i);
+
+	dev->mirror_regs[1] = dev->statusShowReg;
 
 	/* clear the status bits */
 	is_write1_clr = (dev->mirror_regs[0x4a0/4] & 0x00800000);
@@ -298,11 +301,12 @@ unsigned int WaitEncReady(hx280enc_t *dev)
 		writel(irq_status, dev->hwregs + 0x04);
 	else
 		writel(irq_status & (~0xf7d), dev->hwregs + 0x04);
+	dev->statusShowReg = readl(dev->hwregs + 0x04);
 
 	return 0;
 }
 
-int CheckCoreOccupation(hx280enc_t *dev)
+int CheckCoreOccupation(hx280enc_t *dev, struct file *filp)
 {
 	int ret = 0;
 	unsigned long flags;
@@ -310,46 +314,44 @@ int CheckCoreOccupation(hx280enc_t *dev)
 	spin_lock_irqsave(&owner_lock, flags);
 	if (!dev->is_reserved) {
 		dev->is_reserved = 1;
-		dev->pid = current->pid;
+		dev->filp = filp;
 		ret = 1;
-		PDEBUG("CheckCoreOccupation pid=%d\n", dev->pid);
 	}
 	spin_unlock_irqrestore(&owner_lock, flags);
 
 	return ret;
 }
 
-int GetWorkableCore(hx280enc_t *dev)
+int GetWorkableCore(hx280enc_t *dev, struct file *filp)
 {
 	int ret = 0;
 
 	PDEBUG("GetWorkableCore\n");
 
-	if (dev->is_valid && CheckCoreOccupation(dev))
+	if (dev->is_valid && CheckCoreOccupation(dev, filp))
 		ret = 1;
 
 	return ret;
 }
 
-long ReserveEncoder(hx280enc_t *dev)
+long ReserveEncoder(hx280enc_t *dev, struct file *filp)
 {
 	/* lock a core that has specified core id*/
-	if (wait_event_interruptible(enc_hw_queue, GetWorkableCore(dev) != 0))
+	if (wait_event_interruptible(enc_hw_queue, GetWorkableCore(dev, filp) != 0))
 		return -ERESTARTSYS;
 
 	return 0;
 }
 
-void ReleaseEncoder(hx280enc_t *dev)
+void ReleaseEncoder(hx280enc_t *dev, struct file *filp)
 {
 	unsigned long flags;
 
 	PDEBUG("ReleaseEncoder\n");
 
 	spin_lock_irqsave(&owner_lock, flags);
-	PDEBUG("relase reseve by pid=%d with current->pid=%d\n", dev->pid, current->pid);
-	if (dev->is_reserved && dev->pid == current->pid) {
-		dev->pid = -1;
+	if (dev->is_reserved && dev->filp == filp) {
+		dev->filp = NULL;
 		dev->is_reserved = 0;
 	}
 
@@ -372,57 +374,60 @@ static long EncRefreshRegs(hx280enc_t *dev, unsigned int *regs)
 	return 0;
 }
 
-static int hx280enc_write_regs(unsigned long arg)
+static int hx280enc_write_regs(struct enc_regs_buffer *regs)
 {
-	struct enc_regs_buffer regs;
 	hx280enc_t *dev = &hx280enc_data;
 	u32 *reg_buf;
 	u32 i;
 	int ret;
 
-	ret = copy_from_user(&regs, (void *)arg, sizeof(regs));
-	if (ret)
-		return ret;
-	if ((regs.offset + regs.size) > sizeof(dev->mirror_regs)) {
+	if (regs->size > sizeof(dev->mirror_regs) || !regs->size)
+		return -EINVAL;
+	if (regs->offset >= sizeof(dev->mirror_regs))
+		return -EINVAL;
+	if ((regs->offset + regs->size) > sizeof(dev->mirror_regs)) {
 		pr_err("%s invalid param, offset:%d, size:%d\n",
-			__func__, regs.offset, regs.size);
+			__func__, regs->offset, regs->size);
 		return -EINVAL;
 	}
 
-	reg_buf = &dev->mirror_regs[regs.offset / 4];
-	ret = copy_from_user((void *)reg_buf, (void *)regs.regs, regs.size);
+	reg_buf = &dev->mirror_regs[regs->offset / 4];
+	ret = copy_from_user((void *)reg_buf, (void *)regs->regs, regs->size);
 	if (ret)
 		return ret;
 
-	for (i = 0; i < regs.size / 4; i++)
-		iowrite32(reg_buf[i], (dev->hwregs + regs.offset) + i * 4);
+	for (i = 0; i < regs->size / 4; i++) {
+		iowrite32(reg_buf[i], (dev->hwregs + regs->offset) + i * 4);
+		if ((regs->offset + i * 4) == 4)
+			dev->statusShowReg = readl(dev->hwregs + 0x04);
+	}
 
 	return ret;
 }
 
-static int hx280enc_read_regs(unsigned long arg)
+static int hx280enc_read_regs(struct enc_regs_buffer *regs)
 {
-	struct enc_regs_buffer regs;
 	hx280enc_t *dev = &hx280enc_data;
 	u32 *reg_buf;
 	u32 i;
 	int ret;
 
-	ret = copy_from_user(&regs, (void *)arg, sizeof(regs));
-	if (ret)
-		return ret;
-	if ((regs.offset + regs.size) > sizeof(dev->mirror_regs)) {
+	if (regs->size > sizeof(dev->mirror_regs) || !regs->size)
+		return -EINVAL;
+	if (regs->offset >= sizeof(dev->mirror_regs))
+		return -EINVAL;
+	if ((regs->offset + regs->size) > sizeof(dev->mirror_regs)) {
 		pr_err("%s invalid param, offset:%d, size:%d\n",
-			__func__, regs.offset, regs.size);
+			__func__, regs->offset, regs->size);
 		return -EINVAL;
 	}
 
-	reg_buf = &dev->mirror_regs[regs.offset / 4];
+	reg_buf = &dev->mirror_regs[regs->offset / 4];
 
-	for (i = 0; i < regs.size / 4; i++)
-		reg_buf[i] = ioread32((dev->hwregs + regs.offset) + i * 4);
+	for (i = 0; i < regs->size / 4; i++)
+		reg_buf[i] = ioread32((dev->hwregs + regs->offset) + i * 4);
 
-	ret = copy_to_user((void *)regs.regs, (void *)reg_buf, regs.size);
+	ret = copy_to_user((void *)regs->regs, (void *)reg_buf, regs->size);
 
 	return ret;
 }
@@ -465,12 +470,12 @@ static long hx280enc_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		int ret;
 
 		PDEBUG("Reserve ENC Cores\n");
-		ret = ReserveEncoder(&hx280enc_data);
+		ret = ReserveEncoder(&hx280enc_data, filp);
 		return ret;
 	}
 	case _IOC_NR(HX280ENC_IOCH_ENC_RELEASE):
 		PDEBUG("Release ENC Core\n");
-		ReleaseEncoder(&hx280enc_data);
+		ReleaseEncoder(&hx280enc_data, filp);
 		break;
 	case _IOC_NR(HX280ENC_IOCG_CORE_WAIT): {
 		unsigned int *regs = (unsigned int *)arg;
@@ -485,15 +490,51 @@ static long hx280enc_ioctl(struct file *filp, unsigned int cmd, unsigned long ar
 		break;
 	}
 	case _IOC_NR(HX280ENC_IOC_WRITE_REGS): {
-		err = hx280enc_write_regs(arg);
+		struct enc_regs_buffer regs;
+
+		err = copy_from_user(&regs, (void *)arg, sizeof(regs));
+		if (err)
+			return err;
+
+		err = hx280enc_write_regs(&regs);
 		if (err)
 			return err;
 		break;
 	}
 	case _IOC_NR(HX280ENC_IOC_READ_REGS): {
-		err = hx280enc_read_regs(arg);
+		struct enc_regs_buffer regs;
+
+		err = copy_from_user(&regs, (void *)arg, sizeof(regs));
 		if (err)
 			return err;
+
+		err = hx280enc_read_regs(&regs);
+		if (err)
+			return err;
+		break;
+	}
+	case _IOC_NR(HX280ENC_IOCG_EN_CORE): {
+		u32 reg_value;
+
+		PDEBUG("Enable ENC Core\n");
+
+		if (hx280enc_data.is_reserved == 0)
+			return -EPERM;
+		if (hx280enc_data.reg_corrupt == 1) {
+			hx280enc_data.reg_corrupt = 0;
+			return -EAGAIN;
+		}
+
+		if (down_timeout(&hx280enc_data.core_suspend_sem, msecs_to_jiffies(10000))) {
+			pr_err("en core suspend sem down error id\n");
+			return -ERESTARTSYS;
+		}
+
+		reg_value = readl(hx280enc_data.hwregs + 14 * 4);
+		reg_value |= 0x01;
+		writel(reg_value, hx280enc_data.hwregs + 14 * 4);
+		// printk("%s reg_value:%d\n", __func__, reg_value);
+
 		break;
 	}
 	default:
@@ -528,8 +569,8 @@ static int hx280enc_release(struct inode *inode, struct file *filp)
 
 	PDEBUG("dev closed\n");
 	spin_lock_irqsave(&owner_lock, flags);
-	if (dev->is_reserved == 1 && dev->pid == current->pid) {
-		dev->pid = -1;
+	if (dev->is_reserved == 1 && dev->filp == filp) {
+		dev->filp = NULL;
 		dev->is_reserved = 0;
 		dev->irq_received = 0;
 		dev->irq_status = 0;
@@ -547,64 +588,74 @@ static int hx280enc_release(struct inode *inode, struct file *filp)
 }
 
 #ifdef CONFIG_COMPAT
-static long hx280enc_ioctl32(struct file *filp, unsigned int cmd, unsigned long arg)
+struct enc_regs_buffer_32 {
+	__u32 core_id;
+	compat_caddr_t regs;
+	__u32 offset;
+	__u32 size;
+	compat_caddr_t reserved;
+};
+
+static int get_hantro_enc_regs_buffer32(struct enc_regs_buffer *kp,
+					struct enc_regs_buffer_32 __user *up)
 {
-    long err = 0;
-#define HX280ENC_IOCTL32(err, filp, cmd, arg) { \
-	mm_segment_t old_fs = get_fs(); \
-	set_fs(KERNEL_DS); \
-	err = hx280enc_ioctl(filp, cmd, arg); \
-	if (err) \
-	return err; \
-	set_fs(old_fs); \
+	u32 tmp1, tmp2;
+
+	if (!access_ok(up, sizeof(struct enc_regs_buffer_32)) ||
+	    get_user(kp->core_id, &up->core_id) ||
+	    get_user(kp->offset, &up->offset) ||
+	    get_user(kp->size, &up->size) ||
+	    get_user(tmp1, &up->regs) ||
+	    get_user(tmp2, &up->reserved)) {
+		return -EFAULT;
+	}
+	kp->regs = (__force u32 *)compat_ptr(tmp1);
+	kp->reserved = (__force u32 *)compat_ptr(tmp2);
+	return 0;
 }
 
-union {
-    unsigned long kux;
-    unsigned int kui;
-} karg;
-    void __user *up = compat_ptr(arg);
+static bool hantro_h1_is_compat_ptr_ioctl(unsigned int cmd)
+{
+	bool ret = true;
 
-    switch (_IOC_NR(cmd))    {
-    case _IOC_NR(HX280ENC_IOCGHWOFFSET):
-		err = get_user(karg.kux, (s32 __user *)up);
-		if (err)
-		    return err;
-		HX280ENC_IOCTL32(err, filp, cmd, (unsigned long)&karg);
-		err = put_user(((s32)karg.kux), (s32 __user *)up);
+	switch (_IOC_NR(cmd)) {
+	case _IOC_NR(HX280ENC_IOC_WRITE_REGS):
+	case _IOC_NR(HX280ENC_IOC_READ_REGS):
+		ret = false;
 		break;
-    case _IOC_NR(HX280ENC_IOCGHWIOSIZE):
-		err = get_user(karg.kui, (s32 __user *)up);
-		if (err)
-		    return err;
-		HX280ENC_IOCTL32(err, filp, cmd, (unsigned long)&karg);
-		err = put_user(((s32)karg.kui), (s32 __user *)up);
-		break;
-    case _IOC_NR(HX280ENC_IOCH_ENC_RESERVE): {
-	    int ret;
-	    PDEBUG("Reserve ENC Cores\n");
-	    ret = ReserveEncoder(&hx280enc_data);
-	    return ret;
-	}
-    case _IOC_NR(HX280ENC_IOCH_ENC_RELEASE): {
-	    PDEBUG("Release ENC Core\n");
-	    ReleaseEncoder(&hx280enc_data);
-	    break;
-	}
-	case _IOC_NR(HX280ENC_IOCG_CORE_WAIT): {
-		HX280ENC_IOCTL32(err, filp, cmd, (unsigned long)up);
-		break;
-	}
-	case _IOC_NR(HX280ENC_IOC_WRITE_REGS): {
-		HX280ENC_IOCTL32(err, filp, cmd, (unsigned long)up);
-		break;
-	}
-	case _IOC_NR(HX280ENC_IOC_READ_REGS): {
-		HX280ENC_IOCTL32(err, filp, cmd, (unsigned long)up);
-		break;
-	}
 	default:
 		break;
+	}
+
+	return ret;
+}
+
+static long hx280enc_ioctl32(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	long err = 0;
+	void __user *up = compat_ptr(arg);
+	struct enc_regs_buffer regs;
+
+	if (hantro_h1_is_compat_ptr_ioctl(cmd))
+		return compat_ptr_ioctl(filp, cmd, arg);
+
+	err = get_hantro_enc_regs_buffer32(&regs, up);
+	if (err)
+		return err;
+
+	switch (_IOC_NR(cmd)) {
+		case _IOC_NR(HX280ENC_IOC_WRITE_REGS): {
+			err = hx280enc_write_regs(&regs);
+			if (err)
+				return err;
+			break;
+		}
+		case _IOC_NR(HX280ENC_IOC_READ_REGS): {
+			err = hx280enc_read_regs(&regs);
+			if (err)
+				return err;
+			break;
+		}
 	}
 	return 0;
 }
@@ -639,6 +690,7 @@ static int __init hx280enc_init(void)
 	hx280enc_data.irq = irq;
 	hx280enc_data.async_queue = NULL;
 	hx280enc_data.hwregs = NULL;
+	sema_init(&hx280enc_data.core_suspend_sem, 1);
 
 	result = register_chrdev(hx280enc_major, "hx280enc", &hx280enc_fops);
 	if (result < 0) {
@@ -660,7 +712,7 @@ static int __init hx280enc_init(void)
 					SA_INTERRUPT | SA_SHIRQ,
 #else
 				//IRQF_DISABLED | IRQF_SHARED,
-				IRQF_SHARED,
+				0,
 #endif
 					"hx280enc", (void *) &hx280enc_data);
 		if (result == -EINVAL) {
@@ -774,11 +826,13 @@ irqreturn_t hx280enc_isr(int irq, void *dev_id)
 	/* BASE_HWFuse2 = 0x4a0; HWCFGIrqClearSupport = 0x00800000 */
 	is_write1_clr = (readl(dev->hwregs + 0x4a0) & 0x00800000);
 	if (irq_status & 0x01) {
-		/* clear enc IRQ and slice ready interrupt bit */
+		/* clear enc IRQ ,sw reset and slice ready interrupt bit */
 		if (is_write1_clr)
-			writel(irq_status & (0x101), dev->hwregs + 0x04);
+			writel(irq_status & (0x111), dev->hwregs + 0x04);
 		else
-			writel(irq_status & (~0x101), dev->hwregs + 0x04);
+			writel(irq_status & (~0x111), dev->hwregs + 0x04);
+
+		dev->statusShowReg = readl(dev->hwregs + 0x04);
 
 		/* Handle slice ready interrupts. The reference implementation
 		* doesn't signal slice ready interrupts to EWL.
@@ -788,12 +842,16 @@ irqreturn_t hx280enc_isr(int irq, void *dev_id)
 			return IRQ_HANDLED;
 		}
 
-		spin_lock_irqsave(&owner_lock, flags);
-		dev->irq_received = 1;
-		dev->irq_status = irq_status & (~0x01);
-		spin_unlock_irqrestore(&owner_lock, flags);
-
-		wake_up_all(&enc_wait_queue);
+		if (irq_status & 0x04) {
+			spin_lock_irqsave(&owner_lock, flags);
+			dev->irq_received = 1;
+			dev->irq_status = irq_status & (~0x01);
+			spin_unlock_irqrestore(&owner_lock, flags);
+			up(&hx280enc_data.core_suspend_sem);
+			wake_up_all(&enc_wait_queue);
+		} else {
+			pr_err("h1 abnormal irq %x\n", irq_status);
+		}
 
 		PDEBUG("IRQ handled!\n");
 		return IRQ_HANDLED;
@@ -838,6 +896,7 @@ static int hantro_h1_probe(struct platform_device *pdev)
 	struct device *temp_class;
 	struct resource *res;
 	unsigned long reg_base;
+	struct device_node *node;
 
 	hantro_h1_dev = &pdev->dev;
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "regs_hantro_h1");
@@ -872,6 +931,17 @@ static int hantro_h1_probe(struct platform_device *pdev)
 
 	PDEBUG("hantro: h1 clock: 0x%lX, 0x%lX\n", clk_get_rate(hantro_clk_h1), clk_get_rate(hantro_clk_h1_bus));
 
+	/*
+	 * If integrate power-domains into blk-ctrl driver, vpu driver don't
+	 * need handle it again.
+	 */
+	node = of_parse_phandle(pdev->dev.of_node, "power-domains", 0);
+	if (!strcmp(node->name, "blk-ctl") || !strcmp(node->name, "blk-ctrl"))
+		hx280enc_data.skip_blkctrl = 1;
+	else
+		hx280enc_data.skip_blkctrl = 0;
+	of_node_put(node);
+
 	hantro_h1_clk_enable(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 	pm_runtime_get_sync(&pdev->dev);
@@ -883,7 +953,7 @@ static int hantro_h1_probe(struct platform_device *pdev)
 		goto error;
 	}
 
-	hantro_h1_class = class_create(THIS_MODULE, "mxc_hantro_h1");
+	hantro_h1_class = class_create("mxc_hantro_h1");
 	if (IS_ERR(hantro_h1_class)) {
 		err = PTR_ERR(hantro_h1_class);
 		goto error;
@@ -895,7 +965,6 @@ static int hantro_h1_probe(struct platform_device *pdev)
 	}
 	hx280enc_data.dev = &pdev->dev;
 	platform_set_drvdata(pdev, &hx280enc_data);
-	mutex_init(&hx280enc_data.dev_mutex);
 
 	goto out;
 
@@ -932,9 +1001,54 @@ static int hantro_h1_dev_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static int hx280enc_suspend(struct device *dev)
+{
+	int ret = 0;
+	int i;
+
+	PDEBUG("%s start..\n", __func__);
+
+	if (hx280enc_data.is_reserved == 0)
+		return ret;
+
+	ret = down_timeout(&hx280enc_data.core_suspend_sem, msecs_to_jiffies(10000));
+	if (ret) {
+		pr_err("h280xenc sem down error when store regs\n");
+		return ret;
+	}
+	hx280enc_data.reg_corrupt = 1;
+	if (hx280enc_data.irq_status & 0x04) {
+		for (i = 0; i < hx280enc_data.iosize; i += 4)
+			hx280enc_data.mirror_regs[i/4] = readl(hx280enc_data.hwregs + i);
+	}
+	up(&hx280enc_data.core_suspend_sem);
+
+	return ret;
+}
+
+static int hx280enc_resume(struct device *dev)
+{
+	int ret = 0;
+	int i;
+
+	PDEBUG("%s start..\n", __func__);
+
+	if (hx280enc_data.is_reserved == 0 || hx280enc_data.reg_corrupt == 0)
+		return ret;
+
+	if (hx280enc_data.irq_status & 0x04) {
+		for (i = 0; i < hx280enc_data.iosize; i += 4)
+			writel(hx280enc_data.mirror_regs[i/4], hx280enc_data.hwregs + i);
+		hx280enc_data.reg_corrupt = 0;
+	}
+
+	return ret;
+}
+
 #ifdef CONFIG_PM
 static int __maybe_unused hantro_h1_suspend(struct device *dev)
 {
+	hx280enc_suspend(dev);
 	pm_runtime_put_sync_suspend(dev);   //power off
 	return 0;
 }
@@ -944,6 +1058,7 @@ static int __maybe_unused hantro_h1_resume(struct device *dev)
 
 	hantro_h1_power_on_disirq(hx280enc);
 	hantro_h1_ctrlblk_reset(dev);
+	hx280enc_resume(dev);
 	return 0;
 }
 static int hantro_h1_runtime_suspend(struct device *dev)

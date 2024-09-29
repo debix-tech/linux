@@ -520,10 +520,13 @@ struct dpcon_cmd_set_notification {
 	__le64 user_ctx;
 };
 
+/*
+ * Generic FSL MC API
+ */
+
 /* generic command versioning */
 #define OBJ_CMD_BASE_VERSION		1
 #define OBJ_CMD_ID_OFFSET		4
-#define OBJ_CMD_MODULE_OFFSET           8
 
 #define OBJ_CMD(id)	(((id) << OBJ_CMD_ID_OFFSET) | OBJ_CMD_BASE_VERSION)
 
@@ -549,7 +552,7 @@ struct dpcon_cmd_set_notification {
 #define OBJ_CMDID_CLOSE		OBJ_CMD(0x800)
 #define OBJ_CMDID_RESET		OBJ_CMD(0x005)
 
-struct obj_cmd_open {
+struct fsl_mc_obj_cmd_open {
 	__le32 obj_id;
 };
 
@@ -632,8 +635,6 @@ void fsl_mc_allocator_driver_exit(void);
 
 void fsl_mc_init_all_resource_pools(struct fsl_mc_device *mc_bus_dev);
 
-void fsl_mc_cleanup_all_resource_pools(struct fsl_mc_device *mc_bus_dev);
-
 int __must_check fsl_mc_resource_allocate(struct fsl_mc_bus *mc_bus,
 					  enum fsl_mc_pool_type pool_type,
 					  struct fsl_mc_resource
@@ -663,6 +664,8 @@ void fsl_mc_get_root_dprc(struct device *dev,
 
 struct fsl_mc_device *fsl_mc_device_lookup(struct fsl_mc_obj_desc *obj_desc,
 					   struct fsl_mc_device *mc_bus_dev);
+
+u16 mc_cmd_hdr_read_cmdid(struct fsl_mc_command *cmd);
 
 #ifdef CONFIG_FSL_MC_UAPI_SUPPORT
 

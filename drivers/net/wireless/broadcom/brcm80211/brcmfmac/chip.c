@@ -139,6 +139,8 @@ struct sbconfig {
 	u32 sbidhigh;	/* identification */
 };
 
+#define INVALID_RAMBASE			((u32)(~0))
+
 /* bankidx and bankinfo reg defines corerev >= 8 */
 #define SOCRAM_BANKINFO_RETNTRAM_MASK	0x00010000
 #define SOCRAM_BANKINFO_SZMASK		0x0000007f
@@ -210,26 +212,9 @@ struct sbsocramregs {
 #define	ARMCR4_TCBANB_MASK	0xf
 #define	ARMCR4_TCBANB_SHIFT	0
 
-#define	ARMCR4_BSZ_MASK		0x3f
+#define	ARMCR4_BSZ_MASK		0x7f
 #define	ARMCR4_BSZ_MULT		8192
-
-/* Minimum PMU resource mask for 43012C0 */
-#define CY_43012_PMU_MIN_RES_MASK       0xF8BFE77
-
-/* PMU STATUS mask for 43012C0 */
-#define CY_43012_PMU_STATUS_MASK        0x1AC
-
-/* PMU CONTROL EXT mask for 43012C0 */
-#define CY_43012_PMU_CONTROL_EXT_MASK   0x11
-
-/* PMU Watchdog Counter Tick value for 43012C0 */
-#define CY_43012_PMU_WATCHDOG_TICK_VAL  0x04
-
-/* PMU Watchdog Counter Tick value for 4373 */
-#define CY_4373_PMU_WATCHDOG_TICK_VAL  0x04
-
-/* Minimum PMU resource mask for 4373 */
-#define CY_4373_PMU_MIN_RES_MASK       0xFCAFF7F
+#define	ARMCR4_BLK_1K_MASK	0x200
 
 struct brcmf_core_priv {
 	struct brcmf_core pub;
@@ -545,7 +530,7 @@ static int brcmf_chip_cores_check(struct brcmf_chip_priv *ci)
 	int idx = 1;
 
 	list_for_each_entry(core, &ci->cores, list) {
-		brcmf_dbg(INFO, " [%-2d] core 0x%x:%-2d base 0x%08x wrap 0x%08x\n",
+		brcmf_dbg(INFO, " [%-2d] core 0x%x:%-3d base 0x%08x wrap 0x%08x\n",
 			  idx++, core->pub.id, core->pub.rev, core->pub.base,
 			  core->wrapbase);
 
@@ -700,6 +685,7 @@ static u32 brcmf_chip_tcm_ramsize(struct brcmf_core_priv *cr4)
 	u32 nbb;
 	u32 totb;
 	u32 bxinfo;
+	u32 blksize;
 	u32 idx;
 
 	corecap = brcmf_chip_core_read32(cr4, ARMCR4_CAP);
@@ -711,7 +697,11 @@ static u32 brcmf_chip_tcm_ramsize(struct brcmf_core_priv *cr4)
 	for (idx = 0; idx < totb; idx++) {
 		brcmf_chip_core_write32(cr4, ARMCR4_BANKIDX, idx);
 		bxinfo = brcmf_chip_core_read32(cr4, ARMCR4_BANKINFO);
-		memsize += ((bxinfo & ARMCR4_BSZ_MASK) + 1) * ARMCR4_BSZ_MULT;
+		blksize = ARMCR4_BSZ_MULT;
+		if (bxinfo & ARMCR4_BLK_1K_MASK)
+			blksize >>= 3;
+
+		memsize += ((bxinfo & ARMCR4_BSZ_MASK) + 1) * blksize;
 	}
 
 	return memsize;
@@ -721,6 +711,7 @@ static u32 brcmf_chip_tcm_rambase(struct brcmf_chip_priv *ci)
 {
 	switch (ci->pub.chip) {
 	case BRCM_CC_4345_CHIP_ID:
+	case BRCM_CC_43454_CHIP_ID:
 		return 0x198000;
 	case BRCM_CC_4335_CHIP_ID:
 	case BRCM_CC_4339_CHIP_ID:
@@ -739,19 +730,26 @@ static u32 brcmf_chip_tcm_rambase(struct brcmf_chip_priv *ci)
 	case BRCM_CC_4365_CHIP_ID:
 	case BRCM_CC_4366_CHIP_ID:
 	case BRCM_CC_43664_CHIP_ID:
+	case BRCM_CC_43666_CHIP_ID:
 		return 0x200000;
+	case BRCM_CC_4355_CHIP_ID:
 	case BRCM_CC_4359_CHIP_ID:
 		return (ci->pub.chiprev < 9) ? 0x180000 : 0x160000;
 	case BRCM_CC_4364_CHIP_ID:
 	case CY_CC_4373_CHIP_ID:
 		return 0x160000;
-	case CY_CC_89459_CHIP_ID:
-		return ((ci->pub.chiprev < 9) ? 0x180000 : 0x160000);
+	case CY_CC_43752_CHIP_ID:
+	case BRCM_CC_4377_CHIP_ID:
+		return 0x170000;
+	case BRCM_CC_4378_CHIP_ID:
+		return 0x352000;
+	case BRCM_CC_4387_CHIP_ID:
+		return 0x740000;
 	default:
 		brcmf_err("unknown chip: %s\n", ci->pub.name);
 		break;
 	}
-	return 0;
+	return INVALID_RAMBASE;
 }
 
 int brcmf_chip_get_raminfo(struct brcmf_chip *pub)
@@ -766,7 +764,7 @@ int brcmf_chip_get_raminfo(struct brcmf_chip *pub)
 		mem_core = container_of(mem, struct brcmf_core_priv, pub);
 		ci->pub.ramsize = brcmf_chip_tcm_ramsize(mem_core);
 		ci->pub.rambase = brcmf_chip_tcm_rambase(ci);
-		if (!ci->pub.rambase) {
+		if (ci->pub.rambase == INVALID_RAMBASE) {
 			brcmf_err("RAM base not provided with ARM CR4 core\n");
 			return -EINVAL;
 		}
@@ -777,7 +775,7 @@ int brcmf_chip_get_raminfo(struct brcmf_chip *pub)
 						pub);
 			ci->pub.ramsize = brcmf_chip_sysmem_ramsize(mem_core);
 			ci->pub.rambase = brcmf_chip_tcm_rambase(ci);
-			if (!ci->pub.rambase) {
+			if (ci->pub.rambase == INVALID_RAMBASE) {
 				brcmf_err("RAM base not provided with ARM CA7 core\n");
 				return -EINVAL;
 			}
@@ -914,7 +912,8 @@ int brcmf_chip_dmp_erom_scan(struct brcmf_chip_priv *ci)
 	u32 base, wrap;
 	int err;
 
-	eromaddr = ci->ops->read32(ci->ctx, CORE_CC_REG(SI_ENUM_BASE, eromptr));
+	eromaddr = ci->ops->read32(ci->ctx,
+				   CORE_CC_REG(ci->pub.enum_base, eromptr));
 
 	while (desc_type != DMP_DESC_EOT) {
 		val = brcmf_chip_dmp_get_desc(ci, &eromaddr, &desc_type);
@@ -962,19 +961,31 @@ int brcmf_chip_dmp_erom_scan(struct brcmf_chip_priv *ci)
 	return 0;
 }
 
+u32 brcmf_chip_enum_base(u16 devid)
+{
+	return SI_ENUM_BASE_DEFAULT;
+}
+
 static int brcmf_chip_recognition(struct brcmf_chip_priv *ci)
 {
 	struct brcmf_core *core;
 	u32 regdata;
 	u32 socitype;
 	int ret;
+	const u32 READ_FAILED = 0xFFFFFFFF;
 
 	/* Get CC core rev
 	 * Chipid is assume to be at offset 0 from SI_ENUM_BASE
 	 * For different chiptypes or old sdio hosts w/o chipcommon,
 	 * other ways of recognition should be added here.
 	 */
-	regdata = ci->ops->read32(ci->ctx, CORE_CC_REG(SI_ENUM_BASE, chipid));
+	regdata = ci->ops->read32(ci->ctx,
+				  CORE_CC_REG(ci->pub.enum_base, chipid));
+	if (regdata == READ_FAILED) {
+		brcmf_err("MMIO read failed: 0x%08x\n", regdata);
+		return -ENODEV;
+	}
+
 	ci->pub.chip = regdata & CID_ID_MASK;
 	ci->pub.chiprev = (regdata & CID_REV_MASK) >> CID_REV_SHIFT;
 	socitype = (regdata & CID_TYPE_MASK) >> CID_TYPE_SHIFT;
@@ -994,7 +1005,7 @@ static int brcmf_chip_recognition(struct brcmf_chip_priv *ci)
 		ci->resetcore = brcmf_chip_sb_resetcore;
 
 		core = brcmf_chip_add_core(ci, BCMA_CORE_CHIPCOMMON,
-					   SI_ENUM_BASE, 0);
+					   SI_ENUM_BASE_DEFAULT, 0);
 		brcmf_chip_sb_corerev(ci, core);
 		core = brcmf_chip_add_core(ci, BCMA_CORE_SDIO_DEV,
 					   BCM4329_CORE_BUS_BASE, 0);
@@ -1108,7 +1119,7 @@ static int brcmf_chip_setup(struct brcmf_chip_priv *chip)
 	return ret;
 }
 
-struct brcmf_chip *brcmf_chip_attach(void *ctx,
+struct brcmf_chip *brcmf_chip_attach(void *ctx, u16 devid,
 				     const struct brcmf_buscore_ops *ops)
 {
 	struct brcmf_chip_priv *chip;
@@ -1133,6 +1144,7 @@ struct brcmf_chip *brcmf_chip_attach(void *ctx,
 	chip->num_cores = 0;
 	chip->ops = ops;
 	chip->ctx = ctx;
+	chip->pub.enum_base = brcmf_chip_enum_base(devid);
 
 	err = ops->prepare(ctx);
 	if (err < 0)
@@ -1224,14 +1236,6 @@ struct brcmf_core *brcmf_chip_get_pmu(struct brcmf_chip *pub)
 	return cc;
 }
 
-struct brcmf_core *brcmf_chip_get_gci(struct brcmf_chip *pub)
-{
-	struct brcmf_core *gci;
-
-	gci = brcmf_chip_get_core(pub, BCMA_CORE_GCI);
-	return gci;
-}
-
 bool brcmf_chip_iscoreup(struct brcmf_core *pub)
 {
 	struct brcmf_core_priv *core;
@@ -1302,15 +1306,18 @@ static bool brcmf_chip_cm3_set_active(struct brcmf_chip_priv *chip)
 static inline void
 brcmf_chip_cr4_set_passive(struct brcmf_chip_priv *chip)
 {
+	int i;
 	struct brcmf_core *core;
 
 	brcmf_chip_disable_arm(chip, BCMA_CORE_ARM_CR4);
 
-	core = brcmf_chip_get_core(&chip->pub, BCMA_CORE_80211);
-	brcmf_chip_resetcore(core, D11_BCMA_IOCTL_PHYRESET |
-				   D11_BCMA_IOCTL_PHYCLOCKEN,
-			     D11_BCMA_IOCTL_PHYCLOCKEN,
-			     D11_BCMA_IOCTL_PHYCLOCKEN);
+	/* Disable the cores only and let the firmware enable them.
+	 * Releasing reset ourselves breaks BCM4387 in weird ways.
+	 */
+	for (i = 0; (core = brcmf_chip_get_d11core(&chip->pub, i)); i++)
+		brcmf_chip_coredisable(core, D11_BCMA_IOCTL_PHYRESET |
+				       D11_BCMA_IOCTL_PHYCLOCKEN,
+				       D11_BCMA_IOCTL_PHYCLOCKEN);
 }
 
 static bool brcmf_chip_cr4_set_active(struct brcmf_chip_priv *chip, u32 rstvec)
@@ -1418,6 +1425,7 @@ bool brcmf_chip_sr_capable(struct brcmf_chip *pub)
 	case BRCM_CC_4354_CHIP_ID:
 	case BRCM_CC_4356_CHIP_ID:
 	case BRCM_CC_4345_CHIP_ID:
+	case BRCM_CC_43454_CHIP_ID:
 		/* explicitly check SR engine enable bit */
 		pmu_cc3_mask = BIT(2);
 		fallthrough;
@@ -1435,13 +1443,14 @@ bool brcmf_chip_sr_capable(struct brcmf_chip *pub)
 		addr = CORE_CC_REG(base, sr_control1);
 		reg = chip->ops->read32(chip->ctx, addr);
 		return reg != 0;
+	case BRCM_CC_4355_CHIP_ID:
 	case CY_CC_4373_CHIP_ID:
-	case CY_CC_89459_CHIP_ID:
 		/* explicitly check SR engine enable bit */
 		addr = CORE_CC_REG(base, sr_control0);
 		reg = chip->ops->read32(chip->ctx, addr);
 		return (reg & CC_SR_CTL0_ENABLE_MASK) != 0;
 	case BRCM_CC_4359_CHIP_ID:
+	case CY_CC_43752_CHIP_ID:
 	case CY_CC_43012_CHIP_ID:
 		addr = CORE_CC_REG(pmu->base, retention_ctl);
 		reg = chip->ops->read32(chip->ctx, addr);
@@ -1459,151 +1468,3 @@ bool brcmf_chip_sr_capable(struct brcmf_chip *pub)
 			       PMU_RCTL_LOGIC_DISABLE_MASK)) == 0;
 	}
 }
-
-void brcmf_chip_reset_pmu_regs(struct brcmf_chip *pub)
-{
-	struct brcmf_chip_priv *chip;
-	u32 addr;
-	u32 base;
-
-	brcmf_dbg(TRACE, "Enter\n");
-
-	chip = container_of(pub, struct brcmf_chip_priv, pub);
-	base = brcmf_chip_get_pmu(pub)->base;
-
-	switch (pub->chip) {
-	case CY_CC_43012_CHIP_ID:
-		/* SW scratch */
-		addr = CORE_CC_REG(base, swscratch);
-		chip->ops->write32(chip->ctx, addr, 0);
-
-		/* PMU status */
-		addr = CORE_CC_REG(base, pmustatus);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_STATUS_MASK);
-
-		/* PMU control ext */
-		addr = CORE_CC_REG(base, pmucontrol_ext);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_CONTROL_EXT_MASK);
-		break;
-
-	default:
-		brcmf_err("Unsupported chip id\n");
-		break;
-	}
-}
-
-void brcmf_chip_set_default_min_res_mask(struct brcmf_chip *pub)
-{
-	struct brcmf_chip_priv *chip;
-	u32 addr;
-	u32 base;
-
-	brcmf_dbg(TRACE, "Enter\n");
-
-	chip = container_of(pub, struct brcmf_chip_priv, pub);
-	base = brcmf_chip_get_pmu(pub)->base;
-	switch (pub->chip) {
-	case CY_CC_43012_CHIP_ID:
-		addr = CORE_CC_REG(base, min_res_mask);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_MIN_RES_MASK);
-		break;
-
-	default:
-		brcmf_err("Unsupported chip id\n");
-		break;
-	}
-}
-
-void brcmf_chip_ulp_reset_lhl_regs(struct brcmf_chip *pub)
-{
-	struct brcmf_chip_priv *chip;
-	u32 base;
-	u32 addr;
-
-	brcmf_dbg(TRACE, "Enter\n");
-
-	chip = container_of(pub, struct brcmf_chip_priv, pub);
-	base = brcmf_chip_get_gci(pub)->base;
-
-	/* LHL Top Level Power Sequence Control */
-	addr = CORE_GCI_REG(base, lhl_top_pwrseq_ctl_adr);
-	chip->ops->write32(chip->ctx, addr, 0);
-
-	/* GPIO Interrupt Enable0 */
-	addr = CORE_GCI_REG(base, gpio_int_en_port_adr[0]);
-	chip->ops->write32(chip->ctx, addr, 0);
-
-	/* GPIO Interrupt Status0 */
-	addr = CORE_GCI_REG(base, gpio_int_st_port_adr[0]);
-	chip->ops->write32(chip->ctx, addr, ~0);
-
-	/* WL ARM Timer0 Interrupt Mask */
-	addr = CORE_GCI_REG(base, lhl_wl_armtim0_intrp_adr);
-	chip->ops->write32(chip->ctx, addr, 0);
-
-	/* WL ARM Timer0 Interrupt Status */
-	addr = CORE_GCI_REG(base, lhl_wl_armtim0_st_adr);
-	chip->ops->write32(chip->ctx, addr, ~0);
-
-	/* WL ARM Timer */
-	addr = CORE_GCI_REG(base, lhl_wl_armtim0_adr);
-	chip->ops->write32(chip->ctx, addr, 0);
-
-	/* WL MAC Timer0 Interrupt Mask */
-	addr = CORE_GCI_REG(base, lhl_wl_mactim0_intrp_adr);
-	chip->ops->write32(chip->ctx, addr, 0);
-
-	/* WL MAC Timer0 Interrupt Status */
-	addr = CORE_GCI_REG(base, lhl_wl_mactim0_st_adr);
-	chip->ops->write32(chip->ctx, addr, ~0);
-
-	/* WL MAC TimerInt0 */
-	addr = CORE_GCI_REG(base, lhl_wl_mactim_int0_adr);
-	chip->ops->write32(chip->ctx, addr, 0x0);
-}
-
-void brcmf_chip_reset_watchdog(struct brcmf_chip *pub)
-{
-	struct brcmf_chip_priv *chip;
-	u32 base;
-	u32 addr;
-
-	brcmf_dbg(TRACE, "Enter\n");
-
-	chip = container_of(pub, struct brcmf_chip_priv, pub);
-	base = brcmf_chip_get_pmu(pub)->base;
-
-	switch (pub->chip) {
-	case CY_CC_43012_CHIP_ID:
-		addr = CORE_CC_REG(base, min_res_mask);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_MIN_RES_MASK);
-		/* Watchdog res mask */
-		addr = CORE_CC_REG(base, watchdog_res_mask);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_MIN_RES_MASK);
-		/* PMU watchdog */
-		addr = CORE_CC_REG(base, pmuwatchdog);
-		chip->ops->write32(chip->ctx, addr,
-			CY_43012_PMU_WATCHDOG_TICK_VAL);
-		break;
-	case CY_CC_4373_CHIP_ID:
-		addr = CORE_CC_REG(base, min_res_mask);
-		chip->ops->write32(chip->ctx, addr,
-			CY_4373_PMU_MIN_RES_MASK);
-		addr = CORE_CC_REG(base, watchdog_res_mask);
-		chip->ops->write32(chip->ctx, addr,
-			CY_4373_PMU_MIN_RES_MASK);
-		addr = CORE_CC_REG(base, pmuwatchdog);
-		chip->ops->write32(chip->ctx, addr,
-			CY_4373_PMU_WATCHDOG_TICK_VAL);
-		mdelay(100);
-		break;
-	default:
-		break;
-	}
-}
-

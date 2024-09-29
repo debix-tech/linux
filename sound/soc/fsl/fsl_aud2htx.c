@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+
-//
-// Freescale ALSA SoC Digital Audio Interface (SAI) driver.
-//
-// Copyright 2012-2016 Freescale Semiconductor, Inc.
+// Copyright 2020 NXP
 
 #include <linux/clk.h>
 #include <linux/clk-provider.h>
@@ -20,34 +17,9 @@
 #include <sound/dmaengine_pcm.h>
 #include <sound/pcm_params.h>
 #include <linux/dma-mapping.h>
+
 #include "fsl_aud2htx.h"
 #include "imx-pcm.h"
-
-static int fsl_aud2htx_hw_params(struct snd_pcm_substream *substream,
-				 struct snd_pcm_hw_params *params,
-				 struct snd_soc_dai *cpu_dai)
-{
-	struct fsl_aud2htx *aud2htx = snd_soc_dai_get_drvdata(cpu_dai);
-
-	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
-			   AUD2HTX_CTRE_DT_MASK, 0);
-
-	regmap_update_bits(aud2htx->regmap, AUD2HTX_IRQ_MASK,
-			   AUD2HTX_WM_HIGH_IRQ_MASK |
-			   AUD2HTX_WM_LOW_IRQ_MASK |
-			   AUD2HTX_OVF_MASK,
-			   AUD2HTX_WM_HIGH_IRQ_MASK |
-			   AUD2HTX_WM_LOW_IRQ_MASK |
-			   AUD2HTX_OVF_MASK);
-
-	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
-			   AUD2HTX_CTRE_WL_MASK,
-			   0x10 << AUD2HTX_CTRE_WL_SHIFT);
-	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
-			   AUD2HTX_CTRE_WH_MASK,
-			   0x10 << AUD2HTX_CTRE_WH_SHIFT);
-	return 0;
-}
 
 static int fsl_aud2htx_trigger(struct snd_pcm_substream *substream, int cmd,
 			       struct snd_soc_dai *dai)
@@ -77,36 +49,30 @@ static int fsl_aud2htx_trigger(struct snd_pcm_substream *substream, int cmd,
 	return 0;
 }
 
-static int fsl_aud2htx_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
-				      int clk_id, unsigned int freq, int dir)
-{
-	return 0;
-}
-
-static int fsl_aud2htx_set_dai_fmt(struct snd_soc_dai *cpu_dai,
-				   unsigned int fmt)
-{
-	return 0;
-}
-
-static int fsl_aud2htx_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai,
-					u32 tx_mask,
-					u32 rx_mask, int slots, int slot_width)
-{
-	return 0;
-}
-
-static const struct snd_soc_dai_ops fsl_aud2htx_dai_ops = {
-	.hw_params	= fsl_aud2htx_hw_params,
-	.trigger	= fsl_aud2htx_trigger,
-	.set_sysclk	= fsl_aud2htx_set_dai_sysclk,
-	.set_fmt	= fsl_aud2htx_set_dai_fmt,
-	.set_tdm_slot	= fsl_aud2htx_set_dai_tdm_slot,
-};
-
 static int fsl_aud2htx_dai_probe(struct snd_soc_dai *cpu_dai)
 {
 	struct fsl_aud2htx *aud2htx = dev_get_drvdata(cpu_dai->dev);
+
+	/* DMA request when number of entries < WTMK_LOW */
+	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
+			   AUD2HTX_CTRE_DT_MASK, 0);
+
+	/* Disable interrupts*/
+	regmap_update_bits(aud2htx->regmap, AUD2HTX_IRQ_MASK,
+			   AUD2HTX_WM_HIGH_IRQ_MASK |
+			   AUD2HTX_WM_LOW_IRQ_MASK |
+			   AUD2HTX_OVF_MASK,
+			   AUD2HTX_WM_HIGH_IRQ_MASK |
+			   AUD2HTX_WM_LOW_IRQ_MASK |
+			   AUD2HTX_OVF_MASK);
+
+	/* Configure watermark */
+	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
+			   AUD2HTX_CTRE_WL_MASK,
+			   AUD2HTX_WTMK_LOW << AUD2HTX_CTRE_WL_SHIFT);
+	regmap_update_bits(aud2htx->regmap, AUD2HTX_CTRL_EXT,
+			   AUD2HTX_CTRE_WH_MASK,
+			   AUD2HTX_WTMK_HIGH << AUD2HTX_CTRE_WH_SHIFT);
 
 	snd_soc_dai_init_dma_data(cpu_dai, &aud2htx->dma_params_tx,
 				  &aud2htx->dma_params_rx);
@@ -114,11 +80,15 @@ static int fsl_aud2htx_dai_probe(struct snd_soc_dai *cpu_dai)
 	return 0;
 }
 
+static const struct snd_soc_dai_ops fsl_aud2htx_dai_ops = {
+	.probe		= fsl_aud2htx_dai_probe,
+	.trigger	= fsl_aud2htx_trigger,
+};
+
 static struct snd_soc_dai_driver fsl_aud2htx_dai = {
-	.probe = fsl_aud2htx_dai_probe,
 	.playback = {
 		.stream_name = "CPU-Playback",
-		.channels_min = 2,
+		.channels_min = 1,
 		.channels_max = 8,
 		.rates = SNDRV_PCM_RATE_32000 |
 			 SNDRV_PCM_RATE_44100 |
@@ -133,7 +103,8 @@ static struct snd_soc_dai_driver fsl_aud2htx_dai = {
 };
 
 static const struct snd_soc_component_driver fsl_aud2htx_component = {
-	.name	= "fsl-aud2htx",
+	.name			= "fsl-aud2htx",
+	.legacy_dai_naming	= 1,
 };
 
 static const struct reg_default fsl_aud2htx_reg_defaults[] = {
@@ -206,7 +177,6 @@ static const struct of_device_id fsl_aud2htx_dt_ids[] = {
 	{ .compatible = "fsl,imx8mp-aud2htx",},
 	{}
 };
-
 MODULE_DEVICE_TABLE(of, fsl_aud2htx_dt_ids);
 
 static irqreturn_t fsl_aud2htx_isr(int irq, void *dev_id)
@@ -218,7 +188,6 @@ static int fsl_aud2htx_probe(struct platform_device *pdev)
 {
 	struct fsl_aud2htx *aud2htx;
 	struct resource *res;
-	struct device_node *np;
 	void __iomem *regs;
 	int ret, irq;
 
@@ -227,28 +196,21 @@ static int fsl_aud2htx_probe(struct platform_device *pdev)
 		return -ENOMEM;
 
 	aud2htx->pdev = pdev;
-	np = pdev->dev.of_node;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	regs = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(regs)) {
-		dev_err(&pdev->dev, "failed ioremap\n");
+	regs = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
+	if (IS_ERR(regs))
 		return PTR_ERR(regs);
-	}
 
-	aud2htx->regmap = devm_regmap_init_mmio_clk(&pdev->dev, NULL, regs,
-						    &fsl_aud2htx_regmap_config);
+	aud2htx->regmap = devm_regmap_init_mmio(&pdev->dev, regs,
+						&fsl_aud2htx_regmap_config);
 	if (IS_ERR(aud2htx->regmap)) {
 		dev_err(&pdev->dev, "failed to init regmap");
 		return PTR_ERR(aud2htx->regmap);
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no irq for node %s\n",
-			dev_name(&pdev->dev));
+	if (irq < 0)
 		return irq;
-	}
 
 	ret = devm_request_irq(&pdev->dev, irq, fsl_aud2htx_isr, 0,
 			       dev_name(&pdev->dev), aud2htx);
@@ -264,7 +226,7 @@ static int fsl_aud2htx_probe(struct platform_device *pdev)
 	}
 
 	aud2htx->dma_params_tx.chan_name = "tx";
-	aud2htx->dma_params_tx.maxburst = 16;
+	aud2htx->dma_params_tx.maxburst = AUD2HTX_MAXBURST;
 	aud2htx->dma_params_tx.addr = res->start + AUD2HTX_WR;
 
 	platform_set_drvdata(pdev, aud2htx);
@@ -272,30 +234,35 @@ static int fsl_aud2htx_probe(struct platform_device *pdev)
 
 	regcache_cache_only(aud2htx->regmap, true);
 
+	/*
+	 * Register platform component before registering cpu dai for there
+	 * is not defer probe for platform component in snd_soc_add_pcm_runtime().
+	 */
+	ret = devm_snd_dmaengine_pcm_register(&pdev->dev, NULL, 0);
+	if (ret) {
+		dev_err(&pdev->dev, "failed to pcm register\n");
+		pm_runtime_disable(&pdev->dev);
+		return ret;
+	}
+
 	ret = devm_snd_soc_register_component(&pdev->dev,
 					      &fsl_aud2htx_component,
 					      &fsl_aud2htx_dai, 1);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to register ASoC DAI\n");
+		pm_runtime_disable(&pdev->dev);
 		return ret;
 	}
-
-	ret = imx_pcm_dma_init(pdev, IMX_DEFAULT_DMABUF_SIZE);
-	if (ret)
-		dev_err(&pdev->dev, "failed to init imx pcm dma: %d\n", ret);
 
 	return ret;
 }
 
-static int fsl_aud2htx_remove(struct platform_device *pdev)
+static void fsl_aud2htx_remove(struct platform_device *pdev)
 {
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
-#ifdef CONFIG_PM
-static int fsl_aud2htx_runtime_suspend(struct device *dev)
+static int __maybe_unused fsl_aud2htx_runtime_suspend(struct device *dev)
 {
 	struct fsl_aud2htx *aud2htx = dev_get_drvdata(dev);
 
@@ -305,7 +272,7 @@ static int fsl_aud2htx_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int fsl_aud2htx_runtime_resume(struct device *dev)
+static int __maybe_unused fsl_aud2htx_runtime_resume(struct device *dev)
 {
 	struct fsl_aud2htx *aud2htx = dev_get_drvdata(dev);
 	int ret;
@@ -320,7 +287,6 @@ static int fsl_aud2htx_runtime_resume(struct device *dev)
 
 	return 0;
 }
-#endif /*CONFIG_PM*/
 
 static const struct dev_pm_ops fsl_aud2htx_pm_ops = {
 	SET_RUNTIME_PM_OPS(fsl_aud2htx_runtime_suspend,
@@ -332,7 +298,7 @@ static const struct dev_pm_ops fsl_aud2htx_pm_ops = {
 
 static struct platform_driver fsl_aud2htx_driver = {
 	.probe = fsl_aud2htx_probe,
-	.remove = fsl_aud2htx_remove,
+	.remove_new = fsl_aud2htx_remove,
 	.driver = {
 		.name = "fsl-aud2htx",
 		.pm = &fsl_aud2htx_pm_ops,
@@ -341,5 +307,6 @@ static struct platform_driver fsl_aud2htx_driver = {
 };
 module_platform_driver(fsl_aud2htx_driver);
 
+MODULE_AUTHOR("Shengjiu Wang <Shengjiu.Wang@nxp.com>");
 MODULE_DESCRIPTION("NXP AUD2HTX driver");
 MODULE_LICENSE("GPL v2");

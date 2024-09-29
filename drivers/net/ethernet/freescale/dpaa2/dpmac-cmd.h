@@ -19,6 +19,8 @@
 #define DPMAC_CMDID_CLOSE		DPMAC_CMD(0x800)
 #define DPMAC_CMDID_OPEN		DPMAC_CMD(0x80c)
 
+#define DPMAC_CMDID_GET_API_VERSION	DPMAC_CMD(0xa0c)
+
 #define DPMAC_CMDID_GET_ATTR		DPMAC_CMD(0x004)
 
 #define DPMAC_CMDID_SET_IRQ_ENABLE	DPMAC_CMD(0x012)
@@ -32,6 +34,9 @@
 #define DPMAC_CMDID_SET_LINK_STATE	DPMAC_CMD_V2(0x0c3)
 
 #define DPMAC_CMDID_GET_COUNTER		DPMAC_CMD(0x0c4)
+
+#define DPMAC_CMDID_SET_PROTOCOL	DPMAC_CMD(0x0c7)
+
 /* Macros for accessing command fields smaller than 1byte */
 #define DPMAC_MASK(field)        \
 	GENMASK(DPMAC_##field##_SHIFT + DPMAC_##field##_SIZE - 1, \
@@ -76,6 +81,15 @@ struct dpmac_cmd_get_counter {
 struct dpmac_rsp_get_counter {
 	__le64 pad;
 	__le64 counter;
+};
+
+struct dpmac_rsp_get_api_version {
+	__le16 major;
+	__le16 minor;
+};
+
+struct dpmac_cmd_set_protocol {
+	u8 eth_if;
 };
 
 struct dpmac_cmd_set_irq_enable {

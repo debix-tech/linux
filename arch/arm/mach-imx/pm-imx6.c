@@ -4,17 +4,20 @@
  * Copyright 2011 Linaro Ltd.
  */
 
+#include <linux/clk/imx.h>
 #include <linux/delay.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/irq.h>
 #include <linux/genalloc.h>
+#include <linux/irqchip/arm-gic.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_fdt.h>
 #include <linux/of_platform.h>
+#include <linux/platform_device.h>
 #include <linux/psci.h>
 #include <linux/regmap.h>
 #include <linux/slab.h>

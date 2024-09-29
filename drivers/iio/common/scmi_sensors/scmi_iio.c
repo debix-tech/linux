@@ -15,16 +15,21 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/scmi_protocol.h>
 #include <linux/time.h>
 #include <linux/types.h>
+#include <linux/units.h>
 
 #define SCMI_IIO_NUM_OF_AXIS 3
 
 struct scmi_iio_priv {
-	struct scmi_handle *handle;
+	const struct scmi_sensor_proto_ops *sensor_ops;
+	struct scmi_protocol_handle *ph;
 	const struct scmi_sensor_info *sensor_info;
 	struct iio_dev *indio_dev;
+	/* lock to protect against multiple access to the device */
+	struct mutex lock;
 	/* adding one additional channel for timestamp */
 	s64 iio_buf[SCMI_IIO_NUM_OF_AXIS + 1];
 	struct notifier_block sensor_update_nb;
@@ -82,7 +87,6 @@ static int scmi_iio_sensor_update_cb(struct notifier_block *nb,
 static int scmi_iio_buffer_preenable(struct iio_dev *iio_dev)
 {
 	struct scmi_iio_priv *sensor = iio_priv(iio_dev);
-	u32 sensor_id = sensor->sensor_info->id;
 	u32 sensor_config = 0;
 	int err;
 
@@ -92,27 +96,12 @@ static int scmi_iio_buffer_preenable(struct iio_dev *iio_dev)
 
 	sensor_config |= FIELD_PREP(SCMI_SENS_CFG_SENSOR_ENABLED_MASK,
 				    SCMI_SENS_CFG_SENSOR_ENABLE);
-
-	err = sensor->handle->notify_ops->register_event_notifier(sensor->handle,
-			SCMI_PROTOCOL_SENSOR, SCMI_EVENT_SENSOR_UPDATE,
-			&sensor_id, &sensor->sensor_update_nb);
-	if (err) {
-		dev_err(&iio_dev->dev,
-			"Error in registering sensor update notifier for sensor %s err %d",
-			sensor->sensor_info->name, err);
-		return err;
-	}
-
-	err = sensor->handle->sensor_ops->config_set(sensor->handle,
-			sensor->sensor_info->id, sensor_config);
-	if (err) {
-		sensor->handle->notify_ops->unregister_event_notifier(sensor->handle,
-				SCMI_PROTOCOL_SENSOR,
-				SCMI_EVENT_SENSOR_UPDATE, &sensor_id,
-				&sensor->sensor_update_nb);
+	err = sensor->sensor_ops->config_set(sensor->ph,
+					     sensor->sensor_info->id,
+					     sensor_config);
+	if (err)
 		dev_err(&iio_dev->dev, "Error in enabling sensor %s err %d",
 			sensor->sensor_info->name, err);
-	}
 
 	return err;
 }
@@ -120,25 +109,14 @@ static int scmi_iio_buffer_preenable(struct iio_dev *iio_dev)
 static int scmi_iio_buffer_postdisable(struct iio_dev *iio_dev)
 {
 	struct scmi_iio_priv *sensor = iio_priv(iio_dev);
-	u32 sensor_id = sensor->sensor_info->id;
 	u32 sensor_config = 0;
 	int err;
 
 	sensor_config |= FIELD_PREP(SCMI_SENS_CFG_SENSOR_ENABLED_MASK,
 				    SCMI_SENS_CFG_SENSOR_DISABLE);
-
-	err = sensor->handle->notify_ops->unregister_event_notifier(sensor->handle,
-			SCMI_PROTOCOL_SENSOR, SCMI_EVENT_SENSOR_UPDATE,
-			&sensor_id, &sensor->sensor_update_nb);
-	if (err) {
-		dev_err(&iio_dev->dev,
-			"Error in unregistering sensor update notifier for sensor %s err %d",
-			sensor->sensor_info->name, err);
-		return err;
-	}
-
-	err = sensor->handle->sensor_ops->config_set(sensor->handle, sensor_id,
-						     sensor_config);
+	err = sensor->sensor_ops->config_set(sensor->ph,
+					     sensor->sensor_info->id,
+					     sensor_config);
 	if (err) {
 		dev_err(&iio_dev->dev,
 			"Error in disabling sensor %s with err %d",
@@ -156,13 +134,13 @@ static const struct iio_buffer_setup_ops scmi_iio_buffer_ops = {
 static int scmi_iio_set_odr_val(struct iio_dev *iio_dev, int val, int val2)
 {
 	struct scmi_iio_priv *sensor = iio_priv(iio_dev);
-	const unsigned long UHZ_PER_HZ = 1000000UL;
 	u64 sec, mult, uHz, sf;
 	u32 sensor_config;
 	char buf[32];
 
-	int err = sensor->handle->sensor_ops->config_get(sensor->handle,
-			sensor->sensor_info->id, &sensor_config);
+	int err = sensor->sensor_ops->config_get(sensor->ph,
+						 sensor->sensor_info->id,
+						 &sensor_config);
 	if (err) {
 		dev_err(&iio_dev->dev,
 			"Error in getting sensor config for sensor %s err %d",
@@ -170,7 +148,7 @@ static int scmi_iio_set_odr_val(struct iio_dev *iio_dev, int val, int val2)
 		return err;
 	}
 
-	uHz = val * UHZ_PER_HZ + val2;
+	uHz = val * MICROHZ_PER_HZ + val2;
 
 	/*
 	 * The seconds field in the sensor interval in SCMI is 16 bits long
@@ -181,10 +159,10 @@ static int scmi_iio_set_odr_val(struct iio_dev *iio_dev, int val, int val2)
 	 * count the number of characters
 	 */
 	sf = (u64)uHz * 0xFFFF;
-	do_div(sf,  UHZ_PER_HZ);
+	do_div(sf,  MICROHZ_PER_HZ);
 	mult = scnprintf(buf, sizeof(buf), "%llu", sf) - 1;
 
-	sec = int_pow(10, mult) * UHZ_PER_HZ;
+	sec = int_pow(10, mult) * MICROHZ_PER_HZ;
 	do_div(sec, uHz);
 	if (sec == 0) {
 		dev_err(&iio_dev->dev,
@@ -208,8 +186,9 @@ static int scmi_iio_set_odr_val(struct iio_dev *iio_dev, int val, int val2)
 	sensor_config |=
 		FIELD_PREP(SCMI_SENS_CFG_ROUND_MASK, SCMI_SENS_CFG_ROUND_AUTO);
 
-	err = sensor->handle->sensor_ops->config_set(sensor->handle,
-			sensor->sensor_info->id, sensor_config);
+	err = sensor->sensor_ops->config_set(sensor->ph,
+					     sensor->sensor_info->id,
+					     sensor_config);
 	if (err)
 		dev_err(&iio_dev->dev,
 			"Error in setting sensor update interval for sensor %s value %u err %d",
@@ -222,13 +201,14 @@ static int scmi_iio_write_raw(struct iio_dev *iio_dev,
 			      struct iio_chan_spec const *chan, int val,
 			      int val2, long mask)
 {
+	struct scmi_iio_priv *sensor = iio_priv(iio_dev);
 	int err;
 
 	switch (mask) {
 	case IIO_CHAN_INFO_SAMP_FREQ:
-		mutex_lock(&iio_dev->mlock);
+		mutex_lock(&sensor->lock);
 		err = scmi_iio_set_odr_val(iio_dev, val, val2);
-		mutex_unlock(&iio_dev->mlock);
+		mutex_unlock(&sensor->lock);
 		return err;
 	default:
 		return -EINVAL;
@@ -274,8 +254,9 @@ static int scmi_iio_get_odr_val(struct iio_dev *iio_dev, int *val, int *val2)
 	u32 sensor_config;
 	int mult;
 
-	int err = sensor->handle->sensor_ops->config_get(sensor->handle,
-			sensor->sensor_info->id, &sensor_config);
+	int err = sensor->sensor_ops->config_get(sensor->ph,
+						 sensor->sensor_info->id,
+						 &sensor_config);
 	if (err) {
 		dev_err(&iio_dev->dev,
 			"Error in getting sensor config for sensor %s err %d",
@@ -302,6 +283,52 @@ static int scmi_iio_get_odr_val(struct iio_dev *iio_dev, int *val, int *val2)
 	return 0;
 }
 
+static int scmi_iio_read_channel_data(struct iio_dev *iio_dev,
+			     struct iio_chan_spec const *ch, int *val, int *val2)
+{
+	struct scmi_iio_priv *sensor = iio_priv(iio_dev);
+	u32 sensor_config;
+	struct scmi_sensor_reading readings[SCMI_IIO_NUM_OF_AXIS];
+	int err;
+
+	sensor_config = FIELD_PREP(SCMI_SENS_CFG_SENSOR_ENABLED_MASK,
+					SCMI_SENS_CFG_SENSOR_ENABLE);
+	err = sensor->sensor_ops->config_set(
+		sensor->ph, sensor->sensor_info->id, sensor_config);
+	if (err) {
+		dev_err(&iio_dev->dev,
+			"Error in enabling sensor %s err %d",
+			sensor->sensor_info->name, err);
+		return err;
+	}
+
+	err = sensor->sensor_ops->reading_get_timestamped(
+		sensor->ph, sensor->sensor_info->id,
+		sensor->sensor_info->num_axis, readings);
+	if (err) {
+		dev_err(&iio_dev->dev,
+			"Error in reading raw attribute for sensor %s err %d",
+			sensor->sensor_info->name, err);
+		return err;
+	}
+
+	sensor_config = FIELD_PREP(SCMI_SENS_CFG_SENSOR_ENABLED_MASK,
+					SCMI_SENS_CFG_SENSOR_DISABLE);
+	err = sensor->sensor_ops->config_set(
+		sensor->ph, sensor->sensor_info->id, sensor_config);
+	if (err) {
+		dev_err(&iio_dev->dev,
+			"Error in disabling sensor %s err %d",
+			sensor->sensor_info->name, err);
+		return err;
+	}
+
+	*val = lower_32_bits(readings[ch->scan_index].value);
+	*val2 = upper_32_bits(readings[ch->scan_index].value);
+
+	return IIO_VAL_INT_64;
+}
+
 static int scmi_iio_read_raw(struct iio_dev *iio_dev,
 			     struct iio_chan_spec const *ch, int *val,
 			     int *val2, long mask)
@@ -323,6 +350,14 @@ static int scmi_iio_read_raw(struct iio_dev *iio_dev,
 	case IIO_CHAN_INFO_SAMP_FREQ:
 		ret = scmi_iio_get_odr_val(iio_dev, val, val2);
 		return ret ? ret : IIO_VAL_INT_PLUS_MICRO;
+	case IIO_CHAN_INFO_RAW:
+		ret = iio_device_claim_direct_mode(iio_dev);
+		if (ret)
+			return ret;
+
+		ret = scmi_iio_read_channel_data(iio_dev, ch, val, val2);
+		iio_device_release_direct_mode(iio_dev);
+		return ret;
 	default:
 		return -EINVAL;
 	}
@@ -365,12 +400,12 @@ static ssize_t scmi_iio_get_raw_available(struct iio_dev *iio_dev,
 			rem = do_div(resolution,
 				     int_pow(10, abs(exponent))
 				     );
-			len = scnprintf(buf, PAGE_SIZE,
+			len = sysfs_emit(buf,
 					"[%lld %llu.%llu %lld]\n", min_range,
 					resolution, rem, max_range);
 		} else {
 			resolution = resolution * int_pow(10, exponent);
-			len = scnprintf(buf, PAGE_SIZE, "[%lld %llu %lld]\n",
+			len = sysfs_emit(buf, "[%lld %llu %lld]\n",
 					min_range, resolution, max_range);
 		}
 	}
@@ -404,7 +439,8 @@ static void scmi_iio_set_data_channel(struct iio_chan_spec *iio_chan,
 	iio_chan->type = type;
 	iio_chan->modified = 1;
 	iio_chan->channel2 = mod;
-	iio_chan->info_mask_separate = BIT(IIO_CHAN_INFO_SCALE);
+	iio_chan->info_mask_separate =
+		BIT(IIO_CHAN_INFO_SCALE) | BIT(IIO_CHAN_INFO_RAW);
 	iio_chan->info_mask_shared_by_type = BIT(IIO_CHAN_INFO_SAMP_FREQ);
 	iio_chan->info_mask_shared_by_type_available =
 		BIT(IIO_CHAN_INFO_SAMP_FREQ);
@@ -528,29 +564,19 @@ static int scmi_iio_set_sampling_freq_avail(struct iio_dev *iio_dev)
 	return 0;
 }
 
-static int scmi_iio_buffers_setup(struct iio_dev *scmi_iiodev)
-{
-	struct iio_buffer *buffer;
-
-	buffer = devm_iio_kfifo_allocate(&scmi_iiodev->dev);
-	if (!buffer)
-		return -ENOMEM;
-
-	iio_device_attach_buffer(scmi_iiodev, buffer);
-	scmi_iiodev->modes |= INDIO_BUFFER_SOFTWARE;
-	scmi_iiodev->setup_ops = &scmi_iio_buffer_ops;
-	return 0;
-}
-
-static struct iio_dev *scmi_alloc_iiodev(struct device *dev,
-					 struct scmi_handle *handle,
-					 const struct scmi_sensor_info *sensor_info)
+static struct iio_dev *
+scmi_alloc_iiodev(struct scmi_device *sdev,
+		  const struct scmi_sensor_proto_ops *ops,
+		  struct scmi_protocol_handle *ph,
+		  const struct scmi_sensor_info *sensor_info)
 {
 	struct iio_chan_spec *iio_channels;
 	struct scmi_iio_priv *sensor;
 	enum iio_modifier modifier;
 	enum iio_chan_type type;
 	struct iio_dev *iiodev;
+	struct device *dev = &sdev->dev;
+	const struct scmi_handle *handle = sdev->handle;
 	int i, ret;
 
 	iiodev = devm_iio_device_alloc(dev, sizeof(*sensor));
@@ -558,12 +584,13 @@ static struct iio_dev *scmi_alloc_iiodev(struct device *dev,
 		return ERR_PTR(-ENOMEM);
 
 	iiodev->modes = INDIO_DIRECT_MODE;
-	iiodev->dev.parent = dev;
 	sensor = iio_priv(iiodev);
-	sensor->handle = handle;
+	sensor->sensor_ops = ops;
+	sensor->ph = ph;
 	sensor->sensor_info = sensor_info;
 	sensor->sensor_update_nb.notifier_call = scmi_iio_sensor_update_cb;
 	sensor->indio_dev = iiodev;
+	mutex_init(&sensor->lock);
 
 	/* adding one additional channel for timestamp */
 	iiodev->num_channels = sensor_info->num_axis + 1;
@@ -595,6 +622,17 @@ static struct iio_dev *scmi_alloc_iiodev(struct device *dev,
 					  sensor_info->axis[i].id);
 	}
 
+	ret = handle->notify_ops->devm_event_notifier_register(sdev,
+				SCMI_PROTOCOL_SENSOR, SCMI_EVENT_SENSOR_UPDATE,
+				&sensor->sensor_info->id,
+				&sensor->sensor_update_nb);
+	if (ret) {
+		dev_err(&iiodev->dev,
+			"Error in registering sensor update notifier for sensor %s err %d",
+			sensor->sensor_info->name, ret);
+		return ERR_PTR(ret);
+	}
+
 	scmi_iio_set_timestamp_channel(&iio_channels[i], i);
 	iiodev->channels = iio_channels;
 	return iiodev;
@@ -604,24 +642,30 @@ static int scmi_iio_dev_probe(struct scmi_device *sdev)
 {
 	const struct scmi_sensor_info *sensor_info;
 	struct scmi_handle *handle = sdev->handle;
+	const struct scmi_sensor_proto_ops *sensor_ops;
+	struct scmi_protocol_handle *ph;
 	struct device *dev = &sdev->dev;
 	struct iio_dev *scmi_iio_dev;
 	u16 nr_sensors;
 	int err = -ENODEV, i;
 
-	if (!handle || !handle->sensor_ops) {
+	if (!handle)
+		return -ENODEV;
+
+	sensor_ops = handle->devm_protocol_get(sdev, SCMI_PROTOCOL_SENSOR, &ph);
+	if (IS_ERR(sensor_ops)) {
 		dev_err(dev, "SCMI device has no sensor interface\n");
-		return -EINVAL;
+		return PTR_ERR(sensor_ops);
 	}
 
-	nr_sensors = handle->sensor_ops->count_get(handle);
+	nr_sensors = sensor_ops->count_get(ph);
 	if (!nr_sensors) {
 		dev_dbg(dev, "0 sensors found via SCMI bus\n");
 		return -ENODEV;
 	}
 
 	for (i = 0; i < nr_sensors; i++) {
-		sensor_info = handle->sensor_ops->info_get(handle, i);
+		sensor_info = sensor_ops->info_get(ph, i);
 		if (!sensor_info) {
 			dev_err(dev, "SCMI sensor %d has missing info\n", i);
 			return -EINVAL;
@@ -636,7 +680,8 @@ static int scmi_iio_dev_probe(struct scmi_device *sdev)
 		    sensor_info->axis[0].type != RADIANS_SEC)
 			continue;
 
-		scmi_iio_dev = scmi_alloc_iiodev(dev, handle, sensor_info);
+		scmi_iio_dev = scmi_alloc_iiodev(sdev, sensor_ops, ph,
+						 sensor_info);
 		if (IS_ERR(scmi_iio_dev)) {
 			dev_err(dev,
 				"failed to allocate IIO device for sensor %s: %ld\n",
@@ -644,7 +689,9 @@ static int scmi_iio_dev_probe(struct scmi_device *sdev)
 			return PTR_ERR(scmi_iio_dev);
 		}
 
-		err = scmi_iio_buffers_setup(scmi_iio_dev);
+		err = devm_iio_kfifo_buffer_setup(&scmi_iio_dev->dev,
+						  scmi_iio_dev,
+						  &scmi_iio_buffer_ops);
 		if (err < 0) {
 			dev_err(dev,
 				"IIO buffer setup error at sensor %s: %d\n",

@@ -7,10 +7,18 @@
 	/delete-node/ ir-receiver;
 	/delete-node/ audio-codec;
 	/delete-node/ regulator-audio-board;
+	/delete-node/ regulator-pcie;
 	/delete-node/ sound-wm8524;
 	/delete-node/ sound-ak5558;
 	/delete-node/ sound-ak4497;
 	/delete-node/ sound-micfil;
+
+	ak4458_reset: gpio-reset {
+		compatible = "gpio-reset";
+		reset-gpios = <&pca6416 4 GPIO_ACTIVE_LOW>;
+		#reset-cells = <0>;
+		initially-in-reset;
+	};
 
 	leds {
 		panel {
@@ -96,19 +104,40 @@
 		vin-supply = <&reg_cph_3v3>;
 	};
 
+	reg_pcie0: regulator-pcie {
+		status = "disabled";
+	};
+
 	sound-ak4458 {
-		compatible = "fsl,imx-audio-ak4458";
+		compatible = "fsl,imx-audio-card";
 		model = "ak4458-audio";
-		audio-cpu = <&sai1>;
-		audio-codec = <&ak4458_1>, <&ak4458_2>;
-		reset-gpios = <&pca6416 4 GPIO_ACTIVE_LOW>;
+		pri-dai-link {
+			link-name = "akcodec";
+			format = "i2s";
+			fsl,mclk-equal-bclk;
+			cpu {
+				sound-dai = <&sai1>;
+			};
+			codec {
+				sound-codec = <&ak4458_1>, <&ak4458_2>;
+			};
+		};
 	};
 
 	sound-ak5552 {
-		compatible = "fsl,imx-audio-ak5552";
+		compatible = "fsl,imx-audio-card";
 		model = "ak5552-audio";
-		audio-cpu = <&sai5>;
-		audio-codec = <&ak5552>;
+		pri-dai-link {
+			link-name = "akcodec";
+			format = "i2s";
+			fsl,mclk-equal-bclk;
+			cpu {
+				sound-dai = <&sai5>;
+			};
+			codec {
+				sound-dai = <&ak5552>;
+			};
+		};
 	};
 };
 
@@ -118,14 +147,11 @@
 };
 
 &fec1 {
-	phy-reset-gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
-	phy-reset-post-delay = <150>;
-	phy-reset-duration = <10>;
-
 	mdio {
 		ethphy0: ethernet-phy@0 {
-			/delete-property/ at803x,eee-disabled;
-			/delete-property/ at803x,vddio-1p8v;
+			reset-gpios = <&gpio1 5 GPIO_ACTIVE_LOW>;
+			reset-deassert-us = <150000>;
+			reset-assert-us = <15000>;
 			max-speed = <100>;
 		};
 	};
@@ -181,33 +207,46 @@
 	};
 
 	ak4458_1: ak4458@10 {
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "0";
 		compatible = "asahi-kasei,ak4458";
 		reg = <0x10>;
+		resets = <&ak4458_reset>;
 		AVDD-supply = <&reg_dac_avdd_5v0>;
 		DVDD-supply = <&reg_dac_dvdd_3v3>;
+		status = "okay";
 	};
 
 	ak4458_2: ak4458@12 {
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "1";
 		compatible = "asahi-kasei,ak4458";
 		reg = <0x12>;
+		resets = <&ak4458_reset>;
 		AVDD-supply = <&reg_dac_avdd_5v0>;
 		DVDD-supply = <&reg_dac_dvdd_3v3>;
+		status = "okay";
 	};
 
 	ak4458_3: ak4458@11 {
+		#sound-dai-cells = <0>;
+		sound-name-prefix = "2";
 		compatible = "asahi-kasei,ak4458";
 		reg = <0x11>;
+		resets = <&ak4458_reset>;
 		AVDD-supply = <&reg_dac_avdd_5v0>;
 		DVDD-supply = <&reg_dac_dvdd_3v3>;
 		status = "disabled";
 	};
 
 	ak5552: ak5552@13 {
+		#sound-dai-cells = <0>;
 		compatible = "asahi-kasei,ak5552";
 		reg = <0x13>;
 		reset-gpios = <&pca6416 3 GPIO_ACTIVE_LOW>;
 		AVDD-supply = <&reg_adc_avdd_5v0>;
 		DVDD-supply = <&reg_adc_dvdd_3v3>;
+		status = "okay";
 	};
 };
 
@@ -221,6 +260,7 @@
 &iomuxc {
 	/delete-node/ csi_pwn_grp;
 	/delete-node/ csi_rst_grp;
+	/delete-node/ pcie0reggrp;
 
 	pinctrl_fec1: fec1grp {
 		fsl,pins = <
@@ -349,13 +389,22 @@
 	/delete-node/ port@1;
 };
 
+&pcie_phy {
+	status = "disabled";
+};
+
 &pcie0 {
 	status = "disabled";
 	/delete-property/ pinctrl-0;
 };
 
 &pcie0_ep {
+	status = "disabled";
 	/delete-property/ pinctrl-0;
+};
+
+&sai1 {
+	fsl,dataline = <0 0xff 0xff>;
 };
 
 &sai3 {

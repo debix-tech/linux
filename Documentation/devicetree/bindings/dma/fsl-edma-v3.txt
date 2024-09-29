@@ -10,6 +10,8 @@ Required properties:
 	- "fsl,imx8qm-edma" for eDMA used similar to that on i.MX8QM SoC
 	- "fsl,imx8qm-adma" for audio eDMA used on i.MX8QM
 	- "fsl,imx8ulp-edma" for eDMA used on i.MX8ULP
+	- "fsl,imx93-edma" for eDMA used on i.MX93
+	- "fsl,imx95-edma" for eDMA used on i.MX95
 - reg : Specifies base physical address(s) and size of the eDMA channel registers.
 	Each eDMA channel has separated register's address and size. The first one
 	is Manage Page address space.
@@ -21,24 +23,25 @@ Required properties:
 	     |---> edma controller instance, 0, 1, 2,..etc
 
 - #dma-cells : Must be <3>.
-	The 1st cell specifies the channel ID, but source/event id on i.mx8ulp
+	The 1st cell specifies the source ID.
 	The 2nd cell specifies the channel priority.
 	The 3rd cell specifies the channel attributes which include below:
 	BIT(0): transmit or receive:
 		0: transmit, 1: receive.
 	BIT(1): local or remote access:
 		0: local, 1: remote.
-	BIT(2): dualfifo case or not(only in Audio cyclic now):
-		0: not dual fifo case, 1: dualfifo case.
+	BIT(2): multiple fifo case or not(only in Audio cyclic now):
+		0: not multiple fifo case, 1: multiple fifo case.
 	See the SoC's reference manual for all the supported request sources.
 - dma-channels : Number of channels supported by the controller
 
 Optional properties :
-- power-domains: Power domains for edma channel used.
-- power-domain-names: Power domains name for edma channel used.
+- power-domains : Power domains for edma channel used.
+- power-domain-names : Power domains name for edma channel used.
 - clocks : A list of phandle and clock-specifier pairs, one for each entry in
 	clock-names. The first one is for Manage Page
 - clock-names : A list of channel clock names.
+- fsl,edma-axi : The bus type is AXI.
 
 Examples:
 edma0: dma-controller@40018000 {

@@ -65,11 +65,6 @@
 		dcbt_ro(p); \
 	} while (0)
 
-static inline u64 mfatb(void)
-{
-	return get_cycles();
-}
-
 static inline u32 in_be32(volatile void *addr)
 {
 	return be32_to_cpu(*((volatile u32 *) addr));
@@ -92,7 +87,7 @@ static inline void clear_bits(unsigned long mask, volatile unsigned long *p)
 
 static inline void flush_dcache_range(unsigned long start, unsigned long stop)
 {
-	__flush_dcache_area((void *) start, stop - start);
+	dcache_clean_inval_poc(start, stop - start);
 }
 
 #define hard_smp_processor_id() raw_smp_processor_id()

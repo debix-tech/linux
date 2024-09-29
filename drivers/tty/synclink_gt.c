@@ -87,19 +87,17 @@
 /*
  * module identification
  */
-static char *driver_name     = "SyncLink GT";
-static char *slgt_driver_name = "synclink_gt";
-static char *tty_dev_prefix  = "ttySLG";
+static const char driver_name[] = "SyncLink GT";
+static const char tty_dev_prefix[] = "ttySLG";
 MODULE_LICENSE("GPL");
-#define MGSL_MAGIC 0x5401
 #define MAX_DEVICES 32
 
 static const struct pci_device_id pci_table[] = {
-	{PCI_VENDOR_ID_MICROGATE, SYNCLINK_GT_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
-	{PCI_VENDOR_ID_MICROGATE, SYNCLINK_GT2_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
-	{PCI_VENDOR_ID_MICROGATE, SYNCLINK_GT4_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
-	{PCI_VENDOR_ID_MICROGATE, SYNCLINK_AC_DEVICE_ID, PCI_ANY_ID, PCI_ANY_ID,},
-	{0,}, /* terminate list */
+	{ PCI_VDEVICE(MICROGATE, SYNCLINK_GT_DEVICE_ID) },
+	{ PCI_VDEVICE(MICROGATE, SYNCLINK_GT2_DEVICE_ID) },
+	{ PCI_VDEVICE(MICROGATE, SYNCLINK_GT4_DEVICE_ID) },
+	{ PCI_VDEVICE(MICROGATE, SYNCLINK_AC_DEVICE_ID) },
+	{ 0 }, /* terminate list */
 };
 MODULE_DEVICE_TABLE(pci, pci_table);
 
@@ -215,8 +213,6 @@ struct slgt_info {
 
 	struct slgt_info *next_device;	/* device list link */
 
-	int magic;
-
 	char device_name[25];
 	struct pci_dev *pdev;
 
@@ -290,7 +286,6 @@ struct slgt_info {
 	unsigned char *tx_buf;
 	int tx_count;
 
-	char *flag_buf;
 	bool drop_rts_on_tx_done;
 	struct	_input_signal_events	input_signal_events;
 
@@ -327,7 +322,7 @@ struct slgt_info {
 
 };
 
-static MGSL_PARAMS default_params = {
+static const MGSL_PARAMS default_params = {
 	.mode            = MGSL_MODE_HDLC,
 	.loopback        = 0,
 	.flags           = HDLC_FLAG_UNDERRUN_ABORT15,
@@ -436,7 +431,7 @@ static void tx_set_idle(struct slgt_info *info);
 static unsigned int tbuf_bytes(struct slgt_info *info);
 static void reset_tbufs(struct slgt_info *info);
 static void tdma_reset(struct slgt_info *info);
-static bool tx_load(struct slgt_info *info, const char *buf, unsigned int count);
+static bool tx_load(struct slgt_info *info, const u8 *buf, unsigned int count);
 
 static void get_gtsignals(struct slgt_info *info);
 static void set_gtsignals(struct slgt_info *info);
@@ -554,10 +549,6 @@ static inline int sanity_check(struct slgt_info *info, char *devname, const char
 		printk("null struct slgt_info for (%s) in %s\n", devname, name);
 		return 1;
 	}
-	if (info->magic != MGSL_MAGIC) {
-		printk("bad magic number struct slgt_info (%s) in %s\n", devname, name);
-		return 1;
-	}
 #else
 	if (!info)
 		return 1;
@@ -565,7 +556,7 @@ static inline int sanity_check(struct slgt_info *info, char *devname, const char
 	return 0;
 }
 
-/**
+/*
  * line discipline callback wrappers
  *
  * The wrappers maintain line discipline references
@@ -617,7 +608,6 @@ static int open(struct tty_struct *tty, struct file *filp)
 	DBGINFO(("%s open, old ref count = %d\n", info->device_name, info->port.count));
 
 	mutex_lock(&info->port.mutex);
-	info->port.low_latency = (info->port.flags & ASYNC_LOW_LATENCY) ? 1 : 0;
 
 	spin_lock_irqsave(&info->netlock, flags);
 	if (info->netcount) {
@@ -702,13 +692,14 @@ static void hangup(struct tty_struct *tty)
 	info->port.count = 0;
 	info->port.tty = NULL;
 	spin_unlock_irqrestore(&info->port.lock, flags);
-	tty_port_set_active(&info->port, 0);
+	tty_port_set_active(&info->port, false);
 	mutex_unlock(&info->port.mutex);
 
 	wake_up_interruptible(&info->port.open_wait);
 }
 
-static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
+static void set_termios(struct tty_struct *tty,
+			const struct ktermios *old_termios)
 {
 	struct slgt_info *info = tty->driver_data;
 	unsigned long flags;
@@ -737,7 +728,7 @@ static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 
 	/* Handle turning off CRTSCTS */
 	if ((old_termios->c_cflag & CRTSCTS) && !C_CRTSCTS(tty)) {
-		tty->hw_stopped = 0;
+		tty->hw_stopped = false;
 		tx_release(tty);
 	}
 }
@@ -754,8 +745,7 @@ static void update_tx_timer(struct slgt_info *info)
 	}
 }
 
-static int write(struct tty_struct *tty,
-		 const unsigned char *buf, int count)
+static ssize_t write(struct tty_struct *tty, const u8 *buf, size_t count)
 {
 	int ret = 0;
 	struct slgt_info *info = tty->driver_data;
@@ -764,12 +754,12 @@ static int write(struct tty_struct *tty,
 	if (sanity_check(info, tty->name, "write"))
 		return -EIO;
 
-	DBGINFO(("%s write count=%d\n", info->device_name, count));
+	DBGINFO(("%s write count=%zu\n", info->device_name, count));
 
 	if (!info->tx_buf || (count > info->max_frame_size))
 		return -EIO;
 
-	if (!count || tty->stopped || tty->hw_stopped)
+	if (!count || tty->flow.stopped || tty->hw_stopped)
 		return 0;
 
 	spin_lock_irqsave(&info->lock, flags);
@@ -790,7 +780,7 @@ cleanup:
 	return ret;
 }
 
-static int put_char(struct tty_struct *tty, unsigned char ch)
+static int put_char(struct tty_struct *tty, u8 ch)
 {
 	struct slgt_info *info = tty->driver_data;
 	unsigned long flags;
@@ -798,7 +788,7 @@ static int put_char(struct tty_struct *tty, unsigned char ch)
 
 	if (sanity_check(info, tty->name, "put_char"))
 		return 0;
-	DBGINFO(("%s put_char(%d)\n", info->device_name, ch));
+	DBGINFO(("%s put_char(%u)\n", info->device_name, ch));
 	if (!info->tx_buf)
 		return 0;
 	spin_lock_irqsave(&info->lock,flags);
@@ -869,15 +859,15 @@ exit:
 	DBGINFO(("%s wait_until_sent exit\n", info->device_name));
 }
 
-static int write_room(struct tty_struct *tty)
+static unsigned int write_room(struct tty_struct *tty)
 {
 	struct slgt_info *info = tty->driver_data;
-	int ret;
+	unsigned int ret;
 
 	if (sanity_check(info, tty->name, "write_room"))
 		return 0;
 	ret = (info->tx_active) ? 0 : HDLC_MAX_FRAME_SIZE;
-	DBGINFO(("%s write_room=%d\n", info->device_name, ret));
+	DBGINFO(("%s write_room=%u\n", info->device_name, ret));
 	return ret;
 }
 
@@ -890,7 +880,7 @@ static void flush_chars(struct tty_struct *tty)
 		return;
 	DBGINFO(("%s flush_chars entry tx_count=%d\n", info->device_name, info->tx_count));
 
-	if (info->tx_count <= 0 || tty->stopped ||
+	if (info->tx_count <= 0 || tty->flow.stopped ||
 	    tty->hw_stopped || !info->tx_buf)
 		return;
 
@@ -1096,12 +1086,13 @@ static long get_params32(struct slgt_info *info, struct MGSL_PARAMS32 __user *us
 static long set_params32(struct slgt_info *info, struct MGSL_PARAMS32 __user *new_params)
 {
 	struct MGSL_PARAMS32 tmp_params;
+	unsigned long flags;
 
 	DBGINFO(("%s set_params32\n", info->device_name));
 	if (copy_from_user(&tmp_params, new_params, sizeof(struct MGSL_PARAMS32)))
 		return -EFAULT;
 
-	spin_lock(&info->lock);
+	spin_lock_irqsave(&info->lock, flags);
 	if (tmp_params.mode == MGSL_MODE_BASE_CLOCK) {
 		info->base_clock = tmp_params.clock_speed;
 	} else {
@@ -1119,7 +1110,7 @@ static long set_params32(struct slgt_info *info, struct MGSL_PARAMS32 __user *ne
 		info->params.stop_bits       = tmp_params.stop_bits;
 		info->params.parity          = tmp_params.parity;
 	}
-	spin_unlock(&info->lock);
+	spin_unlock_irqrestore(&info->lock, flags);
 
 	program_hw(info);
 
@@ -1255,14 +1246,14 @@ static int synclink_gt_proc_show(struct seq_file *m, void *v)
 /*
  * return count of bytes in transmit buffer
  */
-static int chars_in_buffer(struct tty_struct *tty)
+static unsigned int chars_in_buffer(struct tty_struct *tty)
 {
 	struct slgt_info *info = tty->driver_data;
-	int count;
+	unsigned int count;
 	if (sanity_check(info, tty->name, "chars_in_buffer"))
 		return 0;
 	count = tbuf_bytes(info);
-	DBGINFO(("%s chars_in_buffer()=%d\n", info->device_name, count));
+	DBGINFO(("%s chars_in_buffer()=%u\n", info->device_name, count));
 	return count;
 }
 
@@ -1440,15 +1431,7 @@ static int hdlcdev_open(struct net_device *dev)
 	int rc;
 	unsigned long flags;
 
-	if (!try_module_get(THIS_MODULE))
-		return -EBUSY;
-
 	DBGINFO(("%s hdlcdev_open\n", dev->name));
-
-	/* generic HDLC layer open processing */
-	rc = hdlc_open(dev);
-	if (rc)
-		return rc;
 
 	/* arbitrate between network and tty opens */
 	spin_lock_irqsave(&info->netlock, flags);
@@ -1464,6 +1447,16 @@ static int hdlcdev_open(struct net_device *dev)
 	if ((rc = startup(info)) != 0) {
 		spin_lock_irqsave(&info->netlock, flags);
 		info->netcount=0;
+		spin_unlock_irqrestore(&info->netlock, flags);
+		return rc;
+	}
+
+	/* generic HDLC layer open processing */
+	rc = hdlc_open(dev);
+	if (rc) {
+		shutdown(info);
+		spin_lock_irqsave(&info->netlock, flags);
+		info->netcount = 0;
 		spin_unlock_irqrestore(&info->netlock, flags);
 		return rc;
 	}
@@ -1513,7 +1506,6 @@ static int hdlcdev_close(struct net_device *dev)
 	info->netcount=0;
 	spin_unlock_irqrestore(&info->netlock, flags);
 
-	module_put(THIS_MODULE);
 	return 0;
 }
 
@@ -1525,11 +1517,11 @@ static int hdlcdev_close(struct net_device *dev)
  *
  * Return: 0 if success, otherwise error code
  */
-static int hdlcdev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+static int hdlcdev_ioctl(struct net_device *dev, struct if_settings *ifs)
 {
 	const size_t size = sizeof(sync_serial_settings);
 	sync_serial_settings new_line;
-	sync_serial_settings __user *line = ifr->ifr_settings.ifs_ifsu.sync;
+	sync_serial_settings __user *line = ifs->ifs_ifsu.sync;
 	struct slgt_info *info = dev_to_port(dev);
 	unsigned int flags;
 
@@ -1539,17 +1531,14 @@ static int hdlcdev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 	if (info->port.count)
 		return -EBUSY;
 
-	if (cmd != SIOCWANDEV)
-		return hdlc_ioctl(dev, ifr, cmd);
-
 	memset(&new_line, 0, sizeof(new_line));
 
-	switch(ifr->ifr_settings.type) {
+	switch (ifs->type) {
 	case IF_GET_IFACE: /* return current sync_serial_settings */
 
-		ifr->ifr_settings.type = IF_IFACE_SYNC_SERIAL;
-		if (ifr->ifr_settings.size < size) {
-			ifr->ifr_settings.size = size; /* data size wanted */
+		ifs->type = IF_IFACE_SYNC_SERIAL;
+		if (ifs->size < size) {
+			ifs->size = size; /* data size wanted */
 			return -ENOBUFS;
 		}
 
@@ -1616,13 +1605,14 @@ static int hdlcdev_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
 		return 0;
 
 	default:
-		return hdlc_ioctl(dev, ifr, cmd);
+		return hdlc_ioctl(dev, ifs);
 	}
 }
 
 /**
  * hdlcdev_tx_timeout - called by network layer when transmit timeout is detected
  * @dev: pointer to network device structure
+ * @txqueue: unused
  */
 static void hdlcdev_tx_timeout(struct net_device *dev, unsigned int txqueue)
 {
@@ -1688,7 +1678,7 @@ static const struct net_device_ops hdlcdev_ops = {
 	.ndo_open       = hdlcdev_open,
 	.ndo_stop       = hdlcdev_close,
 	.ndo_start_xmit = hdlc_start_xmit,
-	.ndo_do_ioctl   = hdlcdev_ioctl,
+	.ndo_siocwandev = hdlcdev_ioctl,
 	.ndo_tx_timeout = hdlcdev_tx_timeout,
 };
 
@@ -1749,6 +1739,8 @@ static int hdlcdev_init(struct slgt_info *info)
  */
 static void hdlcdev_exit(struct slgt_info *info)
 {
+	if (!info->netdev)
+		return;
 	unregister_hdlc_device(info->netdev);
 	free_netdev(info->netdev);
 	info->netdev = NULL;
@@ -1959,13 +1951,13 @@ static void cts_change(struct slgt_info *info, unsigned short status)
 		if (info->port.tty) {
 			if (info->port.tty->hw_stopped) {
 				if (info->signals & SerialSignal_CTS) {
-		 			info->port.tty->hw_stopped = 0;
+					info->port.tty->hw_stopped = false;
 					info->pending_bh |= BH_TRANSMIT;
 					return;
 				}
 			} else {
 				if (!(info->signals & SerialSignal_CTS))
-		 			info->port.tty->hw_stopped = 1;
+					info->port.tty->hw_stopped = true;
 			}
 		}
 	}
@@ -2241,7 +2233,7 @@ static void isr_txeom(struct slgt_info *info, unsigned short status)
 		else
 #endif
 		{
-			if (info->port.tty && (info->port.tty->stopped || info->port.tty->hw_stopped)) {
+			if (info->port.tty && (info->port.tty->flow.stopped || info->port.tty->hw_stopped)) {
 				tx_stop(info);
 				return;
 			}
@@ -2360,7 +2352,7 @@ static int startup(struct slgt_info *info)
 	if (info->port.tty)
 		clear_bit(TTY_IO_ERROR, &info->port.tty->flags);
 
-	tty_port_set_initialized(&info->port, 1);
+	tty_port_set_initialized(&info->port, true);
 
 	return 0;
 }
@@ -2407,7 +2399,7 @@ static void shutdown(struct slgt_info *info)
 	if (info->port.tty)
 		set_bit(TTY_IO_ERROR, &info->port.tty->flags);
 
-	tty_port_set_initialized(&info->port, 0);
+	tty_port_set_initialized(&info->port, false);
 }
 
 static void program_hw(struct slgt_info *info)
@@ -2465,14 +2457,7 @@ static void change_params(struct slgt_info *info)
 
 	/* byte size and parity */
 
-	switch (cflag & CSIZE) {
-	case CS5: info->params.data_bits = 5; break;
-	case CS6: info->params.data_bits = 6; break;
-	case CS7: info->params.data_bits = 7; break;
-	case CS8: info->params.data_bits = 8; break;
-	default:  info->params.data_bits = 7; break;
-	}
-
+	info->params.data_bits = tty_get_char_size(cflag);
 	info->params.stop_bits = (cflag & CSTOPB) ? 2 : 1;
 
 	if (cflag & PARENB)
@@ -3139,7 +3124,7 @@ static int tiocmset(struct tty_struct *tty,
 	return 0;
 }
 
-static int carrier_raised(struct tty_port *port)
+static bool carrier_raised(struct tty_port *port)
 {
 	unsigned long flags;
 	struct slgt_info *info = container_of(port, struct slgt_info, port);
@@ -3147,16 +3132,17 @@ static int carrier_raised(struct tty_port *port)
 	spin_lock_irqsave(&info->lock,flags);
 	get_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
-	return (info->signals & SerialSignal_DCD) ? 1 : 0;
+
+	return info->signals & SerialSignal_DCD;
 }
 
-static void dtr_rts(struct tty_port *port, int on)
+static void dtr_rts(struct tty_port *port, bool active)
 {
 	unsigned long flags;
 	struct slgt_info *info = container_of(port, struct slgt_info, port);
 
 	spin_lock_irqsave(&info->lock,flags);
-	if (on)
+	if (active)
 		info->signals |= SerialSignal_RTS | SerialSignal_DTR;
 	else
 		info->signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
@@ -3175,14 +3161,14 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 	int		retval;
 	bool		do_clocal = false;
 	unsigned long	flags;
-	int		cd;
+	bool		cd;
 	struct tty_port *port = &info->port;
 
 	DBGINFO(("%s block_til_ready\n", tty->driver->name));
 
 	if (filp->f_flags & O_NONBLOCK || tty_io_error(tty)) {
 		/* nonblock mode is set or port is not enabled */
-		tty_port_set_active(port, 1);
+		tty_port_set_active(port, true);
 		return 0;
 	}
 
@@ -3239,7 +3225,7 @@ static int block_til_ready(struct tty_struct *tty, struct file *filp,
 	port->blocked_open--;
 
 	if (!retval)
-		tty_port_set_active(port, 1);
+		tty_port_set_active(port, true);
 
 	DBGINFO(("%s block_til_ready ready, rc=%d\n", tty->driver->name, retval));
 	return retval;
@@ -3256,13 +3242,7 @@ static int alloc_tmp_rbuf(struct slgt_info *info)
 	info->tmp_rbuf = kmalloc(info->max_frame_size + 5, GFP_KERNEL);
 	if (info->tmp_rbuf == NULL)
 		return -ENOMEM;
-	/* unused flag buffer to satisfy receive_buf calling interface */
-	info->flag_buf = kzalloc(info->max_frame_size + 5, GFP_KERNEL);
-	if (!info->flag_buf) {
-		kfree(info->tmp_rbuf);
-		info->tmp_rbuf = NULL;
-		return -ENOMEM;
-	}
+
 	return 0;
 }
 
@@ -3270,8 +3250,6 @@ static void free_tmp_rbuf(struct slgt_info *info)
 {
 	kfree(info->tmp_rbuf);
 	info->tmp_rbuf = NULL;
-	kfree(info->flag_buf);
-	info->flag_buf = NULL;
 }
 
 /*
@@ -3506,13 +3484,10 @@ static struct slgt_info *alloc_dev(int adapter_num, int port_num, struct pci_dev
 	} else {
 		tty_port_init(&info->port);
 		info->port.ops = &slgt_port_ops;
-		info->magic = MGSL_MAGIC;
 		INIT_WORK(&info->task, bh_handler);
 		info->max_frame_size = 4096;
 		info->base_clock = 14745600;
 		info->rbuf_fill_level = DMABUFSIZE;
-		info->port.close_delay = 5*HZ/10;
-		info->port.closing_wait = 30*HZ;
 		init_waitqueue_head(&info->status_event_wait_q);
 		init_waitqueue_head(&info->event_wait_q);
 		spin_lock_init(&info->netlock);
@@ -3650,19 +3625,14 @@ static const struct tty_operations ops = {
 
 static void slgt_cleanup(void)
 {
-	int rc;
 	struct slgt_info *info;
 	struct slgt_info *tmp;
-
-	printk(KERN_INFO "unload %s\n", driver_name);
 
 	if (serial_driver) {
 		for (info=slgt_device_list ; info != NULL ; info=info->next_device)
 			tty_unregister_device(serial_driver, info->line);
-		rc = tty_unregister_driver(serial_driver);
-		if (rc)
-			DBGERR(("tty_unregister_driver error=%d\n", rc));
-		put_tty_driver(serial_driver);
+		tty_unregister_driver(serial_driver);
+		tty_driver_kref_put(serial_driver);
 	}
 
 	/* reset devices */
@@ -3699,17 +3669,16 @@ static int __init slgt_init(void)
 {
 	int rc;
 
-	printk(KERN_INFO "%s\n", driver_name);
-
-	serial_driver = alloc_tty_driver(MAX_DEVICES);
-	if (!serial_driver) {
+	serial_driver = tty_alloc_driver(MAX_DEVICES, TTY_DRIVER_REAL_RAW |
+			TTY_DRIVER_DYNAMIC_DEV);
+	if (IS_ERR(serial_driver)) {
 		printk("%s can't allocate tty driver\n", driver_name);
-		return -ENOMEM;
+		return PTR_ERR(serial_driver);
 	}
 
 	/* Initialize the tty_driver structure */
 
-	serial_driver->driver_name = slgt_driver_name;
+	serial_driver->driver_name = "synclink_gt";
 	serial_driver->name = tty_dev_prefix;
 	serial_driver->major = ttymajor;
 	serial_driver->minor_start = 64;
@@ -3720,17 +3689,13 @@ static int __init slgt_init(void)
 		B9600 | CS8 | CREAD | HUPCL | CLOCAL;
 	serial_driver->init_termios.c_ispeed = 9600;
 	serial_driver->init_termios.c_ospeed = 9600;
-	serial_driver->flags = TTY_DRIVER_REAL_RAW | TTY_DRIVER_DYNAMIC_DEV;
 	tty_set_operations(serial_driver, &ops);
 	if ((rc = tty_register_driver(serial_driver)) < 0) {
 		DBGERR(("%s can't register serial driver\n", driver_name));
-		put_tty_driver(serial_driver);
+		tty_driver_kref_put(serial_driver);
 		serial_driver = NULL;
 		goto error;
 	}
-
-	printk(KERN_INFO "%s, tty major#%d\n",
-	       driver_name, serial_driver->major);
 
 	slgt_device_count = 0;
 	if ((rc = pci_register_driver(&pci_driver)) < 0) {
@@ -3738,9 +3703,6 @@ static int __init slgt_init(void)
 		goto error;
 	}
 	pci_registered = true;
-
-	if (!slgt_device_list)
-		printk("%s no devices found\n",driver_name);
 
 	return 0;
 
@@ -3761,47 +3723,47 @@ module_exit(slgt_exit);
  * register access routines
  */
 
-#define CALC_REGADDR() \
-	unsigned long reg_addr = ((unsigned long)info->reg_addr) + addr; \
-	if (addr >= 0x80) \
-		reg_addr += (info->port_num) * 32; \
-	else if (addr >= 0x40)	\
-		reg_addr += (info->port_num) * 16;
+static inline void __iomem *calc_regaddr(struct slgt_info *info,
+					 unsigned int addr)
+{
+	void __iomem *reg_addr = info->reg_addr + addr;
+
+	if (addr >= 0x80)
+		reg_addr += info->port_num * 32;
+	else if (addr >= 0x40)
+		reg_addr += info->port_num * 16;
+
+	return reg_addr;
+}
 
 static __u8 rd_reg8(struct slgt_info *info, unsigned int addr)
 {
-	CALC_REGADDR();
-	return readb((void __iomem *)reg_addr);
+	return readb(calc_regaddr(info, addr));
 }
 
 static void wr_reg8(struct slgt_info *info, unsigned int addr, __u8 value)
 {
-	CALC_REGADDR();
-	writeb(value, (void __iomem *)reg_addr);
+	writeb(value, calc_regaddr(info, addr));
 }
 
 static __u16 rd_reg16(struct slgt_info *info, unsigned int addr)
 {
-	CALC_REGADDR();
-	return readw((void __iomem *)reg_addr);
+	return readw(calc_regaddr(info, addr));
 }
 
 static void wr_reg16(struct slgt_info *info, unsigned int addr, __u16 value)
 {
-	CALC_REGADDR();
-	writew(value, (void __iomem *)reg_addr);
+	writew(value, calc_regaddr(info, addr));
 }
 
 static __u32 rd_reg32(struct slgt_info *info, unsigned int addr)
 {
-	CALC_REGADDR();
-	return readl((void __iomem *)reg_addr);
+	return readl(calc_regaddr(info, addr));
 }
 
 static void wr_reg32(struct slgt_info *info, unsigned int addr, __u32 value)
 {
-	CALC_REGADDR();
-	writel(value, (void __iomem *)reg_addr);
+	writel(value, calc_regaddr(info, addr));
 }
 
 static void rdma_reset(struct slgt_info *info)
@@ -4675,7 +4637,8 @@ check_again:
 				hdlcdev_rx(info,info->tmp_rbuf, framesize);
 			else
 #endif
-				ldisc_receive_buf(tty, info->tmp_rbuf, info->flag_buf, framesize);
+				ldisc_receive_buf(tty, info->tmp_rbuf, NULL,
+						  framesize);
 		}
 	}
 	free_rbufs(info, start, end);
@@ -4709,8 +4672,8 @@ static bool rx_get_buf(struct slgt_info *info)
 	DBGDATA(info, info->rbufs[i].buf, count, "rx");
 	DBGINFO(("rx_get_buf size=%d\n", count));
 	if (count)
-		ldisc_receive_buf(info->port.tty, info->rbufs[i].buf,
-				  info->flag_buf, count);
+		ldisc_receive_buf(info->port.tty, info->rbufs[i].buf, NULL,
+				  count);
 	free_rbufs(info, i, i);
 	return true;
 }
@@ -4803,7 +4766,7 @@ static unsigned int tbuf_bytes(struct slgt_info *info)
  * load data into transmit DMA buffer ring and start transmitter if needed
  * return true if data accepted, otherwise false (buffers full)
  */
-static bool tx_load(struct slgt_info *info, const char *buf, unsigned int size)
+static bool tx_load(struct slgt_info *info, const u8 *buf, unsigned int size)
 {
 	unsigned short count;
 	unsigned int i;
@@ -4963,7 +4926,7 @@ static int loopback_test(struct slgt_info *info)
 #define TESTFRAMESIZE 20
 
 	unsigned long timeout;
-	u16 count = TESTFRAMESIZE;
+	u16 count;
 	unsigned char buf[TESTFRAMESIZE];
 	int rc = -ENODEV;
 	unsigned long flags;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2019 NXP.
+ * Copyright 2019, 2022 NXP.
  */
 
 #include <linux/bitops.h>
@@ -10,6 +10,7 @@
 #include <linux/interrupt.h>
 #include <linux/platform_device.h>
 #include <drm/drm_fourcc.h>
+#include <drm/drm_framebuffer.h>
 #include <drm/drm_rect.h>
 
 #include "dcss-dev.h"
@@ -268,6 +269,7 @@ void dcss_dtrc_bypass(struct dcss_dtrc *dtrc, int ch_num)
 	dcss_dtrc_write(ch, 0x0f0e0100, DCSS_DTRC_ARIDR);
 	dcss_dtrc_write(ch, 0x0f0e, DCSS_DTRC_DTID2DDR);
 
+	ch->running = false;
 	ch->bypass = true;
 }
 

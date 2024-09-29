@@ -13,6 +13,7 @@
  *
  */
 
+#include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/slab.h>
 #include <linux/imx_rpmsg.h>
@@ -126,6 +127,7 @@ static int pm_vlls_notify_m4(bool enter)
 {
 	struct pm_rpmsg_data msg;
 
+	memset(&msg, 0, sizeof(msg));
 	msg.header.cate = IMX_RMPSG_LIFECYCLE;
 	msg.header.major = IMX_RMPSG_MAJOR;
 	msg.header.minor = IMX_RMPSG_MINOR;
@@ -140,6 +142,7 @@ void pm_shutdown_notify_m4(void)
 {
 	struct pm_rpmsg_data msg;
 
+	memset(&msg, 0, sizeof(msg));
 	msg.header.cate = IMX_RMPSG_LIFECYCLE;
 	msg.header.major = IMX_RMPSG_MAJOR;
 	msg.header.minor = IMX_RMPSG_MINOR;
@@ -147,6 +150,7 @@ void pm_shutdown_notify_m4(void)
 	msg.header.cmd = PM_RPMSG_MODE;
 	msg.data = PM_RPMSG_SHUTDOWN;
 	/* No ACK from M4 */
+	local_irq_enable();
 	pm_send_message(&msg, &pm_rpmsg, false);
 	imx7ulp_poweroff();
 }
@@ -155,6 +159,7 @@ void pm_reboot_notify_m4(void)
 {
 	struct pm_rpmsg_data msg;
 
+	memset(&msg, 0, sizeof(msg));
 	msg.header.cate = IMX_RMPSG_LIFECYCLE;
 	msg.header.major = IMX_RMPSG_MAJOR;
 	msg.header.minor = IMX_RMPSG_MINOR;
@@ -162,14 +167,16 @@ void pm_reboot_notify_m4(void)
 	msg.header.cmd = PM_RPMSG_MODE;
 	msg.data = PM_RPMSG_REBOOT;
 
-	pm_send_message(&msg, &pm_rpmsg, true);
-
+	pm_send_message(&msg, &pm_rpmsg, false);
+	/* Give a grace period for failure to restart of 1s */
+	mdelay(1000);
 }
 
 void  pm_heartbeat_off_notify_m4(bool enter)
 {
 	struct pm_rpmsg_data msg;
 
+	memset(&msg, 0, sizeof(msg));
 	msg.header.cate = IMX_RMPSG_LIFECYCLE;
 	msg.header.major = IMX_RMPSG_MAJOR;
 	msg.header.minor = IMX_RMPSG_MINOR;
@@ -184,6 +191,7 @@ static void pm_heart_beat_work_handler(struct work_struct *work)
 {
 	struct pm_rpmsg_data msg;
 
+	memset(&msg, 0, sizeof(msg));
 	/* Notify M4 side A7 in RUN mode at boot time */
 	if (pm_rpmsg.first_flag) {
 		pm_vlls_notify_m4(false);
@@ -210,6 +218,8 @@ static void pm_heart_beat_work_handler(struct work_struct *work)
 static void pm_poweroff_rpmsg(void)
 {
 	pm_shutdown_notify_m4();
+	/* Wait 5s to let M4 power off A7 */
+	mdelay(5000);
 	pr_emerg("Unable to poweroff system\n");
 }
 

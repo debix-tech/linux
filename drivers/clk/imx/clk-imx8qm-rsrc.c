@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2019 NXP
+ * Copyright 2019-2021 NXP
  *	Dong Aisheng <aisheng.dong@nxp.com>
  */
 
@@ -9,7 +9,7 @@
 #include "clk-scu.h"
 
 /* Keep sorted in the ascending order */
-static u32 imx8qm_clk_scu_rsrc_table[] = {
+static const u32 imx8qm_clk_scu_rsrc_table[] = {
 	IMX_SC_R_A53,
 	IMX_SC_R_A72,
 	IMX_SC_R_DC_0_VIDEO0,
@@ -80,8 +80,8 @@ static u32 imx8qm_clk_scu_rsrc_table[] = {
 	IMX_SC_R_M4_0_I2C,
 	IMX_SC_R_M4_1_I2C,
 	IMX_SC_R_AUDIO_PLL_0,
-	IMX_SC_R_VPU_UART,
-	IMX_SC_R_VPUCORE,
+	IMX_SC_R_ENET_0_A2,
+	IMX_SC_R_ENET_1_A0,
 	IMX_SC_R_MIPI_0,
 	IMX_SC_R_MIPI_0_PWM_0,
 	IMX_SC_R_MIPI_0_I2C_0,

@@ -269,8 +269,7 @@ static int elan_touch_register_interrupt(struct i2c_client *client)
 	return 0;
 }
 
-static int elan_touch_probe(struct i2c_client *client,
-			    const struct i2c_device_id *id)
+static int elan_touch_probe(struct i2c_client *client)
 {
 	struct device_node *np = client->dev.of_node;
 	int gpio_elan_cs, gpio_elan_rst, err = 0;
@@ -384,7 +383,7 @@ fail:
 	return err;
 }
 
-static int elan_touch_remove(struct i2c_client *client)
+static void elan_touch_remove(struct i2c_client *client)
 {
 	if (elan_wq)
 		destroy_workqueue(elan_wq);
@@ -395,7 +394,6 @@ static int elan_touch_remove(struct i2c_client *client)
 		free_irq(client->irq, client);
 	else
 		hrtimer_cancel(&elan_touch_data.timer);
-	return 0;
 }
 
 /* -------------------------------------------------------------------- */

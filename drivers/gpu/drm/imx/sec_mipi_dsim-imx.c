@@ -1,7 +1,7 @@
 /*
  * Samsung MIPI DSI Host Controller on IMX
  *
- * Copyright 2018-2020 NXP
+ * Copyright 2018-2022 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -46,6 +46,8 @@ struct imx_sec_dsim_device {
 	int irq;
 	struct clk *clk_cfg;
 	struct clk *clk_pllref;
+	struct clk *clk_apb;
+	struct clk *clk_pix;
 	struct drm_encoder encoder;
 
 	struct reset_control *soft_resetn;
@@ -53,6 +55,8 @@ struct imx_sec_dsim_device {
 	struct reset_control *mipi_reset;
 
 	atomic_t rpm_suspended;
+
+	bool enabled;
 };
 
 #define enc_to_dsim(enc) container_of(enc, struct imx_sec_dsim_device, encoder)
@@ -86,33 +90,92 @@ static int sec_dsim_rstc_reset(struct reset_control *rstc, bool assert)
 	return ret;
 }
 
-static void imx_sec_dsim_encoder_helper_enable(struct drm_encoder *encoder)
+static struct drm_crtc *
+imx_sec_dsim_encoder_get_new_crtc(struct drm_encoder *encoder,
+				  struct drm_atomic_state *state)
+{
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+
+	connector = drm_atomic_get_new_connector_for_encoder(state, encoder);
+	if (!connector)
+		return NULL;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (!conn_state)
+		return NULL;
+
+	return conn_state->crtc;
+}
+
+static void
+imx_sec_dsim_encoder_atomic_enable(struct drm_encoder *encoder,
+				   struct drm_atomic_state *state)
 {
 	int ret;
 	struct imx_sec_dsim_device *dsim_dev = enc_to_dsim(encoder);
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *old_crtc_state;
+
+	crtc = imx_sec_dsim_encoder_get_new_crtc(encoder, state);
+	if (!crtc) {
+		dev_err(dsim_dev->dev, "encoder is enabling without CRTC\n");
+		return;
+	}
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+	/* Coming back from self refresh, nothing to do. */
+	if (old_crtc_state && old_crtc_state->self_refresh_active &&
+	    dsim_dev->enabled)
+		return;
+
+	if (dsim_dev->enabled)
+		return;
 
 	pm_runtime_get_sync(dsim_dev->dev);
 
 	ret = sec_dsim_rstc_reset(dsim_dev->mipi_reset, false);
 	if (ret)
 		dev_err(dsim_dev->dev, "deassert mipi_reset failed\n");
+
+	dsim_dev->enabled = true;
 }
 
-static void imx_sec_dsim_encoder_helper_disable(struct drm_encoder *encoder)
+static void
+imx_sec_dsim_encoder_atomic_disable(struct drm_encoder *encoder,
+				    struct drm_atomic_state *state)
 {
 	int ret;
 	struct imx_sec_dsim_device *dsim_dev = enc_to_dsim(encoder);
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *new_crtc_state;
+
+	crtc = imx_sec_dsim_encoder_get_new_crtc(encoder, state);
+	/* No CRTC means we're doing a full shutdown. */
+	if (!crtc)
+		goto disable;
+
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
+	/* Don't do disablement operation if we're entering PSR. */
+	if (!new_crtc_state || new_crtc_state->self_refresh_active)
+		return;
+
+disable:
+	if (!dsim_dev->enabled)
+		return;
 
 	ret = sec_dsim_rstc_reset(dsim_dev->mipi_reset, true);
 	if (ret)
 		dev_err(dsim_dev->dev, "deassert mipi_reset failed\n");
 
 	pm_runtime_put_sync(dsim_dev->dev);
+
+	dsim_dev->enabled = false;
 }
 
-static int imx_sec_dsim_encoder_helper_atomic_check(struct drm_encoder *encoder,
-						    struct drm_crtc_state *crtc_state,
-						    struct drm_connector_state *conn_state)
+static int imx_sec_dsim_encoder_atomic_check(struct drm_encoder *encoder,
+					     struct drm_crtc_state *crtc_state,
+					     struct drm_connector_state *conn_state)
 {
 	int ret;
 	struct drm_display_mode *adjusted_mode = &crtc_state->adjusted_mode;
@@ -142,10 +205,40 @@ static int imx_sec_dsim_encoder_helper_atomic_check(struct drm_encoder *encoder,
 }
 
 static const struct drm_encoder_helper_funcs imx_sec_dsim_encoder_helper_funcs = {
-	.enable  = imx_sec_dsim_encoder_helper_enable,
-	.disable = imx_sec_dsim_encoder_helper_disable,
-	.atomic_check = imx_sec_dsim_encoder_helper_atomic_check,
+	.atomic_enable = imx_sec_dsim_encoder_atomic_enable,
+	.atomic_disable = imx_sec_dsim_encoder_atomic_disable,
+	.atomic_check = imx_sec_dsim_encoder_atomic_check,
 };
+
+static enum drm_mode_status
+sec_dsim_mode_valid(struct drm_encoder *encoder,
+		    const struct drm_display_mode *mode)
+{
+	struct imx_sec_dsim_device *dsim_dev = enc_to_dsim(encoder);
+	struct drm_bridge *next_bridge = drm_bridge_chain_get_first_bridge(encoder);
+	unsigned long rounded_rate;
+	unsigned long pixel_clock_rate;
+
+	if (!next_bridge)
+		return MODE_OK;
+
+	while (drm_bridge_get_next_bridge(next_bridge))
+		next_bridge = drm_bridge_get_next_bridge(next_bridge);
+
+	if ((next_bridge->ops & DRM_BRIDGE_OP_DETECT) &&
+	    (next_bridge->ops & DRM_BRIDGE_OP_EDID)) {
+		if (dsim_dev->clk_pix) {
+			pixel_clock_rate = mode->clock * 1000;
+			rounded_rate = clk_round_rate(dsim_dev->clk_pix,
+						      pixel_clock_rate);
+
+			if (rounded_rate != pixel_clock_rate)
+				return MODE_CLOCK_RANGE;
+		}
+	}
+
+	return MODE_OK;
+}
 
 static int sec_dsim_determine_pll_ref_rate(u32 *rate, u32 min, u32 max)
 {
@@ -198,7 +291,7 @@ static const struct sec_mipi_dsim_plat_data imx8mm_mipi_dsim_plat_data = {
 	.dphy_timing	= dphy_timing_ln14lpp_v1p2,
 	.num_dphy_timing = ARRAY_SIZE(dphy_timing_ln14lpp_v1p2),
 	.dphy_timing_cmp = dphy_timing_default_cmp,
-	.mode_valid	= NULL,
+	.mode_valid	= sec_dsim_mode_valid,
 	.determine_pll_ref_rate = sec_dsim_determine_pll_ref_rate,
 };
 
@@ -230,19 +323,10 @@ static int sec_dsim_of_parse_resets(struct imx_sec_dsim_device *dsim)
 	const char *compat;
 	uint32_t len, rstc_num = 0;
 
-	/* TODO: bypass resets for imx8mp platform */
-	compat = of_get_property(np, "compatible", NULL);
-	if (unlikely(!compat))
-		return -ENODEV;
-
-	len = strlen(compat);
-	if (!of_compat_cmp(compat, "fsl,imx8mp-mipi-dsim", len))
-		return 0;
-
 	ret = of_parse_phandle_with_args(np, "resets", "#reset-cells",
 					 0, &args);
 	if (ret)
-		return ret;
+		return ret == -ENOENT ? 0 : ret;
 
 	parent = args.np;
 	for_each_child_of_node(parent, child) {
@@ -387,6 +471,15 @@ static int imx_sec_dsim_probe(struct platform_device *pdev)
 	if (IS_ERR(dsim_dev->clk_pllref))
 		return PTR_ERR(dsim_dev->clk_pllref);
 
+	dsim_dev->clk_apb = devm_clk_get(dev, "apb-root");
+	if (IS_ERR(dsim_dev->clk_apb))
+		return PTR_ERR(dsim_dev->clk_apb);
+
+	dsim_dev->clk_pix = devm_clk_get_optional(dev, "pixel");
+	if (IS_ERR(dsim_dev->clk_pix))
+		return dev_err_probe(dev, PTR_ERR(dsim_dev->clk_pix),
+				"failed to get pixel clock\n");
+
 	ret = sec_dsim_of_parse_resets(dsim_dev);
 	if (ret)
 		return ret;
@@ -395,7 +488,14 @@ static int imx_sec_dsim_probe(struct platform_device *pdev)
 
 	pm_runtime_enable(dev);
 
-	return component_add(dev, &imx_sec_dsim_ops);
+	ret = component_add(dev, &imx_sec_dsim_ops);
+	if (ret) {
+		pm_runtime_disable(dev);
+		sec_dsim_of_put_resets(dsim_dev);
+		dev_err_probe(dev, ret, "Failed to add component\n");
+	}
+
+	return ret;
 }
 
 static int imx_sec_dsim_remove(struct platform_device *pdev)
@@ -433,6 +533,7 @@ static int imx_sec_dsim_runtime_suspend(struct device *dev)
 
 	clk_disable_unprepare(dsim_dev->clk_cfg);
 	clk_disable_unprepare(dsim_dev->clk_pllref);
+	clk_disable_unprepare(dsim_dev->clk_apb);
 
 	release_bus_freq(BUS_FREQ_HIGH);
 
@@ -463,6 +564,10 @@ static int imx_sec_dsim_runtime_resume(struct device *dev)
 		return ret;
 
 	ret = clk_prepare_enable(dsim_dev->clk_cfg);
+	if (WARN_ON(unlikely(ret)))
+		return ret;
+
+	ret = clk_prepare_enable(dsim_dev->clk_apb);
 	if (WARN_ON(unlikely(ret)))
 		return ret;
 

@@ -26,12 +26,14 @@
 #define copy_page(to, from)	copy_page_asm((void *)(to), (void *)(from))
 
 struct page;
+struct vm_area_struct;
 
 void clear_page_asm(void *page);
 void copy_page_asm(void *to, void *from);
 #define clear_user_page(vto, vaddr, page) clear_page_asm(vto)
-void copy_user_page(void *vto, void *vfrom, unsigned long vaddr,
-			struct page *pg);
+void copy_user_highpage(struct page *to, struct page *from, unsigned long vaddr,
+		struct vm_area_struct *vma);
+#define __HAVE_ARCH_COPY_USER_HIGHPAGE
 
 /*
  * These are used to make use of C type-checking..
@@ -112,7 +114,7 @@ extern int npmem_ranges;
 #else
 #define BITS_PER_PTE_ENTRY	2
 #define BITS_PER_PMD_ENTRY	2
-#define BITS_PER_PGD_ENTRY	BITS_PER_PMD_ENTRY
+#define BITS_PER_PGD_ENTRY	2
 #endif
 #define PGD_ENTRY_SIZE	(1UL << BITS_PER_PGD_ENTRY)
 #define PMD_ENTRY_SIZE	(1UL << BITS_PER_PMD_ENTRY)
@@ -152,10 +154,6 @@ extern int npmem_ranges;
 #endif
 #define __pa(x)			((unsigned long)(x)-PAGE_OFFSET)
 #define __va(x)			((void *)((unsigned long)(x)+PAGE_OFFSET))
-
-#ifndef CONFIG_SPARSEMEM
-#define pfn_valid(pfn)		((pfn) < max_mapnr)
-#endif
 
 #ifdef CONFIG_HUGETLB_PAGE
 #define HPAGE_SHIFT		PMD_SHIFT /* fixed for transparent huge pages */

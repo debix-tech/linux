@@ -47,6 +47,8 @@ void imx8_get_registers(struct snd_sof_dev *sdev,
 /**
  * imx8_dump() - This function is called when a panic message is
  * received from the firmware.
+ * @sdev: SOF device
+ * @flags: parameter not used but required by ops prototype
  */
 void imx8_dump(struct snd_sof_dev *sdev, u32 flags)
 {
@@ -67,8 +69,8 @@ void imx8_dump(struct snd_sof_dev *sdev, u32 flags)
 			   IMX8_STACK_DUMP_SIZE);
 
 	/* Print the information to the console */
-	snd_sof_get_status(sdev, status, status, &xoops, &panic_info, stack,
-			   IMX8_STACK_DUMP_SIZE);
+	sof_print_oops_and_stack(sdev, KERN_ERR, status, status, &xoops,
+				 &panic_info, stack, IMX8_STACK_DUMP_SIZE);
 }
 EXPORT_SYMBOL(imx8_dump);
 

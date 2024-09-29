@@ -125,8 +125,8 @@ static bool is_yuv(u32 pix_fmt)
 	if ((pix_fmt == V4L2_PIX_FMT_YUYV)  ||
 	    (pix_fmt == V4L2_PIX_FMT_YUV32) ||
 	    (pix_fmt == V4L2_PIX_FMT_YUV444M) ||
-	    (pix_fmt == V4L2_PIX_FMT_YUV24) ||
-	    (pix_fmt == V4L2_PIX_FMT_NV12))
+	    (pix_fmt == V4L2_PIX_FMT_NV12) ||
+	    (pix_fmt == V4L2_PIX_FMT_NV12M))
 		return true;
 	else
 		return false;
@@ -199,65 +199,50 @@ struct mxc_isi_dev *mxc_isi_get_hostdata(struct platform_device *pdev)
 }
 EXPORT_SYMBOL_GPL(mxc_isi_get_hostdata);
 
-void mxc_isi_channel_set_outbuf(struct mxc_isi_dev *mxc_isi,
-				struct mxc_isi_buffer *buf)
+void mxc_isi_channel_set_outbuf_loc(struct mxc_isi_dev *mxc_isi,
+				    struct mxc_isi_buffer *buf)
 {
 	struct vb2_buffer *vb2_buf = &buf->v4l2_buf.vb2_buf;
 	u32 framecount = buf->v4l2_buf.sequence;
-	struct frame_addr *paddr = &buf->paddr;
-	struct mxc_isi_cap_dev *isi_cap;
-	struct v4l2_pix_format_mplane *pix;
-	int val = 0;
+	dma_addr_t *dma_addrs = buf->dma_addrs;
+	struct mxc_isi_cap_dev *isi_cap = mxc_isi->isi_cap;
+	int val = 0, i;
 
-	if (buf->discard) {
-		isi_cap = mxc_isi->isi_cap;
-		pix = &isi_cap->pix;
-		paddr->y = isi_cap->discard_buffer_dma[0];
-		if (pix->num_planes == 2)
-			paddr->cb = isi_cap->discard_buffer_dma[1];
-		if (pix->num_planes == 3) {
-			paddr->cb = isi_cap->discard_buffer_dma[1];
-			paddr->cr = isi_cap->discard_buffer_dma[2];
-		}
-	} else {
-		paddr->y = vb2_dma_contig_plane_dma_addr(vb2_buf, 0);
-
-		if (vb2_buf->num_planes == 2)
-			paddr->cb = vb2_dma_contig_plane_dma_addr(vb2_buf, 1);
-		if (vb2_buf->num_planes == 3) {
-			paddr->cb = vb2_dma_contig_plane_dma_addr(vb2_buf, 1);
-			paddr->cr = vb2_dma_contig_plane_dma_addr(vb2_buf, 2);
-		}
+	for (i = 0; i < vb2_buf->num_planes; ++i) {
+		if (buf->discard)
+			dma_addrs[i] = isi_cap->discard_buffer_dma[i];
+		else
+			dma_addrs[i] = vb2_dma_contig_plane_dma_addr(vb2_buf, i);
 	}
 
 	val = readl(mxc_isi->regs + CHNL_OUT_BUF_CTRL);
 
 	if (framecount == 0 || ((is_buf_active(mxc_isi, 2)) && (framecount != 1))) {
-		writel(paddr->y, mxc_isi->regs + CHNL_OUT_BUF1_ADDR_Y);
-		writel(paddr->cb, mxc_isi->regs + CHNL_OUT_BUF1_ADDR_U);
-		writel(paddr->cr, mxc_isi->regs + CHNL_OUT_BUF1_ADDR_V);
+		writel(dma_addrs[0], mxc_isi->regs + CHNL_OUT_BUF1_ADDR_Y);
+		writel(dma_addrs[1], mxc_isi->regs + CHNL_OUT_BUF1_ADDR_U);
+		writel(dma_addrs[2], mxc_isi->regs + CHNL_OUT_BUF1_ADDR_V);
 		val ^= CHNL_OUT_BUF_CTRL_LOAD_BUF1_ADDR_MASK;
 		buf->id = MXC_ISI_BUF1;
 	} else if (framecount == 1 || is_buf_active(mxc_isi, 1)) {
-		writel(paddr->y, mxc_isi->regs + CHNL_OUT_BUF2_ADDR_Y);
-		writel(paddr->cb, mxc_isi->regs + CHNL_OUT_BUF2_ADDR_U);
-		writel(paddr->cr, mxc_isi->regs + CHNL_OUT_BUF2_ADDR_V);
+		writel(dma_addrs[0], mxc_isi->regs + CHNL_OUT_BUF2_ADDR_Y);
+		writel(dma_addrs[1], mxc_isi->regs + CHNL_OUT_BUF2_ADDR_U);
+		writel(dma_addrs[2], mxc_isi->regs + CHNL_OUT_BUF2_ADDR_V);
 		val ^= CHNL_OUT_BUF_CTRL_LOAD_BUF2_ADDR_MASK;
 		buf->id = MXC_ISI_BUF2;
 	}
 	writel(val, mxc_isi->regs + CHNL_OUT_BUF_CTRL);
 }
-EXPORT_SYMBOL_GPL(mxc_isi_channel_set_outbuf);
+EXPORT_SYMBOL_GPL(mxc_isi_channel_set_outbuf_loc);
 
 void mxc_isi_channel_set_m2m_src_addr(struct mxc_isi_dev *mxc_isi,
 			struct mxc_isi_buffer *buf)
 {
 	struct vb2_buffer *vb2_buf = &buf->v4l2_buf.vb2_buf;
-	struct frame_addr *paddr = &buf->paddr;
+	dma_addr_t *dma_addrs = buf->dma_addrs;
 
 	/* Only support one plane */
-	paddr->y = vb2_dma_contig_plane_dma_addr(vb2_buf, 0);
-	writel(paddr->y, mxc_isi->regs + CHNL_IN_BUF_ADDR);
+	dma_addrs[0] = vb2_dma_contig_plane_dma_addr(vb2_buf, 0);
+	writel(dma_addrs[0], mxc_isi->regs + CHNL_IN_BUF_ADDR);
 }
 EXPORT_SYMBOL_GPL(mxc_isi_channel_set_m2m_src_addr);
 
@@ -320,7 +305,7 @@ void mxc_isi_channel_source_config(struct mxc_isi_dev *mxc_isi)
 }
 EXPORT_SYMBOL_GPL(mxc_isi_channel_source_config);
 
-void mxc_isi_channel_set_flip(struct mxc_isi_dev *mxc_isi)
+void mxc_isi_channel_set_flip_loc(struct mxc_isi_dev *mxc_isi)
 {
 	u32 val;
 
@@ -398,7 +383,7 @@ void mxc_isi_channel_set_alpha_roi0(struct mxc_isi_dev *mxc_isi,
 	writel(val0 + val1, mxc_isi->regs + CHNL_ROI_0_LRC);
 }
 
-void mxc_isi_channel_set_alpha(struct mxc_isi_dev *mxc_isi)
+void mxc_isi_channel_set_alpha_loc(struct mxc_isi_dev *mxc_isi)
 {
 	u32 val;
 
@@ -625,9 +610,9 @@ void mxc_isi_channel_deinit(struct mxc_isi_dev *mxc_isi)
 }
 EXPORT_SYMBOL_GPL(mxc_isi_channel_deinit);
 
-void mxc_isi_channel_config(struct mxc_isi_dev *mxc_isi,
-			    struct mxc_isi_frame *src_f,
-			    struct mxc_isi_frame *dst_f)
+void mxc_isi_channel_config_loc(struct mxc_isi_dev *mxc_isi,
+				struct mxc_isi_frame *src_f,
+				struct mxc_isi_frame *dst_f)
 {
 	u32 val;
 
@@ -657,9 +642,9 @@ void mxc_isi_channel_config(struct mxc_isi_dev *mxc_isi,
 	writel(val, mxc_isi->regs + CHNL_OUT_BUF_PITCH);
 
 	/* TODO */
-	mxc_isi_channel_set_flip(mxc_isi);
+	mxc_isi_channel_set_flip_loc(mxc_isi);
 
-	mxc_isi_channel_set_alpha(mxc_isi);
+	mxc_isi_channel_set_alpha_loc(mxc_isi);
 
 	mxc_isi_channel_set_panic_threshold(mxc_isi);
 
@@ -672,7 +657,7 @@ void mxc_isi_channel_config(struct mxc_isi_dev *mxc_isi,
 
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
-EXPORT_SYMBOL_GPL(mxc_isi_channel_config);
+EXPORT_SYMBOL_GPL(mxc_isi_channel_config_loc);
 
 void mxc_isi_clean_registers(struct mxc_isi_dev *mxc_isi)
 {
@@ -683,7 +668,7 @@ void mxc_isi_clean_registers(struct mxc_isi_dev *mxc_isi)
 }
 EXPORT_SYMBOL_GPL(mxc_isi_clean_registers);
 
-void mxc_isi_channel_enable(struct mxc_isi_dev *mxc_isi, bool m2m_enabled)
+void mxc_isi_channel_enable_loc(struct mxc_isi_dev *mxc_isi, bool m2m_enabled)
 {
 	u32 val;
 
@@ -709,11 +694,10 @@ void mxc_isi_channel_enable(struct mxc_isi_dev *mxc_isi, bool m2m_enabled)
 	}
 
 	dump_isi_regs(mxc_isi);
-	msleep(300);
 }
-EXPORT_SYMBOL_GPL(mxc_isi_channel_enable);
+EXPORT_SYMBOL_GPL(mxc_isi_channel_enable_loc);
 
-void mxc_isi_channel_disable(struct mxc_isi_dev *mxc_isi)
+void mxc_isi_channel_disable_loc(struct mxc_isi_dev *mxc_isi)
 {
 	u32 val;
 
@@ -725,7 +709,7 @@ void mxc_isi_channel_disable(struct mxc_isi_dev *mxc_isi)
 	val |= (CHNL_CTRL_CLK_EN_DISABLE << CHNL_CTRL_CLK_EN_OFFSET);
 	writel(val, mxc_isi->regs + CHNL_CTRL);
 }
-EXPORT_SYMBOL_GPL(mxc_isi_channel_disable);
+EXPORT_SYMBOL_GPL(mxc_isi_channel_disable_loc);
 
 void  mxc_isi_enable_irq(struct mxc_isi_dev *mxc_isi)
 {

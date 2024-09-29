@@ -1,16 +1,17 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright 2012-2016 Freescale Semiconductor, Inc.
+ * Copyright 2012-2013 Freescale Semiconductor, Inc.
  */
 
 #ifndef __FSL_SAI_H
 #define __FSL_SAI_H
 
-#include <linux/pm_qos.h>
-#include <linux/platform_data/dma-imx.h>
+#include <linux/dma/imx-dma.h>
 #include <sound/dmaengine_pcm.h>
 
+#define FAL_SAI_NUM_RATES  20
 #define FSL_SAI_FORMATS (SNDRV_PCM_FMTBIT_S16_LE |\
+			 SNDRV_PCM_FMTBIT_S20_3LE |\
 			 SNDRV_PCM_FMTBIT_S24_LE |\
 			 SNDRV_PCM_FMTBIT_S32_LE |\
 			 SNDRV_PCM_FMTBIT_DSD_U8 |\
@@ -84,13 +85,14 @@
 #define FSL_SAI_xCR3(tx, ofs)	(tx ? FSL_SAI_TCR3(ofs) : FSL_SAI_RCR3(ofs))
 #define FSL_SAI_xCR4(tx, ofs)	(tx ? FSL_SAI_TCR4(ofs) : FSL_SAI_RCR4(ofs))
 #define FSL_SAI_xCR5(tx, ofs)	(tx ? FSL_SAI_TCR5(ofs) : FSL_SAI_RCR5(ofs))
-#define FSL_SAI_xDR(tx, ofs)	(tx ? FSL_SAI_TDR(ofs) : FSL_SAI_RDR(ofs))
-#define FSL_SAI_xFR(tx, ofs)	(tx ? FSL_SAI_TFR(ofs) : FSL_SAI_RFR(ofs))
+#define FSL_SAI_xDR0(tx)	(tx ? FSL_SAI_TDR0 : FSL_SAI_RDR0)
+#define FSL_SAI_xFR0(tx)	(tx ? FSL_SAI_TFR0 : FSL_SAI_RFR0)
 #define FSL_SAI_xMR(tx)		(tx ? FSL_SAI_TMR : FSL_SAI_RMR)
 
 /* SAI Transmit/Receive Control Register */
 #define FSL_SAI_CSR_TERE	BIT(31)
 #define FSL_SAI_CSR_SE		BIT(30)
+#define FSL_SAI_CSR_BCE		BIT(28)
 #define FSL_SAI_CSR_FR		BIT(25)
 #define FSL_SAI_CSR_SR		BIT(24)
 #define FSL_SAI_CSR_xF_SHIFT	16
@@ -116,6 +118,7 @@
 
 /* SAI Transmit and Receive Configuration 2 Register */
 #define FSL_SAI_CR2_SYNC	BIT(30)
+#define FSL_SAI_CR2_BCI		BIT(28)
 #define FSL_SAI_CR2_MSEL_MASK	(0x3 << 26)
 #define FSL_SAI_CR2_MSEL_BUS	0
 #define FSL_SAI_CR2_MSEL_MCLK1	BIT(26)
@@ -215,36 +218,42 @@
 #define FSL_SAI_CLK_MAST3	3
 
 #define FSL_SAI_MCLK_MAX	4
-#define FSL_SAI_CLK_BIT		5
 
 /* SAI data transfer numbers per DMA request */
 #define FSL_SAI_MAXBURST_TX 6
 #define FSL_SAI_MAXBURST_RX 6
 
-#define SAI_FLAG_PMQOS   BIT(0)
+#define PMQOS_CPU_LATENCY   BIT(0)
+
+/* Max number of dataline */
+#define FSL_SAI_DL_NUM		(8)
+/* default dataline type is zero */
+#define FSL_SAI_DL_DEFAULT	(0)
+#define FSL_SAI_DL_I2S		BIT(0)
+#define FSL_SAI_DL_PDM		BIT(1)
 
 struct fsl_sai_soc_data {
 	bool use_imx_pcm;
 	bool use_edma;
+	bool mclk0_is_mclk1;
+	bool mclk_with_tere;
 	unsigned int fifo_depth;
+	unsigned int pins;
 	unsigned int reg_offset;
-	unsigned int fifos;
-	unsigned int dataline;
 	unsigned int flags;
 	unsigned int max_register;
+	unsigned int max_burst[2];
 };
 
 /**
  * struct fsl_sai_verid - version id data
- * @major: major version number
- * @minor: minor version number
+ * @version: version number
  * @feature: feature specification number
  *           0000000000000000b - Standard feature set
  *           0000000000000000b - Standard feature set
  */
 struct fsl_sai_verid {
-	u32 major;
-	u32 minor;
+	u32 version;
 	u32 feature;
 };
 
@@ -261,7 +270,8 @@ struct fsl_sai_param {
 };
 
 struct fsl_sai_dl_cfg {
-	unsigned int pins;
+	unsigned int type;
+	unsigned int pins[2];
 	unsigned int mask[2];
 	unsigned int start_off[2];
 	unsigned int next_off[2];
@@ -277,20 +287,19 @@ struct fsl_sai {
 	struct clk *pll11k_clk;
 	struct resource *res;
 
-	bool slave_mode[2];
+	bool is_consumer_mode[2];
 	bool is_lsb_first;
 	bool is_dsp_mode;
-	bool is_multi_lane;
+	bool is_pdm_mode;
+	bool is_multi_fifo_dma;
 	bool synchronous[2];
-	bool is_dsd;
+	struct fsl_sai_dl_cfg *dl_cfg;
+	unsigned int dl_cfg_cnt;
+	bool mclk_direction_output;
 	bool monitor_spdif;
 	bool monitor_spdif_start;
 
 	int gpr_idx;
-	int pcm_dl_cfg_cnt;
-	int dsd_dl_cfg_cnt;
-	struct fsl_sai_dl_cfg *pcm_dl_cfg;
-	struct fsl_sai_dl_cfg *dsd_dl_cfg;
 
 	unsigned int masterflag[2];
 
@@ -307,9 +316,11 @@ struct fsl_sai {
 	struct fsl_sai_verid verid;
 	struct fsl_sai_param param;
 	struct pm_qos_request pm_qos_req;
-	struct sdma_audio_config audio_config[2];
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pins_state;
+	struct sdma_peripheral_config audio_config[2];
+	struct snd_pcm_hw_constraint_list constraint_rates;
+	unsigned int constraint_rates_list[FAL_SAI_NUM_RATES];
 };
 
 const struct attribute_group *fsl_sai_get_dev_attribute_group(bool monitor_spdif);

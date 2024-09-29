@@ -79,23 +79,22 @@ static const struct dma_buf_ops dsp_heap_buf_ops = {
 	.release = dsp_heap_dma_buf_release,
 };
 
-static int dsp_heap_allocate(struct dma_heap *heap,
-			     unsigned long len,
-			     unsigned long fd_flags,
-			     unsigned long heap_flags)
+static struct dma_buf * dsp_heap_allocate(struct dma_heap *heap,
+					  unsigned long len,
+					  unsigned long fd_flags,
+					  unsigned long heap_flags)
 {
 	struct dsp_heap *dsp_heap = dma_heap_get_drvdata(heap);
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	struct dsp_heap_buffer *buffer;
 	struct dma_buf *dmabuf;
-	int ret;
 
 	if (len > dsp_heap->size)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	buffer = kzalloc(sizeof(*buffer), GFP_KERNEL);
 	if (!buffer)
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	INIT_LIST_HEAD(&buffer->attachments);
 	mutex_init(&buffer->lock);
@@ -108,18 +107,11 @@ static int dsp_heap_allocate(struct dma_heap *heap,
 	exp_info.priv = buffer;
 	dmabuf = dma_buf_export(&exp_info);
 	if (IS_ERR(dmabuf)) {
-		ret = PTR_ERR(dmabuf);
-		return ret;
+		kfree(buffer);
+		return dmabuf;
 	}
 
-	ret = dma_buf_fd(dmabuf, fd_flags);
-	if (ret < 0) {
-		dma_buf_put(dmabuf);
-		/* just return, as put will call release and that will free */
-		return ret;
-	}
-
-	return ret;
+	return dmabuf;
 }
 
 static const struct dma_heap_ops dsp_heap_ops = {
@@ -131,11 +123,17 @@ static int dsp_heap_create(void)
 	struct dma_heap_export_info exp_info;
 	struct dsp_heap *dsp_heap;
 	struct reserved_mem *rmem;
-	struct device_node np;
+	struct device_node *np;
 
-	np.full_name = "dsp_reserved_heap";
-	np.name = "dsp_reserved_heap";
-	rmem = of_reserved_mem_lookup(&np);
+	np = of_find_node_by_path("/reserved-memory");
+	if (!np)
+		return 0;
+
+	np = of_find_node_by_name(np, "dsp_reserved_heap");
+	if (!np)
+		return 0;
+
+	rmem = of_reserved_mem_lookup(np);
 	if (!rmem) {
 		pr_err("of_reserved_mem_lookup() returned NULL\n");
 		return 0;
@@ -168,3 +166,4 @@ static int dsp_heap_create(void)
 }
 module_init(dsp_heap_create);
 MODULE_LICENSE("GPL v2");
+MODULE_IMPORT_NS(DMA_BUF);

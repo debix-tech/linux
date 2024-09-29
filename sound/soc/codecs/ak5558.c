@@ -24,6 +24,11 @@
 
 #include "ak5558.h"
 
+enum ak555x_type {
+	AK5558,
+	AK5552,
+};
+
 #define AK5558_NUM_SUPPLIES 2
 static const char *ak5558_supply_names[AK5558_NUM_SUPPLIES] = {
 	"DVDD",
@@ -80,13 +85,13 @@ static const struct soc_enum ak5558_adcset_enum[] = {
 };
 
 static const struct snd_kcontrol_new ak5558_snd_controls[] = {
-	SOC_ENUM("AK5558 Monaural Mode", ak5558_mono_enum[0]),
-	SOC_ENUM("AK5558 Digital Filter", ak5558_adcset_enum[0]),
+	SOC_ENUM("Monaural Mode", ak5558_mono_enum[0]),
+	SOC_ENUM("Digital Filter", ak5558_adcset_enum[0]),
 };
 
 static const struct snd_kcontrol_new ak5552_snd_controls[] = {
-	SOC_ENUM("AK5552 Monaural Mode", ak5552_mono_enum[0]),
-	SOC_ENUM("AK5552 Digital Filter", ak5558_adcset_enum[0]),
+	SOC_ENUM("Monaural Mode", ak5552_mono_enum[0]),
+	SOC_ENUM("Digital Filter", ak5558_adcset_enum[0]),
 };
 
 static const struct snd_soc_dapm_widget ak5558_dapm_widgets[] = {
@@ -193,13 +198,13 @@ static int ak5558_set_dai_fmt(struct snd_soc_dai *dai, unsigned int fmt)
 	struct snd_soc_component *component = dai->component;
 	u8 format;
 
-	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
-	case SND_SOC_DAIFMT_CBS_CFS:
+	switch (fmt & SND_SOC_DAIFMT_CLOCK_PROVIDER_MASK) {
+	case SND_SOC_DAIFMT_CBC_CFC:
 		break;
-	case SND_SOC_DAIFMT_CBM_CFM:
+	case SND_SOC_DAIFMT_CBP_CFP:
 		break;
-	case SND_SOC_DAIFMT_CBS_CFM:
-	case SND_SOC_DAIFMT_CBM_CFS:
+	case SND_SOC_DAIFMT_CBC_CFP:
+	case SND_SOC_DAIFMT_CBP_CFC:
 	default:
 		dev_err(dai->dev, "Clock mode unsupported");
 		return -EINVAL;
@@ -302,7 +307,7 @@ static struct snd_soc_dai_driver ak5558_dai = {
 };
 
 static struct snd_soc_dai_driver ak5552_dai = {
-	.name = "ak5558-aif",
+	.name = "ak5552-aif",
 	.capture = {
 		.stream_name = "Capture",
 		.channels_min = 1,
@@ -313,21 +318,12 @@ static struct snd_soc_dai_driver ak5552_dai = {
 	.ops = &ak5558_dai_ops,
 };
 
-static void ak5558_power_off(struct ak5558_priv *ak5558)
+static void ak5558_reset(struct ak5558_priv *ak5558, bool active)
 {
 	if (!ak5558->reset_gpiod)
 		return;
 
-	gpiod_set_value_cansleep(ak5558->reset_gpiod, 1);
-	usleep_range(1000, 2000);
-}
-
-static void ak5558_power_on(struct ak5558_priv *ak5558)
-{
-	if (!ak5558->reset_gpiod)
-		return;
-
-	gpiod_set_value_cansleep(ak5558->reset_gpiod, 0);
+	gpiod_set_value_cansleep(ak5558->reset_gpiod, active);
 	usleep_range(1000, 2000);
 }
 
@@ -335,7 +331,7 @@ static int ak5558_probe(struct snd_soc_component *component)
 {
 	struct ak5558_priv *ak5558 = snd_soc_component_get_drvdata(component);
 
-	ak5558_power_on(ak5558);
+	ak5558_reset(ak5558, false);
 	return ak5558_set_mcki(component);
 }
 
@@ -343,7 +339,7 @@ static void ak5558_remove(struct snd_soc_component *component)
 {
 	struct ak5558_priv *ak5558 = snd_soc_component_get_drvdata(component);
 
-	ak5558_power_off(ak5558);
+	ak5558_reset(ak5558, true);
 }
 
 static int __maybe_unused ak5558_runtime_suspend(struct device *dev)
@@ -351,7 +347,7 @@ static int __maybe_unused ak5558_runtime_suspend(struct device *dev)
 	struct ak5558_priv *ak5558 = dev_get_drvdata(dev);
 
 	regcache_cache_only(ak5558->regmap, true);
-	ak5558_power_off(ak5558);
+	ak5558_reset(ak5558, true);
 
 	regulator_bulk_disable(ARRAY_SIZE(ak5558->supplies),
 			       ak5558->supplies);
@@ -370,8 +366,8 @@ static int __maybe_unused ak5558_runtime_resume(struct device *dev)
 		return ret;
 	}
 
-	ak5558_power_off(ak5558);
-	ak5558_power_on(ak5558);
+	ak5558_reset(ak5558, true);
+	ak5558_reset(ak5558, false);
 
 	regcache_cache_only(ak5558->regmap, false);
 	regcache_mark_dirty(ak5558->regmap);
@@ -397,7 +393,6 @@ static const struct snd_soc_component_driver soc_codec_dev_ak5558 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct snd_soc_component_driver soc_codec_dev_ak5552 = {
@@ -412,7 +407,6 @@ static const struct snd_soc_component_driver soc_codec_dev_ak5552 = {
 	.idle_bias_on		= 1,
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 static const struct regmap_config ak5558_regmap = {
@@ -429,7 +423,8 @@ static int ak5558_i2c_probe(struct i2c_client *i2c)
 {
 	struct ak5558_priv *ak5558;
 	int ret = 0;
-	int i;
+	int dev_id;
+	int i, reg;
 
 	ak5558 = devm_kzalloc(&i2c->dev, sizeof(*ak5558), GFP_KERNEL);
 	if (!ak5558)
@@ -457,16 +452,35 @@ static int ak5558_i2c_probe(struct i2c_client *i2c)
 		return ret;
 	}
 
-	if (of_device_is_compatible(i2c->dev.of_node, "asahi-kasei,ak5552"))
+	dev_id = (uintptr_t)of_device_get_match_data(&i2c->dev);
+	switch (dev_id) {
+	case AK5552:
 		ret = devm_snd_soc_register_component(&i2c->dev,
 						      &soc_codec_dev_ak5552,
 						      &ak5552_dai, 1);
-	else
+		break;
+	case AK5558:
 		ret = devm_snd_soc_register_component(&i2c->dev,
 						      &soc_codec_dev_ak5558,
 						      &ak5558_dai, 1);
-	if (ret)
+		break;
+	default:
+		dev_err(&i2c->dev, "unexpected device type\n");
+		return -EINVAL;
+	}
+	if (ret < 0) {
+		dev_err(&i2c->dev, "failed to register component: %d\n", ret);
 		return ret;
+	}
+
+	/* tog the reset gpio */
+	ak5558_reset(ak5558, true);
+	ak5558_reset(ak5558, false);
+
+	/* Check if first register can be read or not */
+	reg = i2c_smbus_read_byte_data(i2c, AK5558_00_POWER_MANAGEMENT1);
+	if (reg < 0)
+		return -ENODEV;
 
 	pm_runtime_enable(&i2c->dev);
 	regcache_cache_only(ak5558->regmap, true);
@@ -474,16 +488,14 @@ static int ak5558_i2c_probe(struct i2c_client *i2c)
 	return 0;
 }
 
-static int ak5558_i2c_remove(struct i2c_client *i2c)
+static void ak5558_i2c_remove(struct i2c_client *i2c)
 {
 	pm_runtime_disable(&i2c->dev);
-
-	return 0;
 }
 
-static const struct of_device_id ak5558_i2c_dt_ids[] = {
-	{ .compatible = "asahi-kasei,ak5558", },
-	{ .compatible = "asahi-kasei,ak5552", },
+static const struct of_device_id ak5558_i2c_dt_ids[] __maybe_unused = {
+	{ .compatible = "asahi-kasei,ak5558", .data = (void *) AK5558 },
+	{ .compatible = "asahi-kasei,ak5552", .data = (void *) AK5552 },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, ak5558_i2c_dt_ids);
@@ -494,7 +506,7 @@ static struct i2c_driver ak5558_i2c_driver = {
 		.of_match_table = of_match_ptr(ak5558_i2c_dt_ids),
 		.pm = &ak5558_pm,
 	},
-	.probe_new = ak5558_i2c_probe,
+	.probe = ak5558_i2c_probe,
 	.remove = ak5558_i2c_remove,
 };
 

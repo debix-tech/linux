@@ -10,14 +10,15 @@
  *
  */
 #include <drm/bridge/cdns-mhdp.h>
+#include <drm/display/drm_hdcp_helper.h>
+#include <drm/display/drm_hdmi_helper.h>
+#include <drm/display/drm_scdc_helper.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_encoder_slave.h>
-#include <drm/drm_hdcp.h>
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_print.h>
-#include <drm/drm_scdc_helper.h>
 #include <drm/drm_vblank.h>
 #include <linux/delay.h>
 #include <linux/err.h>
@@ -33,18 +34,20 @@
 
 static void hdmi_sink_config(struct cdns_mhdp_device *mhdp)
 {
-	struct drm_scdc *scdc = &mhdp->connector.base.display_info.hdmi.scdc;
+	struct drm_display_info *display = &mhdp->connector.base.display_info;
 	u8 buff = 0;
 
-	/* return if hdmi work in DVI mode */
-	if (mhdp->hdmi.hdmi_type == MODE_DVI)
-		return;
-
-	/* check sink support SCDC or not */
-	if (scdc->supported != true) {
-		DRM_INFO("Sink Not Support SCDC\n");
+	/* check sink type (HDMI or DVI) */
+	if (!display->is_hdmi) {
+		mhdp->hdmi.hdmi_type = MODE_DVI;
 		return;
 	}
+
+	mhdp->hdmi.hdmi_type = MODE_HDMI_1_4;
+
+	/* check HDMI2.0 sink */
+	if (!display->hdmi.scdc.supported)
+		return;
 
 	if (mhdp->hdmi.char_rate > 340000) {
 		/*
@@ -53,7 +56,7 @@ static void hdmi_sink_config(struct cdns_mhdp_device *mhdp)
 		 */
 		buff = SCDC_TMDS_BIT_CLOCK_RATIO_BY_40 | SCDC_SCRAMBLING_ENABLE;
 		mhdp->hdmi.hdmi_type = MODE_HDMI_2_0;
-	} else  if (scdc->scrambling.low_rates) {
+	} else  if (display->hdmi.scdc.scrambling.low_rates) {
 		/*
 		 * Enable scrambling and HDMI2.0 when scrambling capability of sink
 		 * be indicated in the HF-VSDB LTE_340Mcsc_scramble bit
@@ -102,7 +105,7 @@ static int hdmi_avi_info_set(struct cdns_mhdp_device *mhdp,
 		break;
 	}
 
-	drm_hdmi_avi_infoframe_colorspace(&frame, conn_state);
+	drm_hdmi_avi_infoframe_colorimetry(&frame, conn_state);
 
 	adj_mode = &mhdp->bridge.base.encoder->crtc->state->adjusted_mode;
 
@@ -275,13 +278,7 @@ cdns_hdmi_connector_detect(struct drm_connector *connector, bool force)
 		result = connector_status_unknown;
 	}
 
-	mutex_lock(&mhdp->lock);
-	if (result != mhdp->last_connector_result) {
-		handle_plugged_change(mhdp,
-				      result == connector_status_connected);
-		mhdp->last_connector_result = result;
-	}
-	mutex_unlock(&mhdp->lock);
+	mhdp->last_connector_result = result;
 
 	return result;
 }
@@ -303,8 +300,6 @@ static int cdns_hdmi_connector_get_modes(struct drm_connector *connector)
 			 edid->header[6], edid->header[7]);
 		drm_connector_update_edid_property(connector, edid);
 		num_modes = drm_add_edid_modes(connector, edid);
-		mhdp->hdmi.hdmi_type = drm_detect_hdmi_monitor(edid) ?
-						MODE_HDMI_1_4 : MODE_DVI;
 		kfree(edid);
 	}
 
@@ -328,6 +323,7 @@ static void cdns_hdmi_bridge_disable(struct drm_bridge *bridge)
 	struct cdns_mhdp_device *mhdp = bridge->driver_private;
 
 	cdns_hdcp_disable(mhdp);
+	handle_plugged_change(mhdp, false);
 }
 
 static void cdns_hdmi_bridge_enable(struct drm_bridge *bridge)
@@ -337,6 +333,7 @@ static void cdns_hdmi_bridge_enable(struct drm_bridge *bridge)
 
 	if (conn_state->content_protection == DRM_MODE_CONTENT_PROTECTION_DESIRED)
 		cdns_hdcp_enable(mhdp);
+	handle_plugged_change(mhdp, true);
 }
 
 static int cdns_hdmi_connector_atomic_check(struct drm_connector *connector,
@@ -367,9 +364,9 @@ static int cdns_hdmi_connector_atomic_check(struct drm_connector *connector,
 			!new_con_state->hdr_output_metadata ||
 			!old_con_state->hdr_output_metadata ||
 			new_con_state->colorspace != old_con_state->colorspace;
-		/* save new connector state */
-		memcpy(&mhdp->connector.new_state, new_con_state, sizeof(struct drm_connector_state));
 	}
+	/* save new connector state */
+	memcpy(&mhdp->connector.new_state, new_con_state, sizeof(struct drm_connector_state));
 
 	/*
 	 * These properties are handled by fastset, and might not end up in a
@@ -425,10 +422,8 @@ static int cdns_hdmi_bridge_attach(struct drm_bridge *bridge,
 					   config->hdr_output_metadata_property,
 					   0);
 
-		if (!drm_mode_create_hdmi_colorspace_property(connector))
-			drm_object_attach_property(&connector->base,
-						connector->colorspace_property,
-						0);
+		if (!drm_mode_create_hdmi_colorspace_property(connector, 0))
+			drm_connector_attach_colorspace_property(connector);
 	}
 
 	drm_connector_attach_encoder(connector, encoder);
@@ -508,6 +503,14 @@ bool cdns_hdmi_bridge_mode_fixup(struct drm_bridge *bridge,
 
 	/* for all other platforms, other than imx8mq */
 	if (strncmp("imx8mq-hdmi", mhdp->plat_data->plat_name, 11)) {
+		/* In color depth mode,
+		 * if the character clock rate exceed max_tmds_clock
+		 * video should default work in bpc = 8.
+		 */
+		if ((mode->clock * di->bpc / 8) > di->max_tmds_clock)
+			return true;
+
+		/* only bpc less than 12 is supported */
 		if (di->bpc == 10 || di->bpc == 6)
 			video->color_depth = di->bpc;
 
@@ -548,8 +551,11 @@ bool cdns_hdmi_bridge_mode_fixup(struct drm_bridge *bridge,
 			video->color_fmt = YCBCR_4_2_0;
 		else
 			video->color_fmt = YCBCR_4_4_4;
-	} else if (new_state->colorspace == DRM_MODE_COLORIMETRY_DEFAULT)
-		return !drm_mode_is_420_only(di, mode);
+	} else if (new_state->colorspace == DRM_MODE_COLORIMETRY_DEFAULT) {
+		/* set default color fmt for YUV420 only mode */
+		if (drm_mode_is_420_only(di, mode))
+			video->color_fmt = YCBCR_4_2_0;
+	}
 
 	return true;
 }
@@ -573,11 +579,25 @@ static void hotplug_work_func(struct work_struct *work)
 
 	if (connector->status == connector_status_connected) {
 		DRM_INFO("HDMI Cable Plug In\n");
+
+		/* Recovery HDCP state */
+		if (connector->state->content_protection != DRM_MODE_CONTENT_PROTECTION_UNDESIRED)
+			mhdp->hdcp.state = HDCP_STATE_ENABLING;
+
 		mhdp->force_mode_set = true;
 		enable_irq(mhdp->irq[IRQ_OUT]);
 	} else if (connector->status == connector_status_disconnected) {
 		/* Cable Disconnedted  */
 		DRM_INFO("HDMI Cable Plug Out\n");
+
+		/* Disable HDCP when cable plugout,
+		 * set content_protection to DESIRED, recovery HDCP state after cable plugin
+		 */
+		if (connector->state->content_protection != DRM_MODE_CONTENT_PROTECTION_UNDESIRED) {
+			connector->state->content_protection = DRM_MODE_CONTENT_PROTECTION_DESIRED;
+			mhdp->hdcp.state = HDCP_STATE_DISABLING;
+		}
+
 		/* force mode set for cable replugin to recovery HDMI2.0 video modes */
 		mhdp->force_mode_set = true;
 		enable_irq(mhdp->irq[IRQ_IN]);
@@ -743,6 +763,9 @@ static void __cdns_hdmi_remove(struct cdns_mhdp_device *mhdp)
 	cdns_mhdp_unregister_cec_driver(&mhdp->hdmi.cec);
 #endif
 	cdns_mhdp_unregister_audio_driver(mhdp->dev);
+	cnds_hdcp_remove_device_files(mhdp);
+
+	cdns_mhdp_plat_call(mhdp, power_off);
 }
 
 /* -----------------------------------------------------------------------------

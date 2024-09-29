@@ -18,13 +18,13 @@
 &iomuxc {
 	pinctrl_csi1_pwn: csi1_pwn_grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_SAI1_RXC__GPIO4_IO01	0x19
+			MX8MP_IOMUXC_SAI1_RXC__GPIO4_IO01	0x10
 		>;
 	};
 
 	pinctrl_csi1_rst: csi1_rst_grp {
 		fsl,pins = <
-			MX8MP_IOMUXC_SAI1_RXFS__GPIO4_IO00	0x19
+			MX8MP_IOMUXC_SAI1_RXFS__GPIO4_IO00	0x10
 		>;
 	};
 };
@@ -90,7 +90,7 @@
 &mipi_csi_0 {
 	status = "okay";
 
-	port@0 {
+	port {
 		mipi_csi0_ep: endpoint {
 			remote-endpoint = <&basler_ep_0>;
 			data-lanes = <4>;

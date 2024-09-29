@@ -73,7 +73,7 @@ static struct ata_port_operations rb532_pata_port_ops = {
 
 /* ------------------------------------------------------------------------ */
 
-static struct scsi_host_template rb532_pata_sht = {
+static const struct scsi_host_template rb532_pata_sht = {
 	ATA_PIO_SHT(DRV_NAME),
 };
 
@@ -115,10 +115,8 @@ static int rb532_pata_driver_probe(struct platform_device *pdev)
 	}
 
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "no IRQ resource found\n");
+	if (irq < 0)
 		return irq;
-	}
 	if (!irq)
 		return -EINVAL;
 
@@ -157,18 +155,16 @@ static int rb532_pata_driver_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int rb532_pata_driver_remove(struct platform_device *pdev)
+static void rb532_pata_driver_remove(struct platform_device *pdev)
 {
 	struct ata_host *ah = platform_get_drvdata(pdev);
 
 	ata_host_detach(ah);
-
-	return 0;
 }
 
 static struct platform_driver rb532_pata_platform_driver = {
 	.probe		= rb532_pata_driver_probe,
-	.remove		= rb532_pata_driver_remove,
+	.remove_new	= rb532_pata_driver_remove,
 	.driver	 = {
 		.name   = DRV_NAME,
 	},

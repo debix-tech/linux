@@ -656,9 +656,8 @@ static struct regulator *core_regulator;
 static struct regulator *analog_regulator;
 static struct regulator *gpo_regulator;
 
-static int ov5640_probe(struct i2c_client *adapter,
-				const struct i2c_device_id *device_id);
-static int ov5640_remove(struct i2c_client *client);
+static int ov5640_probe(struct i2c_client *adapter);
+static void ov5640_remove(struct i2c_client *client);
 
 static s32 ov5640_read_reg(u16 reg, u8 *val);
 static s32 ov5640_write_reg(u16 reg, u8 val);
@@ -1384,8 +1383,14 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
 	else
 		pr_err("currently this sensor format can not be supported!\n");
 
-	dn_mode = ov5640_mode_info_data[frame_rate][mode].dn_mode;
-	orig_dn_mode = ov5640_mode_info_data[frame_rate][orig_mode].dn_mode;
+	if (mode == ov5640_mode_INIT) {
+		dn_mode = 0;
+		orig_dn_mode = 0;
+	} else {
+		dn_mode = ov5640_mode_info_data[frame_rate][mode].dn_mode;
+		orig_dn_mode = ov5640_mode_info_data[frame_rate][orig_mode].dn_mode;
+	}
+
 	if (mode == ov5640_mode_INIT) {
 		pModeSetting = ov5640_init_setting_30fps_VGA;
 		ArySize = ARRAY_SIZE(ov5640_init_setting_30fps_VGA);
@@ -1950,6 +1955,8 @@ static int ioctl_dev_exit(struct v4l2_int_device *s)
  * This structure defines all the ioctls for this module and links them to the
  * enumeration.
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
 static struct v4l2_int_ioctl_desc ov5640_ioctl_desc[] = {
 	{vidioc_int_dev_init_num, (v4l2_int_ioctl_func *) ioctl_dev_init},
 	{vidioc_int_dev_exit_num, ioctl_dev_exit},
@@ -1977,6 +1984,7 @@ static struct v4l2_int_ioctl_desc ov5640_ioctl_desc[] = {
 	{vidioc_int_g_chip_ident_num,
 				(v4l2_int_ioctl_func *) ioctl_g_chip_ident},
 };
+#pragma GCC diagnostic pop
 
 static struct v4l2_int_slave ov5640_slave = {
 	.ioctls = ov5640_ioctl_desc,
@@ -1998,8 +2006,7 @@ static struct v4l2_int_device ov5640_int_device = {
  * @param adapter            struct i2c_adapter *
  * @return  Error code indicating success or failure
  */
-static int ov5640_probe(struct i2c_client *client,
-			const struct i2c_device_id *id)
+static int ov5640_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	int retval;
@@ -2109,13 +2116,11 @@ static int ov5640_probe(struct i2c_client *client,
  * @param client            struct i2c_client *
  * @return  Error code indicating success or failure
  */
-static int ov5640_remove(struct i2c_client *client)
+static void ov5640_remove(struct i2c_client *client)
 {
 	v4l2_int_device_unregister(&ov5640_int_device);
 
 	ov5640_power_off();
-
-	return 0;
 }
 
 /*!

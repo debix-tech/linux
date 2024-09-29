@@ -211,22 +211,28 @@ static void dcnano_crtc_queue_state_event(struct drm_crtc *crtc)
 }
 
 static int dcnano_crtc_atomic_check(struct drm_crtc *crtc,
-				    struct drm_crtc_state *state)
+				    struct drm_atomic_state *state)
 {
-	bool has_primary = state->plane_mask & drm_plane_mask(crtc->primary);
+	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state,
+									  crtc);
+	bool has_primary = crtc_state->plane_mask &
+			   drm_plane_mask(crtc->primary);
 
-	if (state->active && !has_primary)
+	if (crtc_state->active && !has_primary)
 		return -EINVAL;
 
-	if (state->active_changed && state->active)
-		state->mode_changed = true;
+	if (crtc_state->active_changed && crtc_state->active)
+		crtc_state->mode_changed = true;
 
 	return 0;
 }
 
 static void dcnano_crtc_atomic_flush(struct drm_crtc *crtc,
-				     struct drm_crtc_state *old_crtc_state)
+				     struct drm_atomic_state *state)
 {
+	struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(state,
+									      crtc);
+
 	if (!crtc->state->active && !old_crtc_state->active)
 		return;
 
@@ -235,7 +241,7 @@ static void dcnano_crtc_atomic_flush(struct drm_crtc *crtc,
 }
 
 static void dcnano_crtc_atomic_enable(struct drm_crtc *crtc,
-				      struct drm_crtc_state *old_crtc_state)
+				      struct drm_atomic_state *state)
 {
 	struct drm_device *drm = crtc->dev;
 	struct dcnano_dev *dcnano = crtc_to_dcnano_dev(crtc);
@@ -258,8 +264,7 @@ static void dcnano_crtc_atomic_enable(struct drm_crtc *crtc,
 
 	drm_crtc_vblank_on(crtc);
 
-	for_each_new_plane_in_state(old_crtc_state->state,
-				    plane, new_plane_state, i) {
+	for_each_new_plane_in_state(state, plane, new_plane_state, i) {
 		if (!new_plane_state->fb)
 			continue;
 
@@ -288,7 +293,7 @@ static void dcnano_crtc_atomic_enable(struct drm_crtc *crtc,
 }
 
 static void dcnano_crtc_atomic_disable(struct drm_crtc *crtc,
-				       struct drm_crtc_state *old_crtc_state)
+				       struct drm_atomic_state *state)
 {
 	struct drm_device *drm = crtc->dev;
 	struct dcnano_dev *dcnano = crtc_to_dcnano_dev(crtc);

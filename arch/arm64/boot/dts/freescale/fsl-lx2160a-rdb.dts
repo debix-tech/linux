@@ -14,6 +14,8 @@
 
 	aliases {
 		crypto = &crypto;
+		mmc0 = &esdhc0;
+		mmc1 = &esdhc1;
 		serial0 = &uart0;
 	};
 
@@ -29,21 +31,27 @@
 		regulator-boot-on;
 		regulator-always-on;
 	};
-};
 
-&can0 {
-	status = "okay";
-
-	can-transceiver {
-		max-bitrate = <5000000>;
+	sfp2: sfp-2 {
+		compatible = "sff,sfp";
+		i2c-bus = <&sfp2_i2c>;
+		maximum-power-milliwatt = <2000>;
+		/* Leave commented out if using DPMAC_LINK_TYPE_FIXED mode */
+		/* tx-disable-gpios = <&sfp2_csr 0 GPIO_ACTIVE_HIGH>; */
+		los-gpios = <&sfp2_csr 4 GPIO_ACTIVE_HIGH>;
+		tx-fault-gpios = <&sfp2_csr 5 GPIO_ACTIVE_HIGH>;
+		mod-def0-gpios = <&sfp2_csr 7 GPIO_ACTIVE_LOW>;
 	};
-};
 
-&can1 {
-	status = "okay";
-
-	can-transceiver {
-		max-bitrate = <5000000>;
+	sfp3: sfp-3 {
+		compatible = "sff,sfp";
+		i2c-bus = <&sfp3_i2c>;
+		maximum-power-milliwatt = <2000>;
+		/* Leave commented out if using DPMAC_LINK_TYPE_FIXED mode */
+		/* tx-disable-gpios = <&sfp3_csr 0 GPIO_ACTIVE_HIGH>; */
+		los-gpios = <&sfp3_csr 4 GPIO_ACTIVE_HIGH>;
+		tx-fault-gpios = <&sfp3_csr 5 GPIO_ACTIVE_HIGH>;
+		mod-def0-gpios = <&sfp3_csr 7 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -63,6 +71,20 @@
 	managed = "in-band-status";
 };
 
+&dpmac5 {
+	sfp = <&sfp2>;
+	managed = "in-band-status";
+	phys = <&serdes_1 5>, <&inphi_retimer 0>;
+	phy-names = "serdes", "retimer";
+};
+
+&dpmac6 {
+	sfp = <&sfp3>;
+	managed = "in-band-status";
+	phys = <&serdes_1 4>, <&inphi_retimer 1>;
+	phy-names = "serdes", "retimer";
+};
+
 &dpmac17 {
 	phy-handle = <&rgmii_phy1>;
 	phy-connection-type = "rgmii-id";
@@ -79,6 +101,7 @@
 	rgmii_phy1: ethernet-phy@1 {
 		/* AR8035 PHY */
 		compatible = "ethernet-phy-id004d.d072";
+		interrupts-extended = <&extirq 4 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x1>;
 		eee-broken-1000t;
 	};
@@ -86,6 +109,7 @@
 	rgmii_phy2: ethernet-phy@2 {
 		/* AR8035 PHY */
 		compatible = "ethernet-phy-id004d.d072";
+		interrupts-extended = <&extirq 5 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x2>;
 		eee-broken-1000t;
 	};
@@ -93,20 +117,42 @@
 	aquantia_phy1: ethernet-phy@4 {
 		/* AQR107 PHY */
 		compatible = "ethernet-phy-ieee802.3-c45";
-		interrupts = <GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts-extended = <&extirq 2 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x4>;
 	};
 
 	aquantia_phy2: ethernet-phy@5 {
 		/* AQR107 PHY */
 		compatible = "ethernet-phy-ieee802.3-c45";
-		interrupts = <GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts-extended = <&extirq 3 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x5>;
+	};
+};
+
+&can0 {
+	status = "okay";
+
+	can-transceiver {
+		max-bitrate = <5000000>;
+	};
+};
+
+&can1 {
+	status = "okay";
+
+	can-transceiver {
+		max-bitrate = <5000000>;
 	};
 };
 
 &emdio2 {
 	status = "okay";
+
+	inphi_retimer: retimer@0 {
+		compatible = "inphi,in112525";
+		reg = <0x0>;
+		#phy-cells = <1>;
+	};
 };
 
 &esdhc0 {
@@ -153,6 +199,37 @@
 &i2c0 {
 	status = "okay";
 
+	cpld@66 {
+		compatible = "fsl,lx2160a-rdb-qixis-cpld";
+		reg = <0x66>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		sfp2_csr: gpio@19 {
+			compatible = "fsl,lx2160a-rdb-qixis-cpld-gpio";
+			reg = <0x19>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names =
+				"SFP2_TX_EN", "",
+				"", "",
+				"SFP2_RX_LOS", "SFP2_TX_FAULT",
+				"", "SFP2_MOD_ABS";
+		};
+
+		sfp3_csr: gpio@1a {
+			compatible = "fsl,lx2160a-rdb-qixis-cpld-gpio";
+			reg = <0x1a>;
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names =
+				"SFP3_TX_EN", "",
+				"", "",
+				"SFP3_RX_LOS", "SFP3_TX_FAULT",
+				"", "SFP3_MOD_ABS";
+		};
+	};
+
 	i2c-mux@77 {
 		compatible = "nxp,pca9547";
 		reg = <0x77>;
@@ -188,18 +265,47 @@
 				vcc-supply = <&sb_3v3>;
 			};
 		};
+
+		i2c@7 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x7>;
+
+			i2c-mux@75 {
+				compatible = "nxp,pca9547";
+				reg = <0x75>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+
+				sfp2_i2c: i2c@4 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0x4>;
+				};
+
+				sfp3_i2c: i2c@5 {
+					#address-cells = <1>;
+					#size-cells = <0>;
+					reg = <0x5>;
+				};
+			};
+		};
 	};
 };
 
 &i2c4 {
 	status = "okay";
 
-	rtc@51 {
-		compatible = "nxp,pcf2129";
-		reg = <0x51>;
+	rtc@53 {
+		compatible = "nxp,pcf2131";
+		reg = <0x53>;
 		/* IRQ_RTC_B -> IRQ08, active low */
 		interrupts-extended = <&extirq 8 IRQ_TYPE_LEVEL_LOW>;
 	};
+};
+
+&optee {
+	status = "okay";
 };
 
 &pcs_mdio3 {
@@ -207,6 +313,14 @@
 };
 
 &pcs_mdio4 {
+	status = "okay";
+};
+
+&pcs_mdio5 {
+	status = "okay";
+};
+
+&pcs_mdio6 {
 	status = "okay";
 };
 
@@ -240,19 +354,4 @@
 
 &usb1 {
 	status = "okay";
-};
-
-&emdio2 {
-	inphi_phy: ethernet-phy@0 {
-		compatible = "ethernet-phy-id0210.7440";
-		reg = <0x0>;
-	};
-};
-
-&dpmac5 {
-	phy-handle = <&inphi_phy>;
-};
-
-&dpmac6 {
-	phy-handle = <&inphi_phy>;
 };

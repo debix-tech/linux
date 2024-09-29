@@ -27,11 +27,11 @@
 #include <linux/smp.h>
 #include <linux/security.h>
 #include <linux/stddef.h>
-#include <linux/tracehook.h>
 #include <linux/audit.h>
 #include <linux/seccomp.h>
 #include <linux/ftrace.h>
 
+#include <asm/branch.h>
 #include <asm/byteorder.h>
 #include <asm/cpu.h>
 #include <asm/cpu-info.h>
@@ -48,6 +48,12 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
+
+unsigned long exception_ip(struct pt_regs *regs)
+{
+	return exception_epc(regs);
+}
+EXPORT_SYMBOL(exception_ip);
 
 /*
  * Called by kernel/ptrace.c when detaching..
@@ -532,10 +538,11 @@ static int fpr_set(struct task_struct *target,
 		ptrace_setfcr31(target, fcr31);
 	}
 
-	if (count > 0)
-		err = user_regset_copyin_ignore(&pos, &count, &kbuf, &ubuf,
-						fir_pos,
-						fir_pos + sizeof(u32));
+	if (count > 0) {
+		user_regset_copyin_ignore(&pos, &count, &kbuf, &ubuf,
+					  fir_pos, fir_pos + sizeof(u32));
+		return 0;
+	}
 
 	return err;
 }
@@ -1317,7 +1324,7 @@ asmlinkage long syscall_trace_enter(struct pt_regs *regs, long syscall)
 	current_thread_info()->syscall = syscall;
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE)) {
-		if (tracehook_report_syscall_entry(regs))
+		if (ptrace_report_syscall_entry(regs))
 			return -1;
 		syscall = current_thread_info()->syscall;
 	}
@@ -1376,7 +1383,7 @@ asmlinkage void syscall_trace_leave(struct pt_regs *regs)
 		trace_sys_exit(regs, regs_return_value(regs));
 
 	if (test_thread_flag(TIF_SYSCALL_TRACE))
-		tracehook_report_syscall_exit(regs, 0);
+		ptrace_report_syscall_exit(regs, 0);
 
 	user_enter();
 }

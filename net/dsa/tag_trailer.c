@@ -8,7 +8,9 @@
 #include <linux/list.h>
 #include <linux/slab.h>
 
-#include "dsa_priv.h"
+#include "tag.h"
+
+#define TRAILER_NAME "trailer"
 
 static struct sk_buff *trailer_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -24,8 +26,7 @@ static struct sk_buff *trailer_xmit(struct sk_buff *skb, struct net_device *dev)
 	return skb;
 }
 
-static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
-				   struct packet_type *pt)
+static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev)
 {
 	u8 *trailer;
 	int source_port;
@@ -51,15 +52,14 @@ static struct sk_buff *trailer_rcv(struct sk_buff *skb, struct net_device *dev,
 }
 
 static const struct dsa_device_ops trailer_netdev_ops = {
-	.name	= "trailer",
+	.name	= TRAILER_NAME,
 	.proto	= DSA_TAG_PROTO_TRAILER,
 	.xmit	= trailer_xmit,
 	.rcv	= trailer_rcv,
-	.overhead = 4,
-	.tail_tag = true,
+	.needed_tailroom = 4,
 };
 
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_TRAILER);
+MODULE_ALIAS_DSA_TAG_DRIVER(DSA_TAG_PROTO_TRAILER, TRAILER_NAME);
 
 module_dsa_tag_driver(trailer_netdev_ops);

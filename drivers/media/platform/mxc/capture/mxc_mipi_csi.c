@@ -286,9 +286,8 @@ struct csi_state {
 	struct csis_pktbuf pkt_buf;
 	struct mipi_csis_event events[MIPI_CSIS_NUM_EVENTS];
 
-	struct v4l2_async_subdev    asd;
+	struct fwnode_handle *fwnode;
 	struct v4l2_async_notifier  subdev_notifier;
-	struct v4l2_async_subdev    *async_subdevs[2];
 
 	struct csis_hw_reset hw_reset;
 	struct regulator     *mipi_phy_regulator;
@@ -564,10 +563,10 @@ static int mipi_csis_clk_get(struct csi_state *state)
 		return -ENODEV;
 	}
 
-	state->phy_clk = devm_clk_get(dev, "phy_clk");
+	state->phy_clk = devm_clk_get_optional(dev, "phy_clk");
 	if (IS_ERR(state->phy_clk)) {
 		dev_err(dev, "Could not get mipi phy clock\n");
-		return -ENODEV;
+		return PTR_ERR(state->phy_clk);
 	}
 
 	state->disp_axi = devm_clk_get(dev, "disp_axi");
@@ -717,7 +716,7 @@ unlock:
 }
 
 static int mipi_csis_enum_mbus_code(struct v4l2_subdev *mipi_sd,
-				    struct v4l2_subdev_pad_config *cfg,
+				    struct v4l2_subdev_state *sd_state,
 				    struct v4l2_subdev_mbus_code_enum *code)
 {
 	struct csi_state *state = mipi_sd_to_csi_state(mipi_sd);
@@ -739,7 +738,7 @@ static int mipi_csis_enum_mbus_code(struct v4l2_subdev *mipi_sd,
 }
 
 static int mipi_csis_set_fmt(struct v4l2_subdev *mipi_sd,
-			     struct v4l2_subdev_pad_config *cfg,
+			     struct v4l2_subdev_state *sd_state,
 			     struct v4l2_subdev_format *format)
 {
 	struct csi_state *state = mipi_sd_to_csi_state(mipi_sd);
@@ -777,7 +776,7 @@ static int mipi_csis_set_fmt(struct v4l2_subdev *mipi_sd,
 }
 
 static int mipi_csis_get_fmt(struct v4l2_subdev *mipi_sd,
-			     struct v4l2_subdev_pad_config *cfg,
+			     struct v4l2_subdev_state *sd_state,
 			     struct v4l2_subdev_format *format)
 {
 	struct csi_state *state = mipi_sd_to_csi_state(mipi_sd);
@@ -822,7 +821,7 @@ static int mipi_csis_g_parm(struct v4l2_subdev *mipi_sd, struct v4l2_streamparm 
 }
 
 static int mipi_csis_enum_framesizes(struct v4l2_subdev *mipi_sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct csi_state *state = mipi_sd_to_csi_state(mipi_sd);
@@ -832,7 +831,7 @@ static int mipi_csis_enum_framesizes(struct v4l2_subdev *mipi_sd,
 }
 
 static int mipi_csis_enum_frameintervals(struct v4l2_subdev *mipi_sd,
-		struct v4l2_subdev_pad_config *cfg,
+		struct v4l2_subdev_state *sd_state,
 		struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct csi_state *state = mipi_sd_to_csi_state(mipi_sd);
@@ -925,16 +924,16 @@ static irqreturn_t mipi_csis_irq_handler(int irq, void *dev_id)
 
 static int subdev_notifier_bound(struct v4l2_async_notifier *notifier,
 			    struct v4l2_subdev *subdev,
-			    struct v4l2_async_subdev *asd)
+			    struct v4l2_async_connection *asd)
 {
 	struct csi_state *state = notifier_to_mipi_dev(notifier);
 
-	/* Find platform data for this sensor subdev */
-	if (state->asd.match.fwnode == dev_fwnode(subdev->dev))
-		state->sensor_sd = subdev;
-
 	if (subdev == NULL)
 		return -EINVAL;
+
+	/* Find platform data for this sensor subdev */
+	if (state->fwnode == dev_fwnode(subdev->dev))
+		state->sensor_sd = subdev;
 
 	v4l2_info(&state->v4l2_dev, "Registered sensor subdevice: %s\n",
 		  subdev->name);
@@ -989,9 +988,10 @@ static int mipi_csis_subdev_host(struct csi_state *state)
 {
 	struct device_node *parent = state->dev->of_node;
 	struct device_node *node, *port, *rem;
+	struct v4l2_async_connection *asd;
 	int ret;
 
-	v4l2_async_notifier_init(&state->subdev_notifier);
+	v4l2_async_nf_init(&state->subdev_notifier, &state->v4l2_dev);
 
 	/* Attach sensors linked to csi receivers */
 	for_each_available_child_of_node(parent, node) {
@@ -1011,26 +1011,25 @@ static int mipi_csis_subdev_host(struct csi_state *state)
 			return -1;
 		}
 
-		INIT_LIST_HEAD(&state->asd.list);
-		state->asd.match_type = V4L2_ASYNC_MATCH_FWNODE;
-		state->asd.match.fwnode = of_fwnode_handle(rem);
-		state->async_subdevs[0] = &state->asd;
+		state->fwnode = of_fwnode_handle(rem);
+		asd = v4l2_async_nf_add_fwnode(&state->subdev_notifier,
+						state->fwnode,
+						struct v4l2_async_connection);
+		if (IS_ERR(asd)) {
+			of_node_put(rem);
+			dev_err(state->dev, "failed to add subdev to a notifier\n");
+			return PTR_ERR(asd);
+		}
 
 		of_node_put(rem);
 		break;
 	}
 
-	ret = v4l2_async_notifier_add_subdev(&state->subdev_notifier,
-					&state->asd);
-	if (ret) {
-		dev_err(state->dev, "failed to add subdev to a notifier\n");
-		return ret;
-	}
+
 	state->subdev_notifier.v4l2_dev = &state->v4l2_dev;
 	state->subdev_notifier.ops = &mxc_mipi_csi_subdev_ops;
 
-	ret = v4l2_async_notifier_register(&state->v4l2_dev,
-					&state->subdev_notifier);
+	ret = v4l2_async_nf_register(&state->subdev_notifier);
 	if (ret)
 		dev_err(state->dev,
 					"Error register async notifier regoster\n");
@@ -1170,7 +1169,7 @@ static int mipi_csis_probe(struct platform_device *pdev)
 	return 0;
 
 e_sd_host:
-	v4l2_async_notifier_unregister(&state->subdev_notifier);
+	v4l2_async_nf_unregister(&state->subdev_notifier);
 	v4l2_device_unregister(&state->v4l2_dev);
 e_sd_mipi:
 	v4l2_async_unregister_subdev(&state->mipi_sd);
@@ -1272,7 +1271,8 @@ static int mipi_csis_remove(struct platform_device *pdev)
 	struct csi_state *state = platform_get_drvdata(pdev);
 
 	v4l2_async_unregister_subdev(&state->mipi_sd);
-	v4l2_async_notifier_unregister(&state->subdev_notifier);
+	v4l2_async_nf_unregister(&state->subdev_notifier);
+	v4l2_async_nf_cleanup(&state->subdev_notifier);
 	v4l2_device_unregister(&state->v4l2_dev);
 
 	pm_runtime_disable(&pdev->dev);

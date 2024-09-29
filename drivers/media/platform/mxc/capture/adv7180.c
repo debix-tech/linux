@@ -45,9 +45,8 @@ static struct regulator *avdd_regulator;
 static struct regulator *pvdd_regulator;
 static int pwn_gpio;
 
-static int adv7180_probe(struct i2c_client *adapter,
-			 const struct i2c_device_id *id);
-static int adv7180_detach(struct i2c_client *client);
+static int adv7180_probe(struct i2c_client *adapter);
+static void adv7180_detach(struct i2c_client *client);
 
 #ifdef CONFIG_OF
 static const struct of_device_id adv7180_of_match[] = {
@@ -855,6 +854,8 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
 /*!
  * This structure defines all the ioctls for this module.
  */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-function-type"
 static struct v4l2_int_ioctl_desc adv7180_ioctl_desc[] = {
 
 	{vidioc_int_dev_init_num, (v4l2_int_ioctl_func*)ioctl_dev_init},
@@ -908,6 +909,7 @@ static struct v4l2_int_ioctl_desc adv7180_ioctl_desc[] = {
 	{vidioc_int_g_chip_ident_num,
 				(v4l2_int_ioctl_func *)ioctl_g_chip_ident},
 };
+#pragma GCC diagnostic pop
 
 static struct v4l2_int_slave adv7180_slave = {
 	.ioctls = adv7180_ioctl_desc,
@@ -1205,8 +1207,7 @@ static void adv7180_hard_reset(bool cvbs)
  *
  *  @return		Error code indicating success or failure.
  */
-static int adv7180_probe(struct i2c_client *client,
-			 const struct i2c_device_id *id)
+static int adv7180_probe(struct i2c_client *client)
 {
 	int rev_id;
 	int ret = 0;
@@ -1338,7 +1339,7 @@ static int adv7180_probe(struct i2c_client *client,
  *
  *  @return		Error code indicating success or failure.
  */
-static int adv7180_detach(struct i2c_client *client)
+static void adv7180_detach(struct i2c_client *client)
 {
 	dev_dbg(&adv7180_data.sen.i2c_client->dev,
 		"%s:Removing %s video decoder @ 0x%02X from adapter %s\n",
@@ -1360,8 +1361,6 @@ static int adv7180_detach(struct i2c_client *client)
 		regulator_disable(pvdd_regulator);
 
 	v4l2_int_device_unregister(&adv7180_int_device);
-
-	return 0;
 }
 
 /*!

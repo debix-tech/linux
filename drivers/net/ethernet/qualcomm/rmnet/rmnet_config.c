@@ -12,6 +12,7 @@
 #include "rmnet_handlers.h"
 #include "rmnet_vnd.h"
 #include "rmnet_private.h"
+#include "rmnet_map.h"
 
 /* Local Definitions and Declarations */
 
@@ -38,6 +39,8 @@ static int rmnet_unregister_real_device(struct net_device *real_dev)
 
 	if (port->nr_rmnet_devs)
 		return -EINVAL;
+
+	rmnet_map_tx_aggregate_exit(port);
 
 	netdev_rx_handler_unregister(real_dev);
 
@@ -78,6 +81,8 @@ static int rmnet_register_real_device(struct net_device *real_dev,
 
 	for (entry = 0; entry < RMNET_MAX_LOGICAL_EP; entry++)
 		INIT_HLIST_HEAD(&port->muxed_ep[entry]);
+
+	rmnet_map_tx_aggregate_init(port);
 
 	netdev_dbg(real_dev, "registered with rmnet\n");
 	return 0;
@@ -163,7 +168,8 @@ static int rmnet_newlink(struct net *src_net, struct net_device *dev,
 		struct ifla_rmnet_flags *flags;
 
 		flags = nla_data(data[IFLA_RMNET_FLAGS]);
-		data_format = flags->flags & flags->mask;
+		data_format &= ~flags->mask;
+		data_format |= flags->flags & flags->mask;
 	}
 
 	netdev_dbg(dev, "data format [0x%08X]\n", data_format);
@@ -336,7 +342,8 @@ static int rmnet_changelink(struct net_device *dev, struct nlattr *tb[],
 
 		old_data_format = port->data_format;
 		flags = nla_data(data[IFLA_RMNET_FLAGS]);
-		port->data_format = flags->flags & flags->mask;
+		port->data_format &= ~flags->mask;
+		port->data_format |= flags->flags & flags->mask;
 
 		if (rmnet_vnd_update_dev_mtu(port, real_dev)) {
 			port->data_format = old_data_format;
@@ -389,7 +396,7 @@ nla_put_failure:
 
 struct rtnl_link_ops rmnet_link_ops __read_mostly = {
 	.kind		= "rmnet",
-	.maxtype	= __IFLA_RMNET_MAX,
+	.maxtype	= IFLA_RMNET_MAX,
 	.priv_size	= sizeof(struct rmnet_priv),
 	.setup		= rmnet_vnd_setup,
 	.validate	= rmnet_rtnl_validate,

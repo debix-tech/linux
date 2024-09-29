@@ -34,7 +34,7 @@
 		i2c0 = &i2c_rpbus_0;
 		i2c1 = &i2c_rpbus_1;
 		dphy0 = &mipi0_dphy;
-		mipi_dsi0 = &mipi0_dsi_host;
+		mipi-dsi0 = &mipi0_dsi_host;
 	};
 
 	cpus: cpus {
@@ -206,7 +206,7 @@
 		status = "disabled";
 	};
 
-	scu {
+	system-controller {
 		compatible = "fsl,imx-scu";
 		mbox-names = "tx0",
 			     "rx0",
@@ -215,7 +215,7 @@
 			  &lsio_mu1 1 0
 			  &lsio_mu1 3 3>;
 
-		pd: imx8qx-pd {
+		pd: power-controller {
 			compatible = "fsl,imx8qm-scu-pd", "fsl,scu-pd";
 			#power-domain-cells = <1>;
 			wakeup-irq = <235 236 237 258 262 267 271
@@ -225,15 +225,13 @@
 		clk: clock-controller {
 			compatible = "fsl,imx8qm-clk", "fsl,scu-clk";
 			#clock-cells = <2>;
-			clocks = <&xtal32k &xtal24m>;
-			clock-names = "xtal_32KHz", "xtal_24Mhz";
 		};
 
 		iomuxc: pinctrl {
 			compatible = "fsl,imx8qm-iomuxc";
 		};
 
-		ocotp: imx8qm-ocotp {
+		ocotp: ocotp {
 			compatible = "fsl,imx8qm-scu-ocotp";
 			#address-cells = <1>;
 			#size-cells = <1>;
@@ -252,6 +250,12 @@
 			compatible = "fsl,imx8qm-sc-rtc";
 		};
 
+		scu_key: keys {
+			compatible = "fsl,imx8qm-sc-key", "fsl,imx-sc-key";
+			linux,keycodes = <KEY_POWER>;
+			wakeup-source;
+		};
+
 		watchdog {
 			compatible = "fsl,imx8qm-sc-wdt", "fsl,imx-sc-wdt";
 			timeout-sec = <60>;
@@ -265,7 +269,7 @@
 	};
 
 	thermal_zones: thermal-zones {
-		cpu-thermal0 {
+		cpu0-thermal {
 			polling-delay-passive = <250>;
 			polling-delay = <2000>;
 			thermal-sensors = <&tsens IMX_SC_R_A53>;
@@ -330,6 +334,36 @@
 		};
 	};
 
+	rpmsg0: rpmsg@90000000 {
+		compatible = "fsl,imx8qm-rpmsg";
+		/* up to now, the following channels are used in imx rpmsg
+		 * - tx1/rx1: messages channel.
+		 * - general interrupt1: remote proc finish re-init rpmsg stack
+		 *   when A core is partition reset.
+		 */
+		mbox-names = "tx", "rx", "rxdb";
+		mboxes = <&lsio_mu5 0 1
+			  &lsio_mu5 1 1
+			  &lsio_mu5 3 1>;
+		mub-partition = <5>;
+		status = "disabled";
+	};
+
+	rpmsg1: rpmsg@90100000 {
+		compatible = "fsl,imx8qm-rpmsg";
+		/* up to now, the following channels are used in imx rpmsg
+		 * - tx1/rx1: messages channel.
+		 * - general interrupt1: remote proc finish re-init rpmsg stack
+		 *   when A core is partition reset.
+		 */
+		mbox-names = "tx", "rx", "rxdb";
+		mboxes = <&lsio_mu6 0 1
+			  &lsio_mu6 1 1
+			  &lsio_mu6 3 1>;
+		mub-partition = <6>;
+		status = "disabled";
+	};
+
 	imx_shmem_net: imx_shmem_net {
 		compatible = "fsl,imx-shmem-net";
 		mub-partition = <3>;
@@ -339,12 +373,6 @@
 		status = "disabled";
 	};
 
-	sc_pwrkey: sc-powerkey {
-		compatible = "fsl,imx8-pwrkey";
-		linux,keycode = <KEY_POWER>;
-		wakeup-source;
-	};
-
 	vpu_subsys_dsp: bus@55000000 {
 		compatible = "simple-bus";
 		#address-cells = <1>;
@@ -352,17 +380,19 @@
 		ranges = <0x55000000 0x0 0x55000000 0x1000000>;
 
 		dsp: dsp@556e8000 {
-			compatible = "fsl,imx8qm-hifi4";
+			compatible = "fsl,imx8qm-dsp";
 			reg = <0x556e8000 0x88000>;
 			clocks = <&clk_dummy>,
 				 <&clk_dummy>,
 				 <&clk_dummy>;
-			clock-names = "dsp_clk1", "dsp_clk2", "dsp_clk3";
-			firmware-name = "imx/dsp/hifi4.bin";
+			clock-names = "ipg", "ocram", "core";
+			fsl,dsp-firmware = "imx/dsp/hifi4.bin";
 			power-domains = <&pd IMX_SC_R_MU_13A>,
 					<&pd IMX_SC_R_MU_13B>,
 					<&pd IMX_SC_R_DSP>,
 					<&pd IMX_SC_R_DSP_RAM>;
+			memory-region = <&dsp_reserved>;
+			fixup-offset = <0x4000000>;
 			status = "disabled";
 		};
 	};

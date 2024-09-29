@@ -846,12 +846,10 @@ static int max77620_regulator_probe(struct platform_device *pdev)
 			return ret;
 
 		rdev = devm_regulator_register(dev, rdesc, &config);
-		if (IS_ERR(rdev)) {
-			ret = PTR_ERR(rdev);
-			dev_err(dev, "Regulator registration %s failed: %d\n",
-				rdesc->name, ret);
-			return ret;
-		}
+		if (IS_ERR(rdev))
+			return dev_err_probe(dev, PTR_ERR(rdev),
+					     "Regulator registration %s failed\n",
+					     rdesc->name);
 	}
 
 	return 0;
@@ -918,6 +916,7 @@ static struct platform_driver max77620_regulator_driver = {
 	.id_table = max77620_regulator_devtype,
 	.driver = {
 		.name = "max77620-pmic",
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 		.pm = &max77620_regulator_pm_ops,
 	},
 };

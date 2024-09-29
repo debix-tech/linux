@@ -1395,7 +1395,7 @@ static t_Error SetPcd(t_FmPort *p_FmPort, t_FmPortPcdParams *p_PcdParams)
             case (e_FM_PORT_PCD_SUPPORT_PRS_AND_KG_AND_CC):
             case (e_FM_PORT_PCD_SUPPORT_PRS_AND_KG_AND_CC_AND_PLCR):
                 tmpReg = NIA_KG_CC_EN;
-                /* fall through */
+                fallthrough;
             case (e_FM_PORT_PCD_SUPPORT_PRS_AND_KG):
             case (e_FM_PORT_PCD_SUPPORT_PRS_AND_KG_AND_PLCR):
                 if (p_PcdParams->p_KgParams->directScheme)
@@ -1532,7 +1532,7 @@ static t_Error SetPcd(t_FmPort *p_FmPort, t_FmPortPcdParams *p_PcdParams)
             /* case for using sw parser as the initial NIA address, before
                * HW parsing
                */
-            if ((p_PcdParams->p_PrsParams->additionalParams[i].hdr == HEADER_TYPE_NONE) && 
+            if ((p_PcdParams->p_PrsParams->additionalParams[i].hdr == HEADER_TYPE_NONE) &&
                     p_PcdParams->p_PrsParams->additionalParams[i].swPrsEnable)
             {
                 initialSwPrs = FmPcdGetSwPrsOffset(p_FmPort->h_FmPcd, HEADER_TYPE_NONE,
@@ -2407,7 +2407,7 @@ t_Handle FM_PORT_Config(t_FmPortParams *p_FmPortParams)
                          tmpReg);
 #endif /* FM_WRONG_RESET_VALUES_ERRATA_FMAN_A005127 */
 
-            /* fall through */
+            fallthrough;
         case (e_FM_PORT_TYPE_TX_10G):
                 tmpReg =
                         GET_UINT32(p_FmPort->p_FmPortBmiRegs->txPortBmiRegs.fmbm_tfp);
@@ -2439,7 +2439,7 @@ t_Handle FM_PORT_Config(t_FmPortParams *p_FmPortParams)
             p_FmPort->p_FmPortDriverParam->noScatherGather =
                     DEFAULT_PORT_noScatherGather;
 #endif /* (DPAA_VERSION >= 11) */
-            /* fall through */
+            fallthrough;
         case (e_FM_PORT_TYPE_OH_HOST_COMMAND):
             p_FmPort->p_FmPortDriverParam->deqPrefetchOption =
                     DEFAULT_PORT_deqPrefetchOption_HC;
@@ -4275,7 +4275,7 @@ t_Error FM_PORT_ModifyCounter(t_Handle h_FmPort, e_FmPortCounters counter,
                 RETURN_ERROR(
                         MINOR, E_INVALID_STATE,
                         ("Requested counter is not available for Rx ports"));
-            /* fall through */
+            fallthrough;
         case (e_FM_PORT_COUNTERS_ENQ_TOTAL):
             bmiCounter = FALSE;
             break;
@@ -4394,7 +4394,7 @@ t_Error FM_PORT_ReleaseStalled(t_Handle h_FmPort)
     return FmResumeStalledPort(p_FmPort->h_Fm, p_FmPort->hardwarePortId);
 }
 
-t_Error FM_PORT_SetRxL4ChecksumVerify(t_Handle h_FmPort, bool l4Checksum)
+t_Error FM_PORT_SetRxL4ChecksumVerify(t_Handle h_FmPort, bool enable)
 {
     t_FmPort *p_FmPort = (t_FmPort*)h_FmPort;
     int err;
@@ -4407,7 +4407,13 @@ t_Error FM_PORT_SetRxL4ChecksumVerify(t_Handle h_FmPort, bool l4Checksum)
         RETURN_ERROR(MAJOR, E_INVALID_OPERATION,
                      ("available for Rx ports only"));
 
-    if (l4Checksum)
+    /* Bits 0-7 in the Rx FD Status are initialized by the user configurable
+     * FMBM_RFNE[FDCS]. A bit which is set by the user in FMBM_RFNE[FDCS] is
+     * reflected in the corresponding bit, and is not reset by the FMan
+     * hardware. So to let the hardware do its job, we need to clear the FMBM
+     * bit, and vice versa.
+     */
+    if (!enable)
         err = fman_port_modify_rx_fd_bits(
                 &p_FmPort->port, (uint8_t)(BMI_PORT_RFNE_FRWD_DCL4C >> 24),
                 TRUE);
@@ -5675,12 +5681,6 @@ static t_Error FmPortConfigAutoResForDeepSleepSupport1(t_FmPort *p_FmPort)
     return E_OK;
 }
 
-t_FmPortDsarTablesSizes* FM_PORT_GetDsarTablesMaxSizes(t_Handle h_FmPortRx)
-{
-    t_FmPort *p_FmPort = (t_FmPort *)h_FmPortRx;
-    return p_FmPort->deepSleepVars.autoResMaxSizes;
-}
-
 struct arOffsets
 {
     uint32_t arp;
@@ -6002,7 +6002,7 @@ t_Error FM_PORT_EnterDsar(t_Handle h_FmPortRx, t_FmPortDsarParams *params)
     t_FmGetSetParams fmGetSetParams;
     memset(&fmGetSetParams, 0, sizeof (t_FmGetSetParams));
     fmGetSetParams.setParams.type = UPDATE_FPM_BRKC_SLP;
-    fmGetSetParams.setParams.sleep = 1;    
+    fmGetSetParams.setParams.sleep = 1;
 
     err = DsarCheckParams(params, p_FmPort->deepSleepVars.autoResMaxSizes);
     if (err != E_OK)
@@ -6377,7 +6377,7 @@ t_Error FM_PORT_EnterDsarFinal(t_Handle h_DsarRxPort, t_Handle h_DsarTxPort)
 
 EXPORT_SYMBOL(FM_PORT_EnterDsarFinal);
 
-void FM_PORT_Dsar_DumpRegs()
+void FM_PORT_Dsar_DumpRegs(void)
 {
     uint32_t* hh = XX_PhysToVirt(PTR_TO_UINT(ARDesc));
     DUMP_MEMORY(hh, 0x220);

@@ -9,8 +9,6 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of.h>
-#include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
@@ -27,15 +25,13 @@ static int imx8qxp_lpcg_clk_probe(struct platform_device *pdev)
 	unsigned int bit_offset[IMX_LPCG_MAX_CLKS];
 	struct clk_hw_onecell_data *clk_data;
 	struct clk_hw **clk_hws;
-	struct resource *res;
 	void __iomem *base;
 	bool autogate;
 	int count;
 	int ret;
 	int i;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	base = devm_ioremap_resource(&pdev->dev, res);
+	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
@@ -85,7 +81,8 @@ static int imx8qxp_lpcg_clk_probe(struct platform_device *pdev)
 		if (bit_offset[i] > 31) {
 			dev_warn(&pdev->dev, "invalid bit offset of clock %d\n",
 				 i);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto unreg;
 		}
 
 		clk_hws[i] = imx_clk_lpcg_scu_dev(&pdev->dev, output_names[i],
@@ -94,15 +91,28 @@ static int imx8qxp_lpcg_clk_probe(struct platform_device *pdev)
 		if (IS_ERR(clk_hws[i])) {
 			dev_warn(&pdev->dev, "failed to register clock %d\n",
 				 i);
-			return -EINVAL;
+			ret = PTR_ERR(clk_hws[i]);
+			goto unreg;
 		}
 	}
 
 	ret = devm_of_clk_add_hw_provider(&pdev->dev, of_clk_hw_onecell_get,
 					  clk_data);
+	if (ret)
+		goto unreg;
 
 	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_autosuspend(&pdev->dev);
+
+	return 0;
+
+unreg:
+	while (--i >= 0) {
+		if (clk_hws[i])
+			imx_clk_lpcg_scu_unregister(clk_hws[i]);
+	}
+
+	pm_runtime_disable(&pdev->dev);
 
 	return ret;
 }
@@ -122,7 +132,7 @@ static struct platform_driver imx8qxp_lpcg_clk_driver = {
 	.probe = imx8qxp_lpcg_clk_probe,
 };
 
-builtin_platform_driver(imx8qxp_lpcg_clk_driver);
+module_platform_driver(imx8qxp_lpcg_clk_driver);
 
 MODULE_AUTHOR("Aisheng Dong <aisheng.dong@nxp.com>");
 MODULE_DESCRIPTION("NXP i.MX8QXP LPCG clock driver");

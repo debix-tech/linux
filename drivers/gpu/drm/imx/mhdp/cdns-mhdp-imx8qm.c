@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 NXP
+ * Copyright 2019-2022 NXP
  *
  * this program is free software; you can redistribute it and/or modify
  * it under the terms of the gnu general public license version 2 as
@@ -59,8 +59,13 @@ static void imx8qm_pixel_link_mux(struct imx_mhdp_device *imx_mhdp)
 static void imx8qm_pixel_link_valid(u32 dual_mode)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	imx_sc_misc_set_control(handle, IMX_SC_R_DC_0, IMX_SC_C_PXL_LINK_MST1_VLD, 1);
 	if (dual_mode)
@@ -70,8 +75,13 @@ static void imx8qm_pixel_link_valid(u32 dual_mode)
 static void imx8qm_pixel_link_invalid(u32 dual_mode)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	imx_sc_misc_set_control(handle, IMX_SC_R_DC_0, IMX_SC_C_PXL_LINK_MST1_VLD, 0);
 	if (dual_mode)
@@ -81,8 +91,13 @@ static void imx8qm_pixel_link_invalid(u32 dual_mode)
 static void imx8qm_pixel_link_sync_enable(u32 dual_mode)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	if (dual_mode)
 		imx_sc_misc_set_control(handle, IMX_SC_R_DC_0, IMX_SC_C_SYNC_CTRL, 3);
@@ -93,8 +108,13 @@ static void imx8qm_pixel_link_sync_enable(u32 dual_mode)
 static void imx8qm_pixel_link_sync_disable(u32 dual_mode)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	if (dual_mode)
 		imx_sc_misc_set_control(handle, IMX_SC_R_DC_0, IMX_SC_C_SYNC_CTRL, 0);
@@ -105,8 +125,13 @@ static void imx8qm_pixel_link_sync_disable(u32 dual_mode)
 void imx8qm_phy_reset(u8 reset)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	/* set the pixel link mode and pixel type */
 	imx_sc_misc_set_control(handle, IMX_SC_R_HDMI, IMX_SC_C_PHY_RESET, reset);
@@ -115,8 +140,13 @@ void imx8qm_phy_reset(u8 reset)
 static void imx8qm_clk_mux(u8 is_dp)
 {
 	struct imx_sc_ipc *handle;
+	int ret = 0;
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 
 	if (is_dp)
 		/* Enable the 24MHz for HDP PHY */
@@ -480,7 +510,6 @@ int cdns_mhdp_power_on_imx8qm(struct cdns_mhdp_device *mhdp)
 {
 	struct imx_mhdp_device *imx_mhdp =
 				container_of(mhdp, struct imx_mhdp_device, mhdp);
-
 	/* Power on PM Domains */
 
 	imx8qm_attach_pm_domains(imx_mhdp);
@@ -507,19 +536,19 @@ int cdns_mhdp_power_on_imx8qm(struct cdns_mhdp_device *mhdp)
 int cdns_mhdp_power_off_imx8qm(struct cdns_mhdp_device *mhdp)
 {
 	struct imx_mhdp_device *imx_mhdp =
-		container_of(mhdp, struct imx_mhdp_device, mhdp);
+				container_of(mhdp, struct imx_mhdp_device, mhdp);
 
 	imx8qm_phy_reset(0);
+
+	/* disable pixel and ipg clock */
 	imx8qm_pixel_clk_disable(imx_mhdp);
 	imx8qm_ipg_clk_disable(imx_mhdp);
 
-	/* Power off PM Domains */
 	imx8qm_detach_pm_domains(imx_mhdp);
-
 	return 0;
 }
 
-void cdns_mhdp_plat_init_imx8qm(struct cdns_mhdp_device *mhdp)
+void cdns_mhdp_plat_deinit_imx8qm(struct cdns_mhdp_device *mhdp)
 {
 	struct imx_mhdp_device *imx_mhdp =
 				container_of(mhdp, struct imx_mhdp_device, mhdp);
@@ -529,7 +558,7 @@ void cdns_mhdp_plat_init_imx8qm(struct cdns_mhdp_device *mhdp)
 	imx8qm_pixel_link_invalid(dual_mode);
 }
 
-void cdns_mhdp_plat_deinit_imx8qm(struct cdns_mhdp_device *mhdp)
+void cdns_mhdp_plat_init_imx8qm(struct cdns_mhdp_device *mhdp)
 {
 	struct imx_mhdp_device *imx_mhdp =
 				container_of(mhdp, struct imx_mhdp_device, mhdp);
@@ -544,12 +573,16 @@ void cdns_mhdp_pclk_rate_imx8qm(struct cdns_mhdp_device *mhdp)
 	struct imx_mhdp_device *imx_mhdp =
 				container_of(mhdp, struct imx_mhdp_device, mhdp);
 
+	mutex_lock(&mhdp->iolock);
+
 	/* set pixel clock before video mode setup */
 	imx8qm_pixel_clk_disable(imx_mhdp);
 
 	imx8qm_pixel_clk_set_rate(imx_mhdp, imx_mhdp->mhdp.mode.clock * 1000);
 
 	imx8qm_pixel_clk_enable(imx_mhdp);
+
+	mutex_unlock(&mhdp->iolock);
 
 	/* Config pixel link mux */
 	imx8qm_pixel_link_mux(imx_mhdp);
@@ -597,7 +630,7 @@ static int cdns_mhdp_firmware_load(struct imx_mhdp_device *imx_mhdp)
 		goto out;
 
 	if (!imx_mhdp->fw) {
-		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_NOHOTPLUG,
+		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_NOUEVENT,
 						imx_mhdp->firmware_name,
 						imx_mhdp->mhdp.dev, GFP_KERNEL,
 						imx_mhdp,
@@ -641,6 +674,14 @@ int cdns_mhdp_firmware_init_imx8qm(struct cdns_mhdp_device *mhdp)
 
 	/* turn on IP activity */
 	cdns_mhdp_set_firmware_active(&imx_mhdp->mhdp, 1);
+
+	if (mhdp->is_dp) {
+		ret = cdns_mhdp_set_maximum_defer_retry(mhdp,
+							mhdp->i2c_over_aux_retries);
+		if (!ret)
+			DRM_INFO("set maximum defer retry to %d",
+				 mhdp->i2c_over_aux_retries);
+	}
 
 	DRM_INFO("HDP FW Version - ver %d verlib %d\n",
 			cdns_mhdp_bus_read(mhdp, VER_L) + (cdns_mhdp_bus_read(mhdp, VER_H) << 8),

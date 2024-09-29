@@ -34,6 +34,7 @@
 #include <linux/etherdevice.h>
 #include <linux/rtnetlink.h>
 #include <linux/if_vlan.h>
+#include <linux/ethtool.h>
 
 #include <uapi/linux/if_bridge.h>
 #include <net/netlink.h>
@@ -164,7 +165,7 @@ static irqreturn_t _evb_irq0_handler_thread(int irq_num, void *arg)
 	/* Sanity check */
 	if (WARN_ON(!evb_dev || !evb_dev->irqs || !evb_dev->irqs[irq_index]))
 		goto out;
-	if (WARN_ON(evb_dev->irqs[irq_index]->msi_desc->irq != (u32)irq_num))
+	if (WARN_ON(evb_dev->irqs[irq_index]->virq != (u32)irq_num))
 		goto out;
 
 	err = dpdmux_get_irq_status(io, 0, token, irq_index, &status);
@@ -218,7 +219,7 @@ static int evb_setup_irqs(struct fsl_mc_device *evb_dev)
 
 	irq = evb_dev->irqs[irq_index];
 
-	err = devm_request_threaded_irq(dev, irq->msi_desc->irq,
+	err = devm_request_threaded_irq(dev, irq->virq,
 					evb_irq0_handler,
 					_evb_irq0_handler_thread,
 					IRQF_NO_SUSPEND | IRQF_ONESHOT,
@@ -245,7 +246,7 @@ static int evb_setup_irqs(struct fsl_mc_device *evb_dev)
 	return 0;
 
 free_devm_irq:
-	devm_free_irq(dev, irq->msi_desc->irq, dev);
+	devm_free_irq(dev, irq->virq, dev);
 free_irq:
 	fsl_mc_free_irqs(evb_dev);
 	return err;
@@ -261,7 +262,7 @@ static void evb_teardown_irqs(struct fsl_mc_device *evb_dev)
 			      DPDMUX_IRQ_INDEX_IF, 0);
 
 	devm_free_irq(dev,
-		      evb_dev->irqs[DPDMUX_IRQ_INDEX_IF]->msi_desc->irq,
+		      evb_dev->irqs[DPDMUX_IRQ_INDEX_IF]->virq,
 		      dev);
 	fsl_mc_free_irqs(evb_dev);
 }
@@ -415,7 +416,8 @@ static int evb_port_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 
 static int evb_port_fdb_del(struct ndmsg *ndm, struct nlattr *tb[],
 			    struct net_device *netdev,
-			    const unsigned char *addr, u16 vid)
+			    const unsigned char *addr, u16 vid,
+			    struct netlink_ext_ack *extack)
 {
 	u16 _vid;
 	int err;
@@ -1151,7 +1153,7 @@ err_exit:
 	return err;
 }
 
-static int evb_remove(struct fsl_mc_device *evb_dev)
+static void evb_remove(struct fsl_mc_device *evb_dev)
 {
 	struct device		*dev = &evb_dev->dev;
 	struct net_device	*netdev = dev_get_drvdata(dev);
@@ -1179,8 +1181,6 @@ static int evb_remove(struct fsl_mc_device *evb_dev)
 
 	dev_set_drvdata(dev, NULL);
 	free_netdev(netdev);
-
-	return 0;
 }
 
 static int evb_probe(struct fsl_mc_device *evb_dev)
@@ -1287,7 +1287,7 @@ static int evb_probe(struct fsl_mc_device *evb_dev)
 				goto err_takedown;
 			}
 			rtmsg_ifinfo(RTM_NEWLINK, port_netdev,
-				     IFF_SLAVE, GFP_KERNEL);
+				     IFF_SLAVE, GFP_KERNEL, 0, NULL);
 			rtnl_unlock();
 
 			list_add(&port_priv->list, &priv->port_list);

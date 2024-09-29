@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2018 NXP
+ * Copyright 2018-2021 NXP
  *   Dong Aisheng <aisheng.dong@nxp.com>
  */
 
@@ -9,25 +9,23 @@
 #include <linux/bsearch.h>
 #include <linux/clk-provider.h>
 #include <linux/err.h>
+#include <linux/of.h>
 #include <linux/firmware/imx/svc/rm.h>
-#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
-#include <linux/syscalls.h>
 #include <xen/xen.h>
 
 #include "clk-scu.h"
 
 #define IMX_SIP_CPUFREQ			0xC2000001
 #define IMX_SIP_SET_CPUFREQ		0x00
-#define MAX_CLUSTER_NUM			2
 
 static struct imx_sc_ipc *ccm_ipc_handle;
+static struct device_node *pd_np;
+static struct platform_driver imx_clk_scu_driver;
 static const struct imx_clk_scu_rsrc_table *rsrc_table;
-struct device_node *pd_np;
-u32 clock_cells;
 
 struct imx_scu_clk_node {
 	const char *name;
@@ -61,7 +59,7 @@ struct clk_scu {
 };
 
 /*
- * struct clk_gpr_scu - Description of one gate SCU clock
+ * struct clk_gpr_scu - Description of one SCU GPR clock
  * @hw: the common clk_hw
  * @rsrc_id: resource ID of this SCU clock
  * @gpr_id: GPR ID index to control the divider
@@ -73,6 +71,8 @@ struct clk_gpr_scu {
 	u8 flags;
 	bool gate_invert;
 };
+
+#define to_clk_gpr_scu(_hw) container_of(_hw, struct clk_gpr_scu, hw)
 
 /*
  * struct imx_sc_msg_req_set_clock_rate - clock set rate protocol
@@ -98,9 +98,6 @@ struct req_get_clock_rate {
 struct resp_get_clock_rate {
 	__le32 rate;
 };
-
-#define to_clk_mux_gpr_scu(_hw) container_of(_hw, struct clk_mux_gpr_scu, hw)
-#define to_clk_gpr_scu(_hw) container_of(_hw, struct clk_gpr_scu, hw)
 
 /*
  * struct imx_sc_msg_get_clock_rate - clock get rate protocol
@@ -176,48 +173,49 @@ static inline struct clk_scu *to_clk_scu(struct clk_hw *hw)
 	return container_of(hw, struct clk_scu, hw);
 }
 
-static int imx_scu_clk_search_cmp(const void *rsrc, const void *rsrc_p)
+static inline int imx_scu_clk_search_cmp(const void *rsrc, const void *rsrc_p)
 {
 	return *(u32 *)rsrc - *(u32 *)rsrc_p;
 }
 
-bool imx_scu_clk_is_valid(u32 rsrc_id)
+static bool imx_scu_clk_is_valid(u32 rsrc_id)
 {
 	void *p;
 
 	if (!rsrc_table)
 		return true;
 
-        p = bsearch(&rsrc_id, rsrc_table->rsrc, rsrc_table->num,
+	p = bsearch(&rsrc_id, rsrc_table->rsrc, rsrc_table->num,
 		    sizeof(rsrc_table->rsrc[0]), imx_scu_clk_search_cmp);
+
 	return p != NULL;
 }
 
-int imx_clk_scu_init(struct device_node *np, const void *data)
+int imx_clk_scu_init(struct device_node *np,
+		     const struct imx_clk_scu_rsrc_table *data)
 {
-	struct platform_device *pd_dev;
+	u32 clk_cells;
 	int ret, i;
 
 	ret = imx_scu_get_handle(&ccm_ipc_handle);
 	if (ret)
 		return ret;
 
-	if (of_property_read_u32(np, "#clock-cells", &clock_cells))
-		return -EINVAL;
+	of_property_read_u32(np, "#clock-cells", &clk_cells);
 
-	if (clock_cells == 2) {
+	if (clk_cells == 2) {
 		for (i = 0; i < IMX_SC_R_LAST; i++)
 			INIT_LIST_HEAD(&imx_scu_clks[i]);
 
+		/* pd_np will be used to attach power domains later */
 		pd_np = of_find_compatible_node(NULL, NULL, "fsl,scu-pd");
-		pd_dev = of_find_device_by_node(pd_np);
-		if (!pd_dev || !device_is_bound(&pd_dev->dev))
-			return -EPROBE_DEFER;
+		if (!pd_np)
+			return -EINVAL;
 
 		rsrc_table = data;
 	}
 
-	return 0;
+	return platform_driver_register(&imx_clk_scu_driver);
 }
 
 /*
@@ -252,6 +250,23 @@ static unsigned long clk_scu_recalc_rate(struct clk_hw *hw,
 	}
 
 	return le32_to_cpu(msg.data.resp.rate);
+}
+
+/*
+ * clk_scu_determine_rate - Returns the closest rate for a SCU clock
+ * @hw: clock to round rate for
+ * @req: clock rate request
+ *
+ * Returns 0 on success, a negative error on failure
+ */
+static int clk_scu_determine_rate(struct clk_hw *hw,
+				  struct clk_rate_request *req)
+{
+	/*
+	 * Assume we support all the requested rate and let the SCU firmware
+	 * to handle the left work
+	 */
+	return 0;
 }
 
 /*
@@ -429,7 +444,7 @@ static void clk_scu_unprepare(struct clk_hw *hw)
 
 static const struct clk_ops clk_scu_ops = {
 	.recalc_rate = clk_scu_recalc_rate,
-	.round_rate = clk_scu_round_rate,
+	.determine_rate = clk_scu_determine_rate,
 	.set_rate = clk_scu_set_rate,
 	.get_parent = clk_scu_get_parent,
 	.set_parent = clk_scu_set_parent,
@@ -485,14 +500,15 @@ struct clk_hw *__imx_clk_scu(struct device *dev, const char *name,
 	 * clock status from HW instead of using the possible invalid
 	 * cached rate.
 	 */
-	init.flags = CLK_GET_RATE_NOCACHE | CLK_SET_PARENT_NOCACHE;
+	init.flags = CLK_GET_RATE_NOCACHE;
 	clk->hw.init = &init;
 
 	hw = &clk->hw;
 	ret = clk_hw_register(dev, hw);
 	if (ret) {
 		kfree(clk);
-		return ERR_PTR(ret);
+		hw = ERR_PTR(ret);
+		return hw;
 	}
 
 	if (dev)
@@ -524,14 +540,14 @@ static int imx_clk_scu_probe(struct platform_device *pdev)
 	struct clk_hw *hw;
 	int ret;
 
-       if (!((clk->rsrc == IMX_SC_R_A35) || (clk->rsrc == IMX_SC_R_A53) ||
-           (clk->rsrc == IMX_SC_R_A72))) {
+	if (!((clk->rsrc == IMX_SC_R_A35) || (clk->rsrc == IMX_SC_R_A53) ||
+	    (clk->rsrc == IMX_SC_R_A72))) {
 		pm_runtime_set_suspended(dev);
 		pm_runtime_set_autosuspend_delay(dev, 50);
 		pm_runtime_use_autosuspend(&pdev->dev);
 		pm_runtime_enable(dev);
 
-		ret = pm_runtime_get_sync(dev);
+		ret = pm_runtime_resume_and_get(dev);
 		if (ret) {
 			pm_genpd_remove_device(dev);
 			pm_runtime_disable(dev);
@@ -549,8 +565,8 @@ static int imx_clk_scu_probe(struct platform_device *pdev)
 	clk->hw = hw;
 	list_add_tail(&clk->node, &imx_scu_clks[clk->rsrc]);
 
-       if (!((clk->rsrc == IMX_SC_R_A35) || (clk->rsrc == IMX_SC_R_A53) ||
-           (clk->rsrc == IMX_SC_R_A72))) {
+	if (!((clk->rsrc == IMX_SC_R_A35) || (clk->rsrc == IMX_SC_R_A53) ||
+	    (clk->rsrc == IMX_SC_R_A72))) {
 		pm_runtime_mark_last_busy(&pdev->dev);
 		pm_runtime_put_autosuspend(&pdev->dev);
 	}
@@ -561,7 +577,7 @@ static int imx_clk_scu_probe(struct platform_device *pdev)
 	return 0;
 }
 
-int __maybe_unused imx_clk_scu_suspend(struct device *dev)
+static int __maybe_unused imx_clk_scu_suspend(struct device *dev)
 {
 	struct clk_scu *clk = dev_get_drvdata(dev);
 	u32 rsrc_id = clk->rsrc_id;
@@ -580,7 +596,6 @@ int __maybe_unused imx_clk_scu_suspend(struct device *dev)
 		clk->rate = clk_scu_recalc_rate(&clk->hw, 0);
 	else
 		clk->rate = clk_hw_get_rate(&clk->hw);
-
 	clk->is_enabled = clk_hw_is_enabled(&clk->hw);
 
 	if (clk->parent)
@@ -596,7 +611,7 @@ int __maybe_unused imx_clk_scu_suspend(struct device *dev)
 	return 0;
 }
 
-int __maybe_unused imx_clk_scu_resume(struct device *dev)
+static int __maybe_unused imx_clk_scu_resume(struct device *dev)
 {
 	struct clk_scu *clk = dev_get_drvdata(dev);
 	u32 rsrc_id = clk->rsrc_id;
@@ -628,7 +643,7 @@ int __maybe_unused imx_clk_scu_resume(struct device *dev)
 	return ret;
 }
 
-const struct dev_pm_ops imx_clk_scu_pm_ops = {
+static const struct dev_pm_ops imx_clk_scu_pm_ops = {
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(imx_clk_scu_suspend,
 				      imx_clk_scu_resume)
 };
@@ -642,12 +657,6 @@ static struct platform_driver imx_clk_scu_driver = {
 	.probe = imx_clk_scu_probe,
 };
 
-static int __init imx_clk_scu_driver_init(void)
-{
-	return platform_driver_register(&imx_clk_scu_driver);
-}
-subsys_initcall_sync(imx_clk_scu_driver_init);
-
 static int imx_clk_scu_attach_pd(struct device *dev, u32 rsrc_id)
 {
 	struct of_phandle_args genpdspec = {
@@ -656,8 +665,8 @@ static int imx_clk_scu_attach_pd(struct device *dev, u32 rsrc_id)
 		.args[0] = rsrc_id,
 	};
 
-	if ((rsrc_id == IMX_SC_R_A35) || (rsrc_id == IMX_SC_R_A53) ||
-	    (rsrc_id == IMX_SC_R_A72))
+	if (rsrc_id == IMX_SC_R_A35 || rsrc_id == IMX_SC_R_A53 ||
+	    rsrc_id == IMX_SC_R_A72)
 		return 0;
 
 	/*
@@ -703,7 +712,7 @@ struct clk_hw *imx_clk_scu_alloc_dev(const char *name,
 	int ret;
 
 	if (!imx_scu_clk_is_valid(rsrc_id))
-		return NULL;
+		return ERR_PTR(-EINVAL);
 
 	if (!imx_clk_is_resource_owned(rsrc_id))
 		return NULL;
@@ -718,20 +727,42 @@ struct clk_hw *imx_clk_scu_alloc_dev(const char *name,
 	ret = platform_device_add_data(pdev, &clk, sizeof(clk));
 	if (ret) {
 		platform_device_put(pdev);
-		return ERR_PTR(-ENOMEM);
+		return ERR_PTR(ret);
 	}
 
-	pdev->driver_override = "imx-scu-clk";
+	ret = driver_set_override(&pdev->dev, &pdev->driver_override,
+				  "imx-scu-clk", strlen("imx-scu-clk"));
+	if (ret) {
+		platform_device_put(pdev);
+		return ERR_PTR(ret);
+	}
 
 	ret = imx_clk_scu_attach_pd(&pdev->dev, rsrc_id);
 	if (ret)
 		pr_warn("%s: failed to attached the power domain %d\n",
 			name, ret);
 
-	platform_device_add(pdev);
+	ret = platform_device_add(pdev);
+	if (ret) {
+		platform_device_put(pdev);
+		return ERR_PTR(ret);
+	}
 
 	/* For API backwards compatiblilty, simply return NULL for success */
 	return NULL;
+}
+
+void imx_clk_scu_unregister(void)
+{
+	struct imx_scu_clk_node *clk, *n;
+	int i;
+
+	for (i = 0; i < IMX_SC_R_LAST; i++) {
+		list_for_each_entry_safe(clk, n, &imx_scu_clks[i], node) {
+			clk_hw_unregister(clk->hw);
+			kfree(clk);
+		}
+	}
 }
 
 static unsigned long clk_gpr_div_scu_recalc_rate(struct clk_hw *hw,
@@ -762,7 +793,7 @@ static long clk_gpr_div_scu_round_rate(struct clk_hw *hw, unsigned long rate,
 }
 
 static int clk_gpr_div_scu_set_rate(struct clk_hw *hw, unsigned long rate,
-				unsigned long parent_rate)
+				    unsigned long parent_rate)
 {
 	struct clk_gpr_scu *clk = to_clk_gpr_scu(hw);
 	uint32_t val;
@@ -783,7 +814,7 @@ static const struct clk_ops clk_gpr_div_scu_ops = {
 
 static u8 clk_gpr_mux_scu_get_parent(struct clk_hw *hw)
 {
-	struct clk_gpr_scu *clk= to_clk_gpr_scu(hw);
+	struct clk_gpr_scu *clk = to_clk_gpr_scu(hw);
 	u32 val = 0;
 
 	imx_sc_misc_get_control(ccm_ipc_handle, clk->rsrc_id,
@@ -794,15 +825,14 @@ static u8 clk_gpr_mux_scu_get_parent(struct clk_hw *hw)
 
 static int clk_gpr_mux_scu_set_parent(struct clk_hw *hw, u8 index)
 {
-	struct clk_gpr_scu *clk= to_clk_gpr_scu(hw);
+	struct clk_gpr_scu *clk = to_clk_gpr_scu(hw);
 
-	imx_sc_misc_set_control(ccm_ipc_handle,	clk->rsrc_id,
-				clk->gpr_id, index);
-
-	return 0;
+	return imx_sc_misc_set_control(ccm_ipc_handle, clk->rsrc_id,
+				       clk->gpr_id, index);
 }
 
 static const struct clk_ops clk_gpr_mux_scu_ops = {
+	.determine_rate = clk_hw_determine_rate_no_reparent,
 	.get_parent = clk_gpr_mux_scu_get_parent,
 	.set_parent = clk_gpr_mux_scu_set_parent,
 };
@@ -829,7 +859,7 @@ static void clk_gpr_gate_scu_unprepare(struct clk_hw *hw)
 
 static int clk_gpr_gate_scu_is_prepared(struct clk_hw *hw)
 {
-	struct clk_gpr_scu *clk= to_clk_gpr_scu(hw);
+	struct clk_gpr_scu *clk = to_clk_gpr_scu(hw);
 	int ret;
 	u32 val;
 
@@ -841,7 +871,7 @@ static int clk_gpr_gate_scu_is_prepared(struct clk_hw *hw)
 	return clk->gate_invert ? !val : val;
 }
 
-static struct clk_ops clk_gpr_gate_scu_ops = {
+static const struct clk_ops clk_gpr_gate_scu_ops = {
 	.prepare = clk_gpr_gate_scu_prepare,
 	.unprepare = clk_gpr_gate_scu_unprepare,
 	.is_prepared = clk_gpr_gate_scu_is_prepared,
@@ -857,26 +887,24 @@ struct clk_hw *__imx_clk_gpr_scu(const char *name, const char * const *parent_na
 	struct clk_init_data init;
 	int ret;
 
-	if (rsrc_id >= IMX_SC_R_LAST)
-		return NULL;
-
-	if (gpr_id >= IMX_SC_C_LAST)
-		return NULL;
-
-	if (!imx_scu_clk_is_valid(rsrc_id))
+	if (rsrc_id >= IMX_SC_R_LAST || gpr_id >= IMX_SC_C_LAST)
 		return ERR_PTR(-EINVAL);
 
-	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
-	if (!clk)
-		return ERR_PTR(-ENOMEM);
-
 	clk_node = kzalloc(sizeof(*clk_node), GFP_KERNEL);
-	if (!clk_node) {
-		kfree(clk);
+	if (!clk_node)
 		return ERR_PTR(-ENOMEM);
-	};
 
-	/* struct clk_gate_scu assignments */
+	if (!imx_scu_clk_is_valid(rsrc_id)) {
+		kfree(clk_node);
+		return ERR_PTR(-EINVAL);
+	}
+
+	clk = kzalloc(sizeof(*clk), GFP_KERNEL);
+	if (!clk) {
+		kfree(clk_node);
+		return ERR_PTR(-ENOMEM);
+	}
+
 	clk->rsrc_id = rsrc_id;
 	clk->gpr_id = gpr_id;
 	clk->flags = flags;

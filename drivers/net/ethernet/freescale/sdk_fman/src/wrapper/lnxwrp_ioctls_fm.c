@@ -39,14 +39,6 @@
 
 /* Linux Headers ------------------- */
 #include <linux/version.h>
-
-#if defined(CONFIG_MODVERSIONS) && !defined(MODVERSIONS)
-#define MODVERSIONS
-#endif
-#ifdef MODVERSIONS
-#include <config/modversions.h>
-#endif /* MODVERSIONS */
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -763,7 +755,9 @@ Status: feature not supported
                 }
             }
 
-            err = FM_PCD_SetException(p_LnxWrpFmDev->h_PcdDev, param->exception, param->enable);
+			err = FM_PCD_SetException(p_LnxWrpFmDev->h_PcdDev,
+					(e_FmPcdExceptions)param->exception,
+					param->enable);
 
             XX_Free(param);
             break;
@@ -2076,8 +2070,7 @@ invalid_port_id:
             XX_Free(param);
             break;
         }
-        
-        
+
 #if defined(CONFIG_COMPAT)
         case FM_PCD_IOC_MATCH_TABLE_GET_KEY_STAT_COMPAT:
 #endif
@@ -2116,11 +2109,10 @@ invalid_port_id:
                     RETURN_ERROR(MINOR, E_WRITE_FAILED, NO_MSG);
             }
 
-  
             err = FM_PCD_MatchTableGetKeyStatistics((t_Handle) param.id,
                                                      param.key_index,
                                                      (t_FmPcdCcKeyStatistics *) &param.statistics);
-         
+
 #if defined(CONFIG_COMPAT)
             if (compat)
             {
@@ -2192,10 +2184,9 @@ invalid_port_id:
                     RETURN_ERROR(MINOR, E_WRITE_FAILED, NO_MSG);
             }
 
-  
             err = FM_PCD_MatchTableGetMissStatistics((t_Handle) param.id,
                                                      (t_FmPcdCcKeyStatistics *) &param.statistics);
-         
+
 #if defined(CONFIG_COMPAT)
             if (compat)
             {
@@ -2227,7 +2218,7 @@ invalid_port_id:
 
             break;
         }
-        
+
 
 #if defined(CONFIG_COMPAT)
         case FM_PCD_IOC_HASH_TABLE_GET_MISS_STAT_COMPAT:
@@ -2267,10 +2258,9 @@ invalid_port_id:
                     RETURN_ERROR(MINOR, E_WRITE_FAILED, NO_MSG);
             }
 
-  
             err = FM_PCD_HashTableGetMissStatistics((t_Handle) param.id,
                                                      (t_FmPcdCcKeyStatistics *) &param.statistics);
-         
+
 #if defined(CONFIG_COMPAT)
             if (compat)
             {
@@ -2302,7 +2292,7 @@ invalid_port_id:
 
             break;
         }
-      
+
 #if defined(CONFIG_COMPAT)
         case FM_PCD_IOC_HASH_TABLE_SET_COMPAT:
 #endif
@@ -2392,10 +2382,12 @@ invalid_port_id:
             else
 #endif
             {
-                if (copy_to_user((ioc_fm_pcd_hash_table_params_t *)arg,
-                            param,
-                            sizeof(ioc_fm_pcd_hash_table_params_t)))
-                    err = E_READ_FAILED;
+			if (copy_to_user((ioc_fm_pcd_hash_table_params_t *)arg,
+					 param,
+					 sizeof(ioc_fm_pcd_hash_table_params_t))) {
+				FM_PCD_HashTableDelete(param->id);
+				err = E_READ_FAILED;
+			}
             }
 
             XX_Free(param);
@@ -3582,7 +3574,9 @@ t_Error LnxwrpFmIOCTL(t_LnxWrpFmDev *p_LnxWrpFmDev, unsigned int cmd, unsigned l
                 }
             }
 
-            err = FM_ModifyCounter(p_LnxWrpFmDev->h_Dev, param->cnt, param->val);
+			err = FM_ModifyCounter(p_LnxWrpFmDev->h_Dev,
+					       (e_FmCounters)param->cnt,
+					       param->val);
 
             XX_Free(param);
             break;
@@ -3617,7 +3611,8 @@ t_Error LnxwrpFmIOCTL(t_LnxWrpFmDev *p_LnxWrpFmDev, unsigned int cmd, unsigned l
                 }
             }
 
-            param->val = FM_GetCounter(p_LnxWrpFmDev->h_Dev, param->cnt);
+			param->val = FM_GetCounter(p_LnxWrpFmDev->h_Dev,
+						   (e_FmCounters)param->cnt);
 
 #if defined(CONFIG_COMPAT)
             if (compat)

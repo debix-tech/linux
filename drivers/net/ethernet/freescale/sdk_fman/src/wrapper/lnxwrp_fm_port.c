@@ -38,12 +38,6 @@
 */
 
 #include <linux/version.h>
-#if defined(CONFIG_MODVERSIONS) && !defined(MODVERSIONS)
-#define MODVERSIONS
-#endif
-#ifdef MODVERSIONS
-#include <config/modversions.h>
-#endif /* MODVERSIONS */
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of_platform.h>
@@ -1406,6 +1400,9 @@ static int /*__devinit*/ fm_port_probe(struct platform_device *of_dev)
 	/* create sysfs entries for stats and regs */
 
 	if (fm_port_sysfs_create(dev) != 0) {
+		device_destroy(p_LnxWrpFmDev->fm_class,
+			       MKDEV(p_LnxWrpFmDev->major,
+				     p_LnxWrpFmPortDev->minor));
 		FreeFmPortDev(p_LnxWrpFmPortDev);
 		REPORT_ERROR(MAJOR, E_INVALID_STATE,
 			     ("Unable to create sys entry - fm port!!!"));

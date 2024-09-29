@@ -24,13 +24,33 @@
 #define PHY_ID_AQR405	0x03a1b4b0
 #define PHY_ID_AQR112	0x03a1b662
 #define PHY_ID_AQR412	0x03a1b712
+#define PHY_ID_AQR113C	0x31c31c12
+#define PHY_ID_AQR115	0x31c31c63
+
+#define MDIO_GLOBAL_LED_PROVIS_1		0xC430
+#define MDIO_GLOBAL_LED_PROVIS_1_LED0_5G	BIT(15)
+#define MDIO_GLOBAL_LED_PROVIS_1_LED0_10G	BIT(7)
+#define MDIO_GLOBAL_LED_PROVIS_1_REV_ACT	BIT(3)
+#define MDIO_GLOBAL_LED_PROVIS_1_SEN_ACT	BIT(2)
+#define MDIO_GLOBAL_LED_PROVIS_1_STR_MASK	GENMASK(1, 0)
+#define MDIO_GLOBAL_LED_PROVIS_1_STR(x)		((x) & GENMASK(1, 0))
+#define MDIO_GLOBAL_LED_PROVIS_2		0xC431
+#define MDIO_GLOBAL_LED_PROVIS_2_LED0_2_5G	BIT(14)
+#define MDIO_GLOBAL_LED_PROVIS_2_LED0_1G	BIT(6)
+#define MDIO_GLOBAL_LED_PROVIS_2_REV_ACT	BIT(3)
+#define MDIO_GLOBAL_LED_PROVIS_2_SEN_ACT	BIT(2)
+#define MDIO_GLOBAL_LED_PROVIS_2_STR_MASK	GENMASK(1, 0)
+#define MDIO_GLOBAL_LED_PROVIS_2_STR(x)		((x) & GENMASK(1, 0))
 
 #define MDIO_PHYXS_VEND_IF_STATUS		0xe812
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_MASK	GENMASK(7, 3)
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_KR	0
+#define MDIO_PHYXS_VEND_IF_STATUS_TYPE_KX	1
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_XFI	2
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_USXGMII	3
+#define MDIO_PHYXS_VEND_IF_STATUS_TYPE_XAUI	4
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_SGMII	6
+#define MDIO_PHYXS_VEND_IF_STATUS_TYPE_RXAUI	7
 #define MDIO_PHYXS_VEND_IF_STATUS_TYPE_OCSGMII	10
 
 #define MDIO_PHYXS_VEND_PROV2			0xC441
@@ -39,6 +59,8 @@
 #define MDIO_AN_VEND_PROV			0xc400
 #define MDIO_AN_VEND_PROV_1000BASET_FULL	BIT(15)
 #define MDIO_AN_VEND_PROV_1000BASET_HALF	BIT(14)
+#define MDIO_AN_VEND_PROV_5000BASET_FULL	BIT(11)
+#define MDIO_AN_VEND_PROV_2500BASET_FULL	BIT(10)
 #define MDIO_AN_VEND_PROV_DOWNSHIFT_EN		BIT(4)
 #define MDIO_AN_VEND_PROV_DOWNSHIFT_MASK	GENMASK(3, 0)
 #define MDIO_AN_VEND_PROV_DOWNSHIFT_DFLT	4
@@ -57,6 +79,7 @@
 #define MDIO_AN_TX_VEND_INT_STATUS1_DOWNSHIFT	BIT(1)
 
 #define MDIO_AN_TX_VEND_INT_STATUS2		0xcc01
+#define MDIO_AN_TX_VEND_INT_STATUS2_MASK	BIT(0)
 
 #define MDIO_AN_TX_VEND_INT_MASK2		0xd401
 #define MDIO_AN_TX_VEND_INT_MASK2_LINK		BIT(0)
@@ -92,6 +115,22 @@
 #define VEND1_GLOBAL_FW_ID_MAJOR		GENMASK(15, 8)
 #define VEND1_GLOBAL_FW_ID_MINOR		GENMASK(7, 0)
 
+#define VEND1_GLOBAL_GEN_STAT2			0xc831
+#define VEND1_GLOBAL_GEN_STAT2_OP_IN_PROG	BIT(15)
+
+/* The following registers all have similar layouts; first the registers... */
+#define VEND1_GLOBAL_CFG_10M			0x0310
+#define VEND1_GLOBAL_CFG_100M			0x031b
+#define VEND1_GLOBAL_CFG_1G			0x031c
+#define VEND1_GLOBAL_CFG_2_5G			0x031d
+#define VEND1_GLOBAL_CFG_5G			0x031e
+#define VEND1_GLOBAL_CFG_10G			0x031f
+/* ...and now the fields */
+#define VEND1_GLOBAL_CFG_RATE_ADAPT		GENMASK(8, 7)
+#define VEND1_GLOBAL_CFG_RATE_ADAPT_NONE	0
+#define VEND1_GLOBAL_CFG_RATE_ADAPT_USX		1
+#define VEND1_GLOBAL_CFG_RATE_ADAPT_PAUSE	2
+
 #define VEND1_GLOBAL_RSVD_STAT1			0xc885
 #define VEND1_GLOBAL_RSVD_STAT1_FW_BUILD_ID	GENMASK(7, 4)
 #define VEND1_GLOBAL_RSVD_STAT1_PROV_ID		GENMASK(3, 0)
@@ -125,6 +164,12 @@
 #define VEND1_GLOBAL_INT_VEND_MASK_GLOBAL1	BIT(2)
 #define VEND1_GLOBAL_INT_VEND_MASK_GLOBAL2	BIT(1)
 #define VEND1_GLOBAL_INT_VEND_MASK_GLOBAL3	BIT(0)
+
+/* Sleep and timeout for checking if the Processor-Intensive
+ * MDIO operation is finished
+ */
+#define AQR107_OP_IN_PROG_SLEEP		1000
+#define AQR107_OP_IN_PROG_TIMEOUT	100000
 
 /* registers in MDIO_MMD_VEND1 region */
 #define AQUANTIA_VND1_GLOBAL_SC			0x000
@@ -258,9 +303,20 @@ static int aqr_config_aneg(struct phy_device *phydev)
 			      phydev->advertising))
 		reg |= MDIO_AN_VEND_PROV_1000BASET_HALF;
 
+	/* Handle the case when the 2.5G and 5G speeds are not advertised */
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_2500baseT_Full_BIT,
+			      phydev->advertising))
+		reg |= MDIO_AN_VEND_PROV_2500BASET_FULL;
+
+	if (linkmode_test_bit(ETHTOOL_LINK_MODE_5000baseT_Full_BIT,
+			      phydev->advertising))
+		reg |= MDIO_AN_VEND_PROV_5000BASET_FULL;
+
 	ret = phy_modify_mmd_changed(phydev, MDIO_MMD_AN, MDIO_AN_VEND_PROV,
 				     MDIO_AN_VEND_PROV_1000BASET_HALF |
-				     MDIO_AN_VEND_PROV_1000BASET_FULL, reg);
+				     MDIO_AN_VEND_PROV_1000BASET_FULL |
+				     MDIO_AN_VEND_PROV_2500BASET_FULL |
+				     MDIO_AN_VEND_PROV_5000BASET_FULL, reg);
 	if (ret < 0)
 		return ret;
 	if (ret > 0)
@@ -329,6 +385,13 @@ static int aqr_config_intr(struct phy_device *phydev)
 	bool en = phydev->interrupts == PHY_INTERRUPT_ENABLED;
 	int err;
 
+	if (en) {
+		/* Clear any pending interrupts before enabling them */
+		err = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_TX_VEND_INT_STATUS2);
+		if (err < 0)
+			return err;
+	}
+
 	err = phy_write_mmd(phydev, MDIO_MMD_AN, MDIO_AN_TX_VEND_INT_MASK2,
 			    en ? MDIO_AN_TX_VEND_INT_MASK2_LINK : 0);
 	if (err < 0)
@@ -339,18 +402,39 @@ static int aqr_config_intr(struct phy_device *phydev)
 	if (err < 0)
 		return err;
 
-	return phy_write_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK,
-			     en ? VEND1_GLOBAL_INT_VEND_MASK_GLOBAL3 |
-			     VEND1_GLOBAL_INT_VEND_MASK_AN : 0);
+	err = phy_write_mmd(phydev, MDIO_MMD_VEND1, VEND1_GLOBAL_INT_VEND_MASK,
+			    en ? VEND1_GLOBAL_INT_VEND_MASK_GLOBAL3 |
+			    VEND1_GLOBAL_INT_VEND_MASK_AN : 0);
+	if (err < 0)
+		return err;
+
+	if (!en) {
+		/* Clear any pending interrupts after we have disabled them */
+		err = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_TX_VEND_INT_STATUS2);
+		if (err < 0)
+			return err;
+	}
+
+	return 0;
 }
 
-static int aqr_ack_interrupt(struct phy_device *phydev)
+static irqreturn_t aqr_handle_interrupt(struct phy_device *phydev)
 {
-	int reg;
+	int irq_status;
 
-	reg = phy_read_mmd(phydev, MDIO_MMD_AN,
-			   MDIO_AN_TX_VEND_INT_STATUS2);
-	return (reg < 0) ? reg : 0;
+	irq_status = phy_read_mmd(phydev, MDIO_MMD_AN,
+				  MDIO_AN_TX_VEND_INT_STATUS2);
+	if (irq_status < 0) {
+		phy_error(phydev);
+		return IRQ_NONE;
+	}
+
+	if (!(irq_status & MDIO_AN_TX_VEND_INT_STATUS2_MASK))
+		return IRQ_NONE;
+
+	phy_trigger_machine(phydev);
+
+	return IRQ_HANDLED;
 }
 
 static int aqr_read_status(struct phy_device *phydev)
@@ -373,42 +457,106 @@ static int aqr_read_status(struct phy_device *phydev)
 	return genphy_c45_read_status(phydev);
 }
 
+static void aqr107_set_led(struct phy_device *phydev, u32 speed)
+{
+	u16 led1, led2;
+
+	switch (speed) {
+	case SPEED_1000:
+		led1 = 0;
+		led2 = MDIO_GLOBAL_LED_PROVIS_2_LED0_1G |
+		       MDIO_GLOBAL_LED_PROVIS_2_REV_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_2_SEN_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_2_STR(0x1);
+		break;
+	case SPEED_2500:
+		led1 = MDIO_GLOBAL_LED_PROVIS_1_REV_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_1_SEN_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_1_STR(0x1);
+		led2 = MDIO_GLOBAL_LED_PROVIS_2_LED0_2_5G;
+		break;
+	case SPEED_5000:
+		led1 = MDIO_GLOBAL_LED_PROVIS_1_LED0_5G |
+		       MDIO_GLOBAL_LED_PROVIS_1_REV_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_1_SEN_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_1_STR(0x1);
+		led2 = 0;
+		break;
+	case SPEED_10000:
+		led1 = MDIO_GLOBAL_LED_PROVIS_1_LED0_10G;
+		led2 = MDIO_GLOBAL_LED_PROVIS_2_REV_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_2_SEN_ACT |
+		       MDIO_GLOBAL_LED_PROVIS_2_STR(0x1);
+		break;
+	default:
+		led1 = 0;
+		led2 = 0;
+		break;
+	}
+
+	if (led1 == phy_read_mmd(phydev, MDIO_MMD_VEND1, MDIO_GLOBAL_LED_PROVIS_1) &&
+	    led2 == phy_read_mmd(phydev, MDIO_MMD_VEND1, MDIO_GLOBAL_LED_PROVIS_2))
+		return;
+
+	phy_write_mmd(phydev, MDIO_MMD_VEND1, MDIO_GLOBAL_LED_PROVIS_1, led1);
+	phy_write_mmd(phydev, MDIO_MMD_VEND1, MDIO_GLOBAL_LED_PROVIS_2, led2);
+}
+
 static int aqr107_read_rate(struct phy_device *phydev)
 {
+	u32 config_reg;
 	int val;
 
 	val = phy_read_mmd(phydev, MDIO_MMD_AN, MDIO_AN_TX_VEND_STATUS1);
 	if (val < 0)
 		return val;
 
-	switch (FIELD_GET(MDIO_AN_TX_VEND_STATUS1_RATE_MASK, val)) {
-	case MDIO_AN_TX_VEND_STATUS1_10BASET:
-		phydev->speed = SPEED_10;
-		break;
-	case MDIO_AN_TX_VEND_STATUS1_100BASETX:
-		phydev->speed = SPEED_100;
-		break;
-	case MDIO_AN_TX_VEND_STATUS1_1000BASET:
-		phydev->speed = SPEED_1000;
-		break;
-	case MDIO_AN_TX_VEND_STATUS1_2500BASET:
-		phydev->speed = SPEED_2500;
-		break;
-	case MDIO_AN_TX_VEND_STATUS1_5000BASET:
-		phydev->speed = SPEED_5000;
-		break;
-	case MDIO_AN_TX_VEND_STATUS1_10GBASET:
-		phydev->speed = SPEED_10000;
-		break;
-	default:
-		phydev->speed = SPEED_UNKNOWN;
-		break;
-	}
-
 	if (val & MDIO_AN_TX_VEND_STATUS1_FULL_DUPLEX)
 		phydev->duplex = DUPLEX_FULL;
 	else
 		phydev->duplex = DUPLEX_HALF;
+
+	switch (FIELD_GET(MDIO_AN_TX_VEND_STATUS1_RATE_MASK, val)) {
+	case MDIO_AN_TX_VEND_STATUS1_10BASET:
+		phydev->speed = SPEED_10;
+		config_reg = VEND1_GLOBAL_CFG_10M;
+		break;
+	case MDIO_AN_TX_VEND_STATUS1_100BASETX:
+		phydev->speed = SPEED_100;
+		config_reg = VEND1_GLOBAL_CFG_100M;
+		break;
+	case MDIO_AN_TX_VEND_STATUS1_1000BASET:
+		phydev->speed = SPEED_1000;
+		config_reg = VEND1_GLOBAL_CFG_1G;
+		break;
+	case MDIO_AN_TX_VEND_STATUS1_2500BASET:
+		phydev->speed = SPEED_2500;
+		config_reg = VEND1_GLOBAL_CFG_2_5G;
+		break;
+	case MDIO_AN_TX_VEND_STATUS1_5000BASET:
+		phydev->speed = SPEED_5000;
+		config_reg = VEND1_GLOBAL_CFG_5G;
+		break;
+	case MDIO_AN_TX_VEND_STATUS1_10GBASET:
+		phydev->speed = SPEED_10000;
+		config_reg = VEND1_GLOBAL_CFG_10G;
+		break;
+	default:
+		phydev->speed = SPEED_UNKNOWN;
+		return 0;
+	}
+
+	aqr107_set_led(phydev, phydev->speed);
+
+	val = phy_read_mmd(phydev, MDIO_MMD_VEND1, config_reg);
+	if (val < 0)
+		return val;
+
+	if (FIELD_GET(VEND1_GLOBAL_CFG_RATE_ADAPT, val) ==
+	    VEND1_GLOBAL_CFG_RATE_ADAPT_PAUSE)
+		phydev->rate_matching = RATE_MATCH_PAUSE;
+	else
+		phydev->rate_matching = RATE_MATCH_NONE;
 
 	return 0;
 }
@@ -424,6 +572,20 @@ static int aqr107_read_status(struct phy_device *phydev)
 	if (!phydev->link || phydev->autoneg == AUTONEG_DISABLE)
 		return 0;
 
+	/* Quad port PHYs like AQR412 have 4 system interfaces, but they can
+	 * also be used with a single system interface over which all 4 ports
+	 * are multiplexed (10G-QXGMII). To the MDIO registers, this mode is
+	 * indistinguishable from USXGMII (which implies a single 10G port),
+	 * which is problematic because the detection logic below would
+	 * overwrite phydev->interface with a wrong value. If the device tree
+	 * is configured for "10g-qxgmii", always trust that value, since it is
+	 * very unlikely that the PHY firmware was configured for protocol
+	 * switching depending on link speed (all USXGMII variants are capable
+	 * of symbol replication).
+	 */
+	if (phydev->interface == PHY_INTERFACE_MODE_10G_QXGMII)
+		goto skip_iface_detection;
+
 	val = phy_read_mmd(phydev, MDIO_MMD_PHYXS, MDIO_PHYXS_VEND_IF_STATUS);
 	if (val < 0)
 		return val;
@@ -432,14 +594,23 @@ static int aqr107_read_status(struct phy_device *phydev)
 	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_KR:
 		phydev->interface = PHY_INTERFACE_MODE_10GKR;
 		break;
+	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_KX:
+		phydev->interface = PHY_INTERFACE_MODE_1000BASEKX;
+		break;
 	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_XFI:
 		phydev->interface = PHY_INTERFACE_MODE_10GBASER;
 		break;
 	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_USXGMII:
 		phydev->interface = PHY_INTERFACE_MODE_USXGMII;
 		break;
+	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_XAUI:
+		phydev->interface = PHY_INTERFACE_MODE_XAUI;
+		break;
 	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_SGMII:
 		phydev->interface = PHY_INTERFACE_MODE_SGMII;
+		break;
+	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_RXAUI:
+		phydev->interface = PHY_INTERFACE_MODE_RXAUI;
 		break;
 	case MDIO_PHYXS_VEND_IF_STATUS_TYPE_OCSGMII:
 		phydev->interface = PHY_INTERFACE_MODE_2500BASEX;
@@ -449,6 +620,7 @@ static int aqr107_read_status(struct phy_device *phydev)
 		break;
 	}
 
+skip_iface_detection:
 	/* Read possibly downshifted rate from vendor register */
 	return aqr107_read_rate(phydev);
 }
@@ -553,11 +725,14 @@ static int aqr107_config_init(struct phy_device *phydev)
 
 	/* Check that the PHY interface type is compatible */
 	if (phydev->interface != PHY_INTERFACE_MODE_SGMII &&
+	    phydev->interface != PHY_INTERFACE_MODE_1000BASEKX &&
 	    phydev->interface != PHY_INTERFACE_MODE_2500BASEX &&
 	    phydev->interface != PHY_INTERFACE_MODE_XGMII &&
 	    phydev->interface != PHY_INTERFACE_MODE_USXGMII &&
 	    phydev->interface != PHY_INTERFACE_MODE_10GKR &&
-	    phydev->interface != PHY_INTERFACE_MODE_10GBASER)
+	    phydev->interface != PHY_INTERFACE_MODE_10GBASER &&
+	    phydev->interface != PHY_INTERFACE_MODE_XAUI &&
+	    phydev->interface != PHY_INTERFACE_MODE_RXAUI)
 		return -ENODEV;
 
 	WARN(phydev->interface == PHY_INTERFACE_MODE_XGMII,
@@ -587,9 +762,7 @@ static int aqcs109_config_init(struct phy_device *phydev)
 	 * PMA speed ability bits are the same for all members of the family,
 	 * AQCS109 however supports speeds up to 2.5G only.
 	 */
-	ret = phy_set_max_speed(phydev, SPEED_2500);
-	if (ret)
-		return ret;
+	phy_set_max_speed(phydev, SPEED_2500);
 
 	return aqr107_set_downshift(phydev, MDIO_AN_VEND_PROV_DOWNSHIFT_DFLT);
 }
@@ -639,16 +812,62 @@ static void aqr107_link_change_notify(struct phy_device *phydev)
 		phydev_info(phydev, "Aquantia 1000Base-T2 mode active\n");
 }
 
+static int aqr107_wait_processor_intensive_op(struct phy_device *phydev)
+{
+	int val, err;
+
+	/* The datasheet notes to wait at least 1ms after issuing a
+	 * processor intensive operation before checking.
+	 * We cannot use the 'sleep_before_read' parameter of read_poll_timeout
+	 * because that just determines the maximum time slept, not the minimum.
+	 */
+	usleep_range(1000, 5000);
+
+	err = phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND1,
+					VEND1_GLOBAL_GEN_STAT2, val,
+					!(val & VEND1_GLOBAL_GEN_STAT2_OP_IN_PROG),
+					AQR107_OP_IN_PROG_SLEEP,
+					AQR107_OP_IN_PROG_TIMEOUT, false);
+	if (err) {
+		phydev_err(phydev, "timeout: processor-intensive MDIO operation\n");
+		return err;
+	}
+
+	return 0;
+}
+
+static int aqr107_get_rate_matching(struct phy_device *phydev,
+				    phy_interface_t iface)
+{
+	if (iface == PHY_INTERFACE_MODE_10GBASER ||
+	    iface == PHY_INTERFACE_MODE_2500BASEX ||
+	    iface == PHY_INTERFACE_MODE_NA)
+		return RATE_MATCH_PAUSE;
+	return RATE_MATCH_NONE;
+}
+
 static int aqr107_suspend(struct phy_device *phydev)
 {
-	return phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, MDIO_CTRL1,
-				MDIO_CTRL1_LPOWER);
+	int err;
+
+	err = phy_set_bits_mmd(phydev, MDIO_MMD_VEND1, MDIO_CTRL1,
+			       MDIO_CTRL1_LPOWER);
+	if (err)
+		return err;
+
+	return aqr107_wait_processor_intensive_op(phydev);
 }
 
 static int aqr107_resume(struct phy_device *phydev)
 {
-	return phy_clear_bits_mmd(phydev, MDIO_MMD_VEND1, MDIO_CTRL1,
-				  MDIO_CTRL1_LPOWER);
+	int err;
+
+	err = phy_clear_bits_mmd(phydev, MDIO_MMD_VEND1, MDIO_CTRL1,
+				 MDIO_CTRL1_LPOWER);
+	if (err)
+		return err;
+
+	return aqr107_wait_processor_intensive_op(phydev);
 }
 
 static int aqr107_probe(struct phy_device *phydev)
@@ -667,7 +886,7 @@ static struct phy_driver aqr_driver[] = {
 	.name		= "Aquantia AQ1202",
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr_read_status,
 },
 {
@@ -675,7 +894,7 @@ static struct phy_driver aqr_driver[] = {
 	.name		= "Aquantia AQ2104",
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr_read_status,
 },
 {
@@ -683,7 +902,7 @@ static struct phy_driver aqr_driver[] = {
 	.name		= "Aquantia AQR105",
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr_read_status,
 	.suspend	= aqr107_suspend,
 	.resume		= aqr107_resume,
@@ -693,17 +912,18 @@ static struct phy_driver aqr_driver[] = {
 	.name		= "Aquantia AQR106",
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr_read_status,
 },
 {
 	PHY_ID_MATCH_MODEL(PHY_ID_AQR107),
 	.name		= "Aquantia AQR107",
 	.probe		= aqr107_probe,
+	.get_rate_matching = aqr107_get_rate_matching,
 	.config_init	= aqr107_config_init,
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr107_read_status,
 	.get_tunable    = aqr107_get_tunable,
 	.set_tunable    = aqr107_set_tunable,
@@ -718,10 +938,11 @@ static struct phy_driver aqr_driver[] = {
 	PHY_ID_MATCH_MODEL(PHY_ID_AQCS109),
 	.name		= "Aquantia AQCS109",
 	.probe		= aqr107_probe,
+	.get_rate_matching = aqr107_get_rate_matching,
 	.config_init	= aqcs109_config_init,
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr107_read_status,
 	.get_tunable    = aqr107_get_tunable,
 	.set_tunable    = aqr107_set_tunable,
@@ -737,24 +958,82 @@ static struct phy_driver aqr_driver[] = {
 	.name		= "Aquantia AQR405",
 	.config_aneg    = aqr_config_aneg,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
+	.handle_interrupt = aqr_handle_interrupt,
 	.read_status	= aqr_read_status,
 },
 {
 	PHY_ID_MATCH_MODEL(PHY_ID_AQR112),
 	.name		= "Aquantia AQR112",
+	.probe		= aqr107_probe,
 	.config_aneg    = aqr_config_aneg_set_prot,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
-	.read_status	= aqr_read_status,
+	.handle_interrupt = aqr_handle_interrupt,
+	.get_tunable    = aqr107_get_tunable,
+	.set_tunable    = aqr107_set_tunable,
+	.suspend	= aqr107_suspend,
+	.resume		= aqr107_resume,
+	.read_status	= aqr107_read_status,
+	.get_rate_matching = aqr107_get_rate_matching,
+	.get_sset_count = aqr107_get_sset_count,
+	.get_strings	= aqr107_get_strings,
+	.get_stats	= aqr107_get_stats,
+	.link_change_notify = aqr107_link_change_notify,
 },
 {
 	PHY_ID_MATCH_MODEL(PHY_ID_AQR412),
 	.name		= "Aquantia AQR412",
+	.probe		= aqr107_probe,
 	.config_aneg    = aqr_config_aneg_set_prot,
 	.config_intr	= aqr_config_intr,
-	.ack_interrupt	= aqr_ack_interrupt,
-	.read_status	= aqr_read_status,
+	.handle_interrupt = aqr_handle_interrupt,
+	.get_tunable    = aqr107_get_tunable,
+	.set_tunable    = aqr107_set_tunable,
+	.suspend	= aqr107_suspend,
+	.resume		= aqr107_resume,
+	.read_status	= aqr107_read_status,
+	.get_rate_matching = aqr107_get_rate_matching,
+	.get_sset_count = aqr107_get_sset_count,
+	.get_strings	= aqr107_get_strings,
+	.get_stats	= aqr107_get_stats,
+	.link_change_notify = aqr107_link_change_notify,
+},
+{
+	PHY_ID_MATCH_MODEL(PHY_ID_AQR113C),
+	.name           = "Aquantia AQR113C",
+	.probe          = aqr107_probe,
+	.get_rate_matching = aqr107_get_rate_matching,
+	.config_init    = aqr107_config_init,
+	.config_aneg    = aqr_config_aneg,
+	.config_intr    = aqr_config_intr,
+	.handle_interrupt       = aqr_handle_interrupt,
+	.read_status    = aqr107_read_status,
+	.get_tunable    = aqr107_get_tunable,
+	.set_tunable    = aqr107_set_tunable,
+	.suspend        = aqr107_suspend,
+	.resume         = aqr107_resume,
+	.get_sset_count = aqr107_get_sset_count,
+	.get_strings    = aqr107_get_strings,
+	.get_stats      = aqr107_get_stats,
+	.link_change_notify = aqr107_link_change_notify,
+},
+{
+	PHY_ID_MATCH_MODEL(PHY_ID_AQR115),
+	.name		= "Aquantia AQR115",
+	.probe		= aqr107_probe,
+	.get_rate_matching = aqr107_get_rate_matching,
+	.config_init	= aqcs109_config_init,
+	.config_aneg	= aqr_config_aneg,
+	.config_intr	= aqr_config_intr,
+	.handle_interrupt = aqr_handle_interrupt,
+	.read_status	= aqr107_read_status,
+	.get_tunable    = aqr107_get_tunable,
+	.set_tunable    = aqr107_set_tunable,
+	.suspend	= aqr107_suspend,
+	.resume		= aqr107_resume,
+	.get_sset_count	= aqr107_get_sset_count,
+	.get_strings	= aqr107_get_strings,
+	.get_stats	= aqr107_get_stats,
+	.link_change_notify = aqr107_link_change_notify,
 },
 };
 
@@ -770,6 +1049,8 @@ static struct mdio_device_id __maybe_unused aqr_tbl[] = {
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR405) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR112) },
 	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR412) },
+	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR113C) },
+	{ PHY_ID_MATCH_MODEL(PHY_ID_AQR115) },
 	{ }
 };
 

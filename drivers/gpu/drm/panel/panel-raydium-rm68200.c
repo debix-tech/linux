@@ -263,12 +263,12 @@ static int rm68200_unprepare(struct drm_panel *panel)
 	if (!ctx->prepared)
 		return 0;
 
-	gpiod_set_value_cansleep(ctx->enable_gpio, 0);
-
 	if (ctx->reset_gpio) {
 		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 		msleep(20);
 	}
+
+	gpiod_set_value_cansleep(ctx->enable_gpio, 0);
 
 	regulator_disable(ctx->supply);
 
@@ -291,14 +291,14 @@ static int rm68200_prepare(struct drm_panel *panel)
 		return ret;
 	}
 
+	gpiod_set_value_cansleep(ctx->enable_gpio, 1);
+
 	if (ctx->reset_gpio) {
 		gpiod_set_value_cansleep(ctx->reset_gpio, 1);
 		msleep(20);
 		gpiod_set_value_cansleep(ctx->reset_gpio, 0);
 		msleep(100);
 	}
-
-	gpiod_set_value_cansleep(ctx->enable_gpio, 1);
 
 	ctx->prepared = true;
 
@@ -425,14 +425,12 @@ static int rm68200_probe(struct mipi_dsi_device *dsi)
 	return 0;
 }
 
-static int rm68200_remove(struct mipi_dsi_device *dsi)
+static void rm68200_remove(struct mipi_dsi_device *dsi)
 {
 	struct rm68200 *ctx = mipi_dsi_get_drvdata(dsi);
 
 	mipi_dsi_detach(dsi);
 	drm_panel_remove(&ctx->panel);
-
-	return 0;
 }
 
 static const struct of_device_id raydium_rm68200_of_match[] = {

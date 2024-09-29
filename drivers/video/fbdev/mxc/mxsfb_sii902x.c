@@ -393,8 +393,7 @@ static int mxsfb_get_of_property(void)
 	return ret;
 }
 
-static int sii902x_probe(struct i2c_client *client,
-		const struct i2c_device_id *id)
+static int sii902x_probe(struct i2c_client *client)
 {
 	int i, dat, ret;
 	struct fb_info edid_fbi;
@@ -497,12 +496,10 @@ static int sii902x_probe(struct i2c_client *client,
 	return 0;
 }
 
-static int sii902x_remove(struct i2c_client *client)
+static void sii902x_remove(struct i2c_client *client)
 {
 	fb_unregister_client(&nb);
 	sii902x_poweroff();
-
-	return 0;
 }
 
 static void sii902x_poweron(void)

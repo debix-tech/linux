@@ -13,7 +13,7 @@
 	status = "okay";
 	disp-dev = "hdmi_disp";
 
-	port@0 {
+	port {
 		dcss_out: endpoint {
 			remote-endpoint = <&hdmi_in>;
 		};
@@ -23,7 +23,7 @@
 &hdmi {
 	compatible = "cdn,imx8mq-dp";
 	lane-mapping = <0xc6>;
-	hdcp-config = <0x2>;
+	hdcp-config = <0x3>;
 	status = "okay";
 
 	port@1 {

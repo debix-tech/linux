@@ -14,7 +14,6 @@
 
 #define LCDC_CTRL			0x00
 #define LCDC_CTRL1			0x10
-#define LCDC_V4_CTRL2			0x20
 #define LCDC_V3_TRANSFER_COUNT		0x20
 #define LCDC_V4_CTRL2			0x20
 #define LCDC_V4_TRANSFER_COUNT		0x30
@@ -34,6 +33,7 @@
 #define LCDC_DVICTRL3			0xf0
 #define LCDC_DVICTRL4			0x100
 #define LCDC_V4_DATA			0x180
+#define LCDC_V4_CRC_STAT		0x1a0
 #define LCDC_V3_DATA			0x1b0
 #define LCDC_V4_DEBUG0			0x1d0
 #define LCDC_V3_DEBUG0			0x1f0
@@ -74,7 +74,7 @@
 #define CTRL_WORD_LENGTH_18		CTRL_SET_WORD_LENGTH(2)
 #define CTRL_WORD_LENGTH_24		CTRL_SET_WORD_LENGTH(3)
 
-#define CTRL1_RECOVERY_ON_UNDERFLOW	BIT(24)
+#define CTRL1_RECOVER_ON_UNDERFLOW	BIT(24)
 #define CTRL1_FIFO_CLEAR		BIT(21)
 
 /*
@@ -95,12 +95,12 @@
 #define CTRL1_CUR_FRAME_DONE_IRQ_EN	BIT(13)
 #define CTRL1_CUR_FRAME_DONE_IRQ	BIT(9)
 
-#define CTRL2_OUTSTANDING_REQS(x)	REG_PUT((x), 23, 21)
-#define REQ_1	0
-#define REQ_2	1
-#define REQ_4	2
-#define REQ_8	3
-#define REQ_16	4
+#define CTRL2_SET_OUTSTANDING_REQS_1	0
+#define CTRL2_SET_OUTSTANDING_REQS_2	(0x1 << 21)
+#define CTRL2_SET_OUTSTANDING_REQS_4	(0x2 << 21)
+#define CTRL2_SET_OUTSTANDING_REQS_8	(0x3 << 21)
+#define CTRL2_SET_OUTSTANDING_REQS_16	(0x4 << 21)
+#define CTRL2_SET_OUTSTANDING_REQS_MASK	(0x7 << 21)
 
 #define SWIZZLE_LE		0 /* Little-Endian or No swap */
 #define SWIZZLE_BE		1 /* Big-Endian or swap all */

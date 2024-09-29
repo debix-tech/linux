@@ -255,7 +255,12 @@ static ssize_t show_fm_risc_load(struct device *dev,
 	FM_CtrlMonStop(p_wrp_fm_dev->h_Dev);
 
 	for (i = 0; i < FM_NUM_OF_CTRL; i++) {
-		err |= FM_CtrlMonGetCounters(p_wrp_fm_dev->h_Dev, i, &util);
+		err = FM_CtrlMonGetCounters(p_wrp_fm_dev->h_Dev, i, &util);
+		if (err) {
+			local_irq_restore(flags);
+			return -EINVAL;
+		}
+
 		m = snprintf(&buf[n],PAGE_SIZE,"\tRisc%u: util-%u%%, efficiency-%u%%\n",
 				i, util.percentCnt[0], util.percentCnt[1]);
 		n=m+n;
@@ -1799,19 +1804,19 @@ int fm_get_counter(void *h_fm, e_FmCounters cnt_e, uint32_t *cnt_val)
 	switch (cnt_e) {
 	case (e_FM_COUNTERS_DEQ_1):
 	case (e_FM_COUNTERS_DEQ_2):
-		/* fall through */
+		fallthrough;
 	case (e_FM_COUNTERS_DEQ_3):
 		if (p_fm->p_FmStateStruct->revInfo.majorRev >= 6)
 			return -EINVAL; /* counter not available */
 
-		/* Else fall through */
+		fallthrough;
 	case (e_FM_COUNTERS_ENQ_TOTAL_FRAME):
 	case (e_FM_COUNTERS_DEQ_TOTAL_FRAME):
 	case (e_FM_COUNTERS_DEQ_0):
 	case (e_FM_COUNTERS_DEQ_FROM_DEFAULT):
 	case (e_FM_COUNTERS_DEQ_FROM_CONTEXT):
 	case (e_FM_COUNTERS_DEQ_FROM_FD):
-		/* fall through */
+		fallthrough;
 	case (e_FM_COUNTERS_DEQ_CONFIRM):
 		if (!(ioread32be(&p_fm->p_FmQmiRegs->fmqm_gc) &
 			QMI_CFG_EN_COUNTERS))

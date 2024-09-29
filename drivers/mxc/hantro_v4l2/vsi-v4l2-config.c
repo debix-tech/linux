@@ -112,7 +112,7 @@ static s32 leveltbl_h264[][3] = {
 };
 
 static const u8 colorprimaries[] = {
-	0,
+	V4L2_COLORSPACE_LAST,
 	V4L2_COLORSPACE_REC709,        /*Rec. ITU-R BT.709-6*/
 	0,
 	0,
@@ -126,7 +126,7 @@ static const u8 colorprimaries[] = {
 };
 
 static const u8 colortransfers[] = {
-	0,
+	V4L2_XFER_FUNC_LAST,
 	V4L2_XFER_FUNC_709,      /*Rec. ITU-R BT.709-6*/
 	0,
 	0,
@@ -134,7 +134,7 @@ static const u8 colortransfers[] = {
 	V4L2_XFER_FUNC_GAMMA28,  /*Rec. ITU-R BT.470-6 System B, G*/
 	V4L2_XFER_FUNC_709,      /*SMPTE170M*/
 	V4L2_XFER_FUNC_SMPTE240M,/*SMPTE240M*/
-	V4L2_XFER_FUNC_LINEAR,   /*Linear transfer characteristics*/
+	V4L2_XFER_FUNC_NONE,     /*Linear transfer characteristics*/
 	0,
 	0,
 	V4L2_XFER_FUNC_XVYCC,    /*IEC 61966-2-4*/
@@ -148,7 +148,7 @@ static const u8 colortransfers[] = {
 };
 
 static const u8 colormatrixcoefs[] = {
-	0,
+	V4L2_YCBCR_ENC_LAST,
 	V4L2_YCBCR_ENC_709,             /*Rec. ITU-R BT.709-6*/
 	0,
 	0,
@@ -257,10 +257,12 @@ void vsi_dec_getvui(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 	struct v4l2_daemon_dec_info *dec_info = &ctx->mediacfg.decparams.dec_info.dec_info;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
 
+	if (test_bit(CTX_FLAG_SRCCHANGED_BIT, &ctx->flag))
+		pix->quantization = (dec_info->video_range == 0 ?  V4L2_QUANTIZATION_LIM_RANGE :
+								   V4L2_QUANTIZATION_FULL_RANGE);
+	else
+		pix->quantization = ctx->mediacfg.quantization;
 	if (dec_info->colour_description_present_flag) {
-		pix->quantization = (dec_info->video_range == 0 ?
-					V4L2_QUANTIZATION_LIM_RANGE :
-					V4L2_QUANTIZATION_FULL_RANGE);
 		if (dec_info->colour_primaries < ARRAY_SIZE(colorprimaries))
 			pix->colorspace = colorprimaries[dec_info->colour_primaries];
 		if (dec_info->transfer_characteristics < ARRAY_SIZE(colortransfers))
@@ -269,7 +271,6 @@ void vsi_dec_getvui(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 			pix->ycbcr_enc = colormatrixcoefs[dec_info->matrix_coefficients];
 	} else {
 		pix->colorspace = ctx->mediacfg.colorspace;
-		pix->quantization = ctx->mediacfg.quantization;
 		pix->xfer_func = ctx->mediacfg.xfer_func;
 		pix->ycbcr_enc = ctx->mediacfg.ycbcr_enc;
 	}
@@ -294,31 +295,37 @@ static void vsi_enum_decfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 	if (vsi_v4l2_hwconfig.max_dec_resolution > 1920) {
 		switch (pixel_format) {
 		case V4L2_PIX_FMT_HEVC:
+		case V4L2_PIX_FMT_VP9:
 			f->stepwise.min_width = 144;
 			f->stepwise.max_width = 4096;
 			f->stepwise.min_height = 144;
-			f->stepwise.max_height = 2160;
+			f->stepwise.max_height = 2304;
 			break;
 		case V4L2_PIX_FMT_H264:
-			f->stepwise.min_width = 96;
+		case V4L2_PIX_FMT_VP8:
+		case V4L2_PIX_FMT_VC1_ANNEX_G:
+		case V4L2_PIX_FMT_VC1_ANNEX_L:
+			f->stepwise.min_width = 48;
 			f->stepwise.max_width = 4096;
 			f->stepwise.min_height = 48;
-			f->stepwise.max_height = 2160;
+			f->stepwise.max_height = 4096;
 			break;
-		case V4L2_PIX_FMT_VP9:
-			f->stepwise.min_width = 96;
-			f->stepwise.max_width = 4096;
-			f->stepwise.min_height = 72;
-			f->stepwise.max_height = 2160;
-			break;
-		case V4L2_PIX_FMT_VP8:
 		case V4L2_PIX_FMT_MPEG4:
 		case V4L2_PIX_FMT_XVID:
 		case V4L2_PIX_FMT_MPEG2:
+		case V4L2_PIX_FMT_MPEG1:
 		case V4L2_PIX_FMT_H263:
-		case V4L2_PIX_FMT_VC1_ANNEX_G:
-		case V4L2_PIX_FMT_VC1_ANNEX_L:
+			f->stepwise.min_width = 48;
+			f->stepwise.max_width = 1920;
+			f->stepwise.min_height = 48;
+			f->stepwise.max_height = 1088;
+			break;
 		case V4L2_PIX_FMT_JPEG:
+			f->stepwise.min_width = 48;
+			f->stepwise.max_width = 16368;
+			f->stepwise.min_height = 48;
+			f->stepwise.max_height = 16368;
+			break;
 		default:
 			f->stepwise.min_width = 48;
 			f->stepwise.max_width = 1920;
@@ -329,23 +336,34 @@ static void vsi_enum_decfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 	} else {
 		switch (pixel_format) {
 		case V4L2_PIX_FMT_HEVC:
-			f->stepwise.min_width = 144;
-			f->stepwise.min_height = 144;
-			break;
 		case V4L2_PIX_FMT_VP9:
-			f->stepwise.min_width = 72;
-			f->stepwise.min_height = 72;
+			f->stepwise.min_width = 144;
+			f->stepwise.max_width = 1920;
+			f->stepwise.min_height = 144;
+			f->stepwise.max_height = 1088;
 			break;
 		case V4L2_PIX_FMT_H264:
 		case V4L2_PIX_FMT_VP8:
 			f->stepwise.min_width = 48;
+			f->stepwise.max_width = 1920;
 			f->stepwise.min_height = 48;
+			f->stepwise.max_height = 4096;
 			break;
 		default:
+			f->stepwise.min_width = 144;
+			f->stepwise.max_width = 1920;
+			f->stepwise.min_height = 144;
+			f->stepwise.max_height = 1088;
 			break;
 		}
-		f->stepwise.max_width = 1920;
-		f->stepwise.max_height = 1088;
+	}
+
+	if (pixel_format == V4L2_PIX_FMT_HEVC || pixel_format == V4L2_PIX_FMT_VP9) {
+		f->stepwise.step_width = 8;
+		f->stepwise.step_height = 8;
+	} else {
+		f->stepwise.step_width = 16;
+		f->stepwise.step_height = 16;
 	}
 }
 
@@ -384,12 +402,24 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = VCENC_YUV420_SEMIPLANAR,
 		.dec_fmt = VSI_V4L2_DEC_PIX_FMT_NV12,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 2,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_NV12M,
+		.enc_fmt = VCENC_YUV420_SEMIPLANAR,
+		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
+		.flag = 0,
+		.num_planes = 2,
+		.comp_planes = 2,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_GREY,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DEC_PIX_FMT_400,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "411 semi planar",
@@ -397,42 +427,72 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DEC_PIX_FMT_411SP,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 2,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_NV16,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DEC_PIX_FMT_422SP,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 2,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_NV24,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DEC_PIX_FMT_444SP,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 2,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_YUV420M,
+		.enc_fmt = VCENC_YUV420_PLANAR,
+		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
+		.flag = 0,
+		.num_planes = 3,
+		.comp_planes = 3,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_YUV420,
 		.enc_fmt = VCENC_YUV420_PLANAR,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 3,
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_NV21M,
+		.enc_fmt = VCENC_YUV420_SEMIPLANAR_VU,
+		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
+		.flag = 0,
+		.num_planes = 2,
+		.comp_planes = 2,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_NV21,
 		.enc_fmt = VCENC_YUV420_SEMIPLANAR_VU,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 2,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_YUYV,
 		.enc_fmt = VCENC_YUV422_INTERLEAVED_YUYV,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_RGB565,
 		.enc_fmt = VCENC_RGB565,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "BGR16",
@@ -440,36 +500,48 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = VCENC_BGR565,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_RGB555,
 		.enc_fmt = VCENC_RGB555,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_RGBA32,
 		.enc_fmt = VCENC_BGR888,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_BGR32,
 		.enc_fmt = VCENC_RGB888,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_ABGR32,
 		.enc_fmt = VCENC_RGB888,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_RGBX32,
 		.enc_fmt = VCENC_BGR888,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "VSI DTRC",
@@ -477,6 +549,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_DTRC,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "P010",
@@ -484,6 +558,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_P010,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "NV12 10Bit",
@@ -491,6 +567,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_NV12_10BIT,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "DTRC 10Bit",
@@ -498,6 +576,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_DTRC_10BIT,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "VSI DTRC compressed",
@@ -505,6 +585,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_RFC,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 	{
 		.name = "VSI DTRC 10 bit compressed",
@@ -512,6 +594,8 @@ static struct vsi_video_fmt vsi_raw_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = VSI_V4L2_DECOUT_RFC_10BIT,
 		.flag = 0,
+		.num_planes = 1,
+		.comp_planes = 1,
 	},
 };
 
@@ -521,30 +605,45 @@ static struct vsi_video_fmt vsi_coded_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_ENC_HEVC,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_HEVC,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(0),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_H264,
 		.enc_fmt = V4L2_DAEMON_CODEC_ENC_H264,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_H264,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(1),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_JPEG,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_JPEG,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(2),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_VP8,
 		.enc_fmt = V4L2_DAEMON_CODEC_ENC_VP8,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_VP8,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(3),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_VP9,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_VP9,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(4),
 	},
 	{
 		.name = "av1",
@@ -552,43 +651,74 @@ static struct vsi_video_fmt vsi_coded_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(5),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_MPEG2,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_MPEG2,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(6),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_MPEG4,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_MPEG4,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(7),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_H263,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_H263,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(8),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_VC1_ANNEX_G,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_VC1_G,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(9),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_VC1_ANNEX_L,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_VC1_L,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(10),
 	},
 	{
-		.name = "rv",
-		.fourcc = V4L2_PIX_FMT_RV,
+		.name = "rv30",
+		.fourcc = V4L2_PIX_FMT_RV30,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_RV,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(11),
+	},
+	{
+		.name = "rv40",
+		.fourcc = V4L2_PIX_FMT_RV40,
+		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
+		.dec_fmt = V4L2_DAEMON_CODEC_DEC_RV,
+		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(11),
 	},
 	{
 		.name = "avs",
@@ -596,12 +726,27 @@ static struct vsi_video_fmt vsi_coded_fmt[] = {
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_AVS2,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(12),
 	},
 	{
 		.fourcc = V4L2_PIX_FMT_XVID,
 		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
 		.dec_fmt = V4L2_DAEMON_CODEC_DEC_XVID,
 		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(13),
+	},
+	{
+		.fourcc = V4L2_PIX_FMT_MPEG1,
+		.enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE,
+		.dec_fmt = V4L2_DAEMON_CODEC_DEC_MPEG2,
+		.flag = (V4L2_FMT_FLAG_DYN_RESOLUTION | V4L2_FMT_FLAG_COMPRESSED),
+		.num_planes = 1,
+		.comp_planes = 1,
+		.mask = BIT(6),
 	},
 };
 
@@ -635,11 +780,11 @@ void vsi_enum_encfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 {
 	switch (pixel_format) {
 	case V4L2_PIX_FMT_HEVC:
-		f->stepwise.min_width = 132;
+		f->stepwise.min_width = 136;
 		f->stepwise.max_width = 1920;
 		f->stepwise.step_width = 2;
-		f->stepwise.min_height = 128;
-		f->stepwise.max_height = 1088;
+		f->stepwise.min_height = 136;
+		f->stepwise.max_height = 8192;
 		f->stepwise.step_height = 2;
 		break;
 	case V4L2_PIX_FMT_H264:
@@ -648,13 +793,13 @@ void vsi_enum_encfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 			f->stepwise.max_width = 1920;
 			f->stepwise.step_width = 4;
 			f->stepwise.min_height = 96;
-			f->stepwise.max_height = 2944;
-			f->stepwise.step_height = 2;
+			f->stepwise.max_height = 4080;
+			f->stepwise.step_height = 4;
 		} else {
-			f->stepwise.min_width = 132;
+			f->stepwise.min_width = 144;
 			f->stepwise.max_width = 1920;
 			f->stepwise.step_width = 2;
-			f->stepwise.min_height = 128;
+			f->stepwise.min_height = 144;
 			f->stepwise.max_height = 8192;
 			f->stepwise.step_height = 2;
 		}
@@ -665,7 +810,7 @@ void vsi_enum_encfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 		f->stepwise.step_width = 4;
 		f->stepwise.min_height = 96;
 		f->stepwise.max_height = 4080;
-		f->stepwise.step_height = 2;
+		f->stepwise.step_height = 4;
 		break;
 	default:
 		if (vsi_v4l2_hwconfig.enc_isH1) {
@@ -673,14 +818,14 @@ void vsi_enum_encfsize(struct v4l2_frmsizeenum *f, u32 pixel_format)
 			f->stepwise.max_width = 1920;
 			f->stepwise.step_width = 4;
 			f->stepwise.min_height = 96;
-			f->stepwise.max_height = 1088;
-			f->stepwise.step_height = 2;
+			f->stepwise.max_height = 4080;
+			f->stepwise.step_height = 4;
 		} else {
-			f->stepwise.min_width = 132;
+			f->stepwise.min_width = 144;
 			f->stepwise.max_width = 1920;
 			f->stepwise.step_width = 2;
-			f->stepwise.min_height = 128;
-			f->stepwise.max_height = 1088;
+			f->stepwise.min_height = 144;
+			f->stepwise.max_height = 8192;
 			f->stepwise.step_height = 2;
 		}
 		break;
@@ -969,9 +1114,9 @@ static void vsi_set_default_parameter_enc(
 	enc_params->specific.enc_h26x_cmd.tc_Offset = -2;
 	enc_params->specific.enc_h26x_cmd.beta_Offset = 5;
 	enc_params->specific.enc_h26x_cmd.ssim = 1;
-	enc_params->specific.enc_h26x_cmd.userData = NULL;
+	enc_params->specific.enc_h26x_cmd.userData = (kaddr_t)NULL;
 	enc_params->specific.enc_h26x_cmd.gopSize = DEFAULT_GOP_SIZE;
-	enc_params->specific.enc_h26x_cmd.gopCfg = NULL;
+	enc_params->specific.enc_h26x_cmd.gopCfg = (kaddr_t)NULL;
 	enc_params->specific.enc_h26x_cmd.outReconFrame = 1;
 	enc_params->specific.enc_h26x_cmd.ltrInterval = -1;
 	enc_params->specific.enc_h26x_cmd.bitDepthLuma = 8;
@@ -1049,7 +1194,7 @@ void vsiv4l2_initcfg(struct vsi_v4l2_ctx *ctxp)
 	u32 enc_fmt_fourcc = 0;
 	u32 dec_fmt_fourcc = 0;
 
-	v4l2_klog(LOGLVL_CONFIG, "%lx:%s default enc_fmt:%d, dec_fmt:%d\n",
+	v4l2_klog(LOGLVL_CONFIG, "%llx:%s default enc_fmt:%d, dec_fmt:%d\n",
 		  ctxp->ctxid, __func__, enc_fmt, dec_fmt);
 
 	if (isencoder(ctxp)) {
@@ -1061,7 +1206,7 @@ void vsiv4l2_initcfg(struct vsi_v4l2_ctx *ctxp)
 		vsi_set_default_parameter_enc(&ctx->encparams, enc_fmt);
 
 		ctx->srcplanes = 2;
-		ctx->infmt_fourcc = V4L2_PIX_FMT_NV12;
+		ctx->infmt_fourcc = V4L2_PIX_FMT_NV12M;
 		ctx->outfmt_fourcc = enc_fmt_fourcc;
 		ctx->flags = vfmt->flag;
 	} else {
@@ -1131,83 +1276,129 @@ static int get_fmtprofile(struct vsi_v4l2_mediacfg *pcfg)
 	}
 }
 
-static void verifyPlanesize(unsigned int psize[], int braw, int pixelformat, int width, int height, int planeno, int bdecoder)
+static int vsi_calc_table_size(int pixelformat, int width, int height)
 {
-	int totalsize = 0;
-	int basesize = width * height, extsize = 0, quadsize = 0;
-	int padsize = 0;
+	int luma_table_size = 0;
+	int chroma_table_size = 0;
+	int width_in_cbs;
+	int height_in_cbs;
 
-	if (braw) {
-		if (enc_isRGBformat(pixelformat)) {
-			extsize = 0;
-			quadsize = 0;
-		} else {
-			switch (pixelformat) {
-			case V4L2_PIX_FMT_NV12:
-			case V4L2_PIX_FMT_NV21:
-			case V4L2_PIX_FMT_YUV420:
-			case V4L2_PIX_FMT_NV12X:
-			case V4L2_PIX_FMT_DTRC:
-			case V4L2_PIX_FMT_P010:
-			case V4L2_PIX_FMT_TILEX:
-			case V4L2_PIX_FMT_RFC:
-			case V4L2_PIX_FMT_RFCX:
-			case V4L2_PIX_FMT_411SP:
-				extsize = basesize / 2;
-				quadsize = basesize / 4;
-				if (bdecoder)
-					padsize = quadsize + 32;
-				break;
-			case V4L2_PIX_FMT_NV16:
-				extsize = basesize;
-				quadsize = 0;
-				break;
-			case V4L2_PIX_FMT_NV24:
-				extsize = basesize * 2;
-				quadsize = 0;
-				break;
-			case V4L2_PIX_FMT_GREY:
-			case V4L2_PIX_FMT_YUYV:
-				extsize = 0;
-				quadsize = 0;
-				break;
-			default:
-				extsize = basesize;
-				quadsize = basesize / 2;
-				break;
-			}
-		}
-		if (planeno == 1) {
-			totalsize = basesize + extsize + padsize;
-			psize[0] = max_t(int, totalsize, psize[0]);
-		} else if (planeno == 2) {
-			psize[0] = basesize;
-			psize[1] = extsize;
-		} else if (planeno == 3) {
-			psize[0] = basesize;
-			psize[1] = quadsize;
-			psize[2] = quadsize;
-		}
-	} else {
-		//for coded format we support 1 plane only
-		//except certain header the CR data can be any small
-		//so just make it page aligned.
-		psize[0] = max_t(int, basesize, psize[0]);
-	}
-	v4l2_klog(LOGLVL_CONFIG, "%s:%d:%d:%d", __func__, psize[0], psize[1], psize[2]);
+	if (pixelformat != V4L2_PIX_FMT_RFC && pixelformat != V4L2_PIX_FMT_RFCX)
+		return 0;
+
+	/*luma table size*/
+	width_in_cbs = ALIGN(DIV_ROUND_UP(width, 8), 16);
+	height_in_cbs = DIV_ROUND_UP(height, 8);
+	luma_table_size = ALIGN(width_in_cbs * height_in_cbs, 16);
+
+	/*chroma table size*/
+	width_in_cbs = ALIGN(DIV_ROUND_UP(width, 16), 16);
+	height_in_cbs = DIV_ROUND_UP(height / 2, 4);
+	chroma_table_size = ALIGN(width_in_cbs * height_in_cbs, 16);
+
+	return luma_table_size + chroma_table_size;
 }
 
-static int vsiv4l2_config_planeno(int pixelformat)
+static void verifyPlanesize(u32 psize[], int braw, int pixelformat, int width, int height, int bdecoder)
 {
+	int basesize = width * height;
+	int chromausize = 0;
+	int chromavsize = 0;
+	int padsize = 0;
+	int tablesize = 0;
+	int mvssize = 0;
+
 	switch (pixelformat) {
 	case V4L2_PIX_FMT_NV12:
+	case V4L2_PIX_FMT_NV12M:
 	case V4L2_PIX_FMT_NV21:
-		return 2;
+	case V4L2_PIX_FMT_NV21M:
+	case V4L2_PIX_FMT_NV12X:
+	case V4L2_PIX_FMT_DTRC:
+	case V4L2_PIX_FMT_P010:
+	case V4L2_PIX_FMT_TILEX:
+	case V4L2_PIX_FMT_411SP:
+		chromausize = basesize / 2;
+		if (bdecoder)
+			padsize = basesize / 4 + 32;
+		break;
 	case V4L2_PIX_FMT_YUV420:
-		return 3;
+	case V4L2_PIX_FMT_YUV420M:
+		chromausize = basesize / 4;
+		chromavsize = basesize / 4;
+		if (bdecoder)
+			padsize = basesize / 4 + 32;
+		break;
+	case V4L2_PIX_FMT_NV16:
+		chromausize = basesize;
+		break;
+	case V4L2_PIX_FMT_NV24:
+		chromausize = basesize * 2;
+		break;
+	case V4L2_PIX_FMT_GREY:
+	case V4L2_PIX_FMT_YUYV:
+		break;
+	case V4L2_PIX_FMT_RFC:
+	case V4L2_PIX_FMT_RFCX:
+		chromausize = basesize / 2;
+		if (bdecoder)
+			padsize = basesize / 4 + 32;
+		mvssize = DIV_ROUND_UP(width, 64) * DIV_ROUND_UP(height, 64) * 64 * 16;
+		padsize = max_t(int, padsize, mvssize);
+		tablesize = vsi_calc_table_size(pixelformat, width, height);
+		break;
 	default:
-		return 1;
+		break;
 	}
+
+	//for coded format we support 1 plane only
+	//except certain header the CR data can be any small
+	//so just make it page aligned.
+	if (!braw && psize[0])
+		psize[0] = clamp_val(psize[0], SZ_128K, SZ_8M);
+	else if (!braw)
+		psize[0] = clamp_val(basesize, SZ_128K, SZ_8M);
+	else
+		psize[0] = basesize;
+	psize[1] = chromausize;
+	psize[2] = chromavsize;
+	psize[3] = padsize + tablesize;
+
+	v4l2_klog(LOGLVL_CONFIG, "%s:%c%c%c%c:%dx%d:%d:%d:%d:%d",
+		  __func__,
+		  pixelformat, pixelformat >> 8, pixelformat >> 16, pixelformat >> 24,
+		  width, height,
+		  psize[0], psize[1], psize[2], psize[3]);
+}
+
+struct vsi_video_fmt *vsi_get_fmt_by_fourcc(u32 fourcc)
+{
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(vsi_raw_fmt); i++) {
+		if (fourcc == vsi_raw_fmt[i].fourcc)
+			return &vsi_raw_fmt[i];
+	}
+	for (i = 0; i < ARRAY_SIZE(vsi_coded_fmt); i++) {
+		if (fourcc == vsi_coded_fmt[i].fourcc)
+			return &vsi_coded_fmt[i];
+	}
+
+	return NULL;
+}
+
+static u32 get_plane_size(u32 psize[], u32 planeno, u32 num_planes)
+{
+	int i;
+	u32 size = 0;
+
+	if (planeno >= num_planes)
+		return 0;
+	if (planeno < num_planes - 1)
+		return psize[planeno];
+	for (i = planeno; i < 4; i++)
+		size += psize[i];
+	return size;
 }
 
 static int is_doublesizefmt(int fmt)
@@ -1259,9 +1450,8 @@ static int vsiv4l2_setfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 	struct v4l2_pix_format_mplane *pixmp = &fmt->fmt.pix_mp;
 	struct vsi_video_fmt *targetfmt;
 	int ret = 0;
-	int i;
 
-	ret = vsiv4l2_verifyfmt(ctx, fmt);
+	ret = vsiv4l2_verifyfmt(ctx, fmt, 0);
 	if (ret != 0)
 		return ret;
 	targetfmt = vsi_find_format(ctx, fmt);
@@ -1275,16 +1465,12 @@ static int vsiv4l2_setfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 		pcfg->encparams.general.inputFormat = targetfmt->enc_fmt;
 		pcfg->infmt_fourcc = pixmp->pixelformat;
 		pcfg->bytesperline = pixmp->plane_fmt[0].bytesperline;
-		for (i = 0; i < pixmp->num_planes; i++)
-			pcfg->sizeimagesrc[i] = pixmp->plane_fmt[i].sizeimage;
 	} else {
 		pcfg->encparams.general.width = pixmp->width;
 		pcfg->encparams.general.height = pixmp->height;
 		pcfg->encparams.general.codecFormat = targetfmt->enc_fmt;
 		pcfg->outfmt_fourcc = pixmp->pixelformat;
 		pcfg->encparams.specific.enc_h26x_cmd.profile = get_fmtprofile(pcfg);
-		for (i = 0; i < pixmp->num_planes; i++)
-			pcfg->sizeimagedst[i] = pixmp->plane_fmt[i].sizeimage;
 	}
 
 	if (binputqueue(fmt->type)) {
@@ -1461,10 +1647,11 @@ static int vsiv4l2_setfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 {
 	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
+	struct v4l2_pix_format pix_ori = fmt->fmt.pix;
 	struct vsi_video_fmt *targetfmt;
 	int ret = 0;
 
-	ret = vsiv4l2_verifyfmt(ctx, fmt);
+	ret = vsiv4l2_verifyfmt(ctx, fmt, 1);
 	if (ret != 0)
 		return ret;
 	targetfmt = vsi_find_format(ctx, fmt);
@@ -1475,16 +1662,24 @@ static int vsiv4l2_setfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 		pcfg->infmt_fourcc = pix->pixelformat;
 	} else {
 		pcfg->outfmt_fourcc = pix->pixelformat;
+		pcfg->decparams.dec_info.io_buffer.outputPixelDepth =
+				vsiv4l2_decidepixeldepth(targetfmt->dec_fmt, pcfg->src_pixeldepth);
 
 		if (!test_bit(CTX_FLAG_SRCCHANGED_BIT, &ctx->flag)) {
+			struct v4l2_frmsizeenum fmsize;
+
 			pcfg->decparams.dec_info.io_buffer.output_width = pix->width;
 			pcfg->decparams.dec_info.io_buffer.output_height = pix->height;
 			pcfg->decparams.dec_info.io_buffer.outBufFormat = targetfmt->dec_fmt;
 			pcfg->bytesperline = pix->bytesperline;
+
+			vsi_enum_decfsize(&fmsize, pcfg->infmt_fourcc);
 			pcfg->decparams.dec_info.dec_info.visible_rect.left = 0;
 			pcfg->decparams.dec_info.dec_info.visible_rect.top = 0;
-			pcfg->decparams.dec_info.dec_info.visible_rect.width = pix->width;
-			pcfg->decparams.dec_info.dec_info.visible_rect.height = pix->height;
+			pcfg->decparams.dec_info.dec_info.visible_rect.width =
+				clamp(pix_ori.width, fmsize.stepwise.min_width, fmsize.stepwise.max_width);
+			pcfg->decparams.dec_info.dec_info.visible_rect.height =
+				clamp(pix_ori.height, fmsize.stepwise.min_height, fmsize.stepwise.max_height);
 		} else {
 			//dtrc is only for HEVC and VP9
 			if (istiledfmt(targetfmt->dec_fmt)
@@ -1496,19 +1691,13 @@ static int vsiv4l2_setfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 			if (pcfg->decparams.dec_info.io_buffer.output_height)
 				pix->height = pcfg->decparams.dec_info.io_buffer.output_height;
 			pcfg->decparams.dec_info.io_buffer.outBufFormat = targetfmt->dec_fmt;
-			pcfg->decparams.dec_info.io_buffer.outputPixelDepth =
-				vsiv4l2_decidepixeldepth(targetfmt->dec_fmt, pcfg->src_pixeldepth);
 			pcfg->bytesperline = pix->width * pcfg->decparams.dec_info.io_buffer.outputPixelDepth / 8;
 			pcfg->bytesperline = ALIGN(pcfg->bytesperline, 16);
 			pix->bytesperline = pcfg->bytesperline;
 		}
 	}
-	ret = vsiv4l2_verifyfmt(ctx, fmt);
+	ret = vsiv4l2_verifyfmt(ctx, fmt, 0);
 
-	if (binputqueue(fmt->type))
-		pcfg->sizeimagesrc[0] = pix->sizeimage;
-	else
-		pcfg->sizeimagedst[0] = pix->sizeimage;
 	pcfg->field = pix->field;
 	pcfg->colorspace = pix->colorspace;
 	pcfg->flags = pix->flags;
@@ -1530,7 +1719,32 @@ int vsiv4l2_setfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 		return vsiv4l2_setfmt_dec(ctx, fmt);
 }
 
-static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
+static u32 vsiv4l2_default_bytesperline(u32 fourcc, u32 width)
+{
+	u32 bytesperline = width;
+
+	switch (fourcc) {
+	case V4L2_PIX_FMT_BGR32:
+	case V4L2_PIX_FMT_RGBX32:
+	case V4L2_PIX_FMT_ABGR32:
+	case V4L2_PIX_FMT_RGBA32:
+		bytesperline = width * 4;
+		break;
+	case V4L2_PIX_FMT_YUYV:
+	case V4L2_PIX_FMT_RGB565:
+	case V4L2_PIX_FMT_BGR565:
+	case V4L2_PIX_FMT_RGB555:
+		bytesperline = width * 2;
+		break;
+	default:
+		bytesperline = width;
+		break;
+	}
+
+	return bytesperline;
+}
+
+static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt, int try_only)
 {
 	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
 	struct v4l2_pix_format_mplane *pixmp = &fmt->fmt.pix_mp;
@@ -1538,8 +1752,12 @@ static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 	struct vsi_video_fmt *vfmt = NULL;
 	int braw;
 	u32 bytesperline;
-	unsigned int psize[VB2_MAX_PLANES] = { 0 };
+	u32 try_size[VB2_MAX_PLANES];
+	u32 *psize = (binputqueue(fmt->type) ? pcfg->sizeimagesrc : pcfg->sizeimagedst);
 	int i;
+
+	if (try_only)
+		psize = try_size;
 
 	if (!isvalidtype(fmt->type, ctx->flag)) {
 		if (V4L2_TYPE_IS_OUTPUT(fmt->type))
@@ -1557,16 +1775,15 @@ static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 		pixmp->pixelformat = vfmt->fourcc;
 	}
 
+	pixmp->num_planes = vfmt->num_planes ? vfmt->num_planes : 1;
 	if (binputqueue(fmt->type))
 		fmsize.pixel_format = pcfg->outfmt_fourcc;
 	else
 		fmsize.pixel_format = pixmp->pixelformat;
 	vsi_enum_encfsize(&fmsize, fmsize.pixel_format);
 
-	pixmp->width = min(pixmp->width, fmsize.stepwise.max_width);
-	pixmp->width = max_t(u32, pixmp->width, fmsize.stepwise.min_width);
-	pixmp->height = min(pixmp->height, fmsize.stepwise.max_height);
-	pixmp->height = max_t(u32, pixmp->height, fmsize.stepwise.min_height);
+	pixmp->width = clamp(pixmp->width, fmsize.stepwise.min_width, fmsize.stepwise.max_width);
+	pixmp->height = clamp(pixmp->height, fmsize.stepwise.min_height, fmsize.stepwise.max_height);
 
 	if (vsi_v4l2_hwconfig.enc_isH1) {
 		if (pixmp->width & 0x3)
@@ -1581,16 +1798,14 @@ static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 	if (pixmp->field == V4L2_FIELD_ANY)
 		pixmp->field = V4L2_FIELD_NONE;
 
-	bytesperline = max_t(int, pixmp->plane_fmt[0].bytesperline, pixmp->width);
+	bytesperline = max_t(int, pixmp->plane_fmt[0].bytesperline,
+			     vsiv4l2_default_bytesperline(pixmp->pixelformat, pixmp->width));
 	if (braw) {
-		pixmp->num_planes = vsiv4l2_config_planeno(pixmp->pixelformat);
 		bytesperline = vsiv4l2_enc_getalign(vfmt->enc_fmt,
 			pcfg->encparams.general.codecFormat, bytesperline);
-	} else {
-		pixmp->num_planes = 1;
 	}
 
-	if (pixmp->pixelformat == V4L2_PIX_FMT_YUV420) {
+	if (pixmp->pixelformat == V4L2_PIX_FMT_YUV420M || pixmp->pixelformat == V4L2_PIX_FMT_YUV420) {
 		pixmp->plane_fmt[0].bytesperline = bytesperline;
 		pixmp->plane_fmt[1].bytesperline = bytesperline / 2;
 		pixmp->plane_fmt[2].bytesperline = bytesperline / 2;
@@ -1601,15 +1816,14 @@ static int vsiv4l2_verifyfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 
 	for (i = 0; i < pixmp->num_planes; i++)
 		psize[i] = pixmp->plane_fmt[i].sizeimage;
-	verifyPlanesize(psize, braw, pixmp->pixelformat, bytesperline,
-			pixmp->height, pixmp->num_planes, 0);
+	verifyPlanesize(psize, braw, pixmp->pixelformat, bytesperline, pixmp->height, 0);
 	for (i = 0; i < pixmp->num_planes; i++)
-		pixmp->plane_fmt[i].sizeimage = psize[i];
+		pixmp->plane_fmt[i].sizeimage = get_plane_size(psize, i, pixmp->num_planes);
 
 	return 0;
 }
 
-static int vsiv4l2_verifyfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
+static int vsiv4l2_verifyfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt, int try_only)
 {
 	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
@@ -1617,7 +1831,11 @@ static int vsiv4l2_verifyfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 	struct vsi_video_fmt *vfmt = NULL;
 	u32 bytesperline;
 	int braw;
-	unsigned int psize[VB2_MAX_PLANES] = { 0 };
+	u32 try_size[VB2_MAX_PLANES];
+	u32 *psize = (binputqueue(fmt->type) ? pcfg->sizeimagesrc : pcfg->sizeimagedst);
+
+	if (try_only)
+		psize = try_size;
 
 	if (!isvalidtype(fmt->type, ctx->flag)) {
 		if (V4L2_TYPE_IS_OUTPUT(fmt->type))
@@ -1643,38 +1861,39 @@ static int vsiv4l2_verifyfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *f
 		fmsize.pixel_format = pcfg->infmt_fourcc;
 
 	vsi_enum_decfsize(&fmsize, fmsize.pixel_format);
-	pix->width = min(pix->width, fmsize.stepwise.max_width);
-	pix->width = max_t(u32, pix->width, fmsize.stepwise.min_width);
-	pix->height = min(pix->height, fmsize.stepwise.max_height);
-	pix->height = max_t(u32, pix->height, fmsize.stepwise.min_height);
+	if (V4L2_TYPE_IS_CAPTURE(fmt->type)) {
+		pix->width = ALIGN(pix->width, fmsize.stepwise.step_width);
+		pix->height = ALIGN(pix->height, fmsize.stepwise.step_height);
+	}
+	pix->width = clamp(pix->width, fmsize.stepwise.min_width, fmsize.stepwise.max_width);
+	pix->height = clamp(pix->height, fmsize.stepwise.min_height, fmsize.stepwise.max_height);
 
 	if (braw) {
 		if (!test_bit(CTX_FLAG_SRCCHANGED_BIT, &ctx->flag)) {
-			bytesperline = ALIGN(pix->width, 16);
+			bytesperline = ALIGN(vsiv4l2_default_bytesperline(pix->pixelformat, pix->width), 16);
 		} else {
 			int outputPixelDepth = vsiv4l2_decidepixeldepth(vfmt->dec_fmt, pcfg->src_pixeldepth);
 
 			bytesperline = ALIGN(pix->width * outputPixelDepth / 8, 16);
 		}
 	} else {
-		bytesperline = pix->width;
+		bytesperline = vsiv4l2_default_bytesperline(pix->pixelformat, pix->width);
 	}
 	pix->bytesperline = bytesperline;
 
 	psize[0] = pix->sizeimage;
-	verifyPlanesize(psize, braw, pix->pixelformat, bytesperline,
-			pix->height, 1, 1);
-	pix->sizeimage = psize[0];
+	verifyPlanesize(psize, braw, pix->pixelformat, bytesperline, pix->height, 1);
+	pix->sizeimage = get_plane_size(psize, 0, 1);
 
 	return 0;
 }
 
-int vsiv4l2_verifyfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
+int vsiv4l2_verifyfmt(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt, int try_only)
 {
 	if (isencoder(ctx))
-		return vsiv4l2_verifyfmt_enc(ctx, fmt);
+		return vsiv4l2_verifyfmt_enc(ctx, fmt, try_only);
 	else
-		return vsiv4l2_verifyfmt_dec(ctx, fmt);
+		return vsiv4l2_verifyfmt_dec(ctx, fmt, try_only);
 }
 
 int vsiv4l2_verifycrop(struct v4l2_selection *s)
@@ -1766,8 +1985,8 @@ static int vsiv4l2_getfmt_enc(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 	if (pixmp->num_planes == 0)
 		pixmp->num_planes = 1;
 	for (i = 0; i < pixmp->num_planes; i++)
-		pixmp->plane_fmt[i].sizeimage = psize[i];
-	if (pixmp->pixelformat == V4L2_PIX_FMT_YUV420) {
+		pixmp->plane_fmt[i].sizeimage = get_plane_size(psize, i, pixmp->num_planes);
+	if (pixmp->pixelformat == V4L2_PIX_FMT_YUV420M || pixmp->pixelformat == V4L2_PIX_FMT_YUV420) {
 		pixmp->plane_fmt[0].bytesperline = pcfg->bytesperline;
 		pixmp->plane_fmt[1].bytesperline =
 			pixmp->plane_fmt[2].bytesperline = pcfg->bytesperline/2;
@@ -1800,22 +2019,21 @@ static int vsiv4l2_getfmt_dec(struct vsi_v4l2_ctx *ctx, struct v4l2_format *fmt)
 {
 	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
 	struct v4l2_pix_format *pix = &fmt->fmt.pix;
-	int braw = brawfmt(ctx->flag, fmt->type);
 	int *psize = (binputqueue(fmt->type) ? pcfg->sizeimagesrc : pcfg->sizeimagedst);
 
 	if (binputqueue(fmt->type)) {
 		pix->width = pcfg->decparams.dec_info.io_buffer.srcwidth;
 		pix->height = pcfg->decparams.dec_info.io_buffer.srcheight;
-		pix->pixelformat = find_local_dec_format(pcfg->decparams.dec_info.io_buffer.inputFormat, braw);
+		pix->pixelformat = pcfg->infmt_fourcc;
 		pix->bytesperline = pix->width;
 	} else {
 		pix->width = pcfg->decparams.dec_info.io_buffer.output_width;
 		pix->height = pcfg->decparams.dec_info.io_buffer.output_height;
 		pix->bytesperline = pcfg->bytesperline;
-		pix->pixelformat = find_local_dec_format(pcfg->decparams.dec_info.io_buffer.outBufFormat, braw);
+		pix->pixelformat = pcfg->outfmt_fourcc;
 	}
 	pix->field = pcfg->field;
-	pix->sizeimage = psize[0];
+	pix->sizeimage = get_plane_size(psize, 0, 1);
 	pix->flags = pcfg->flags;
 
 	vsi_dec_getvui(ctx, fmt);
@@ -1839,24 +2057,21 @@ void vsi_v4l2_update_decfmt(struct vsi_v4l2_ctx *ctx)
 	struct v4l2_format fmt;
 
 	memset(&fmt, 0, sizeof(fmt));
+	fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	vsiv4l2_getfmt(ctx, &fmt);
+
 	if (ctx->mediacfg.decparams.dec_info.dec_info.bit_depth == 10) {
 		if (fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_NV12X &&
 			fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_P010 &&
 			fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_TILEX &&
 			fmt.fmt.pix.pixelformat != V4L2_PIX_FMT_RFCX) {
-			fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-			vsiv4l2_getfmt(ctx, &fmt);
 			fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_NV12X;
-			vsiv4l2_setfmt(ctx, &fmt);
 		}
-		return;
 	}
 	if (isJpegOnlyFmt(ctx->mediacfg.decparams.dec_info.dec_info.src_pix_fmt)) {
-		fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-		vsiv4l2_getfmt(ctx, &fmt);
 		fmt.fmt.pix.pixelformat = find_local_dec_format(ctx->mediacfg.decparams.dec_info.dec_info.src_pix_fmt, 1);
-		vsiv4l2_setfmt(ctx, &fmt);
 	}
+	vsiv4l2_setfmt(ctx, &fmt);
 }
 
 int vsiv4l2_buffer_config(
@@ -1888,7 +2103,7 @@ int vsiv4l2_buffer_config(
 	}
 	*nplanes = planes;
 	for (i = 0; i < planes; i++)
-		sizes[i] = psize[i];
+		sizes[i] = get_plane_size(psize, i, planes);
 
 	if (isencoder(ctx)) {
 		if (*nbuffers + vq->num_buffers < ctx->mediacfg.encparams.specific.enc_h26x_cmd.gopSize)
@@ -1898,7 +2113,7 @@ int vsiv4l2_buffer_config(
 			*nbuffers = ctx->mediacfg.minbuf_4capture - vq->num_buffers;
 	}
 
-	v4l2_klog(LOGLVL_BRIEF, "%lx:%d::%s:%d:%d:%d:%d:%d", ctx->ctxid, vq->type, __func__,
+	v4l2_klog(LOGLVL_BRIEF, "%llx:%d::%s:%d:%d:%d:%d:%d", ctx->ctxid, vq->type, __func__,
 		*nbuffers, *nplanes, sizes[0], sizes[1], sizes[2]);
 	return 0;
 }
@@ -1908,12 +2123,12 @@ void vsiv4l2_set_hwinfo(struct vsi_v4l2_dev_info *hwinfo)
 	int i, j;
 
 	vsi_v4l2_hwconfig = *hwinfo;
-	v4l2_klog(LOGLVL_BRIEF, "%s::%d:%d:%lx:%lx", __func__,
+	v4l2_klog(LOGLVL_BRIEF, "%s::%d:%d:%llx:%llx", __func__,
 		hwinfo->enc_isH1, hwinfo->max_dec_resolution, hwinfo->encformat, hwinfo->decformat);
 	for (i = 0; i < ARRAY_SIZE(vsi_coded_fmt); i++) {
-		if (((1 << i) & hwinfo->encformat) == 0)
+		if ((vsi_coded_fmt[i].mask & hwinfo->encformat) == 0)
 			vsi_coded_fmt[i].enc_fmt = V4L2_DAEMON_CODEC_UNKNOW_TYPE;
-		if (((1 << i) & hwinfo->decformat) == 0) {
+		if ((vsi_coded_fmt[i].mask & hwinfo->decformat) == 0) {
 			//disable all jpg only output fmt
 			if (vsi_coded_fmt[i].dec_fmt == V4L2_DAEMON_CODEC_DEC_JPEG) {
 				for (j = 0; j < ARRAY_SIZE(vsi_raw_fmt); j++) {

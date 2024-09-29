@@ -60,7 +60,7 @@
 		clock-frequency = <8333333>;
 	};
 
-	scu {
+	system-controller {
 		compatible = "fsl,imx-scu";
 		mbox-names = "tx0", "tx1", "tx2", "tx3",
 			     "rx0", "rx1", "rx2", "rx3",
@@ -75,7 +75,7 @@
 			  &lsio_mu2 1 3
 			  &lsio_mu2 3 3>;
 
-		pd: imx8qx-pd {
+		pd: power-controller {
 			compatible = "fsl,imx8qm-scu-pd", "fsl,scu-pd";
 			#power-domain-cells = <1>;
 		};
@@ -83,8 +83,6 @@
 		clk: clock-controller {
 			compatible = "fsl,imx8qm-clk", "fsl,scu-clk";
 			#clock-cells = <2>;
-			clocks = <&xtal32k &xtal24m>;
-			clock-names = "xtal_32KHz", "xtal_24Mhz";
 		};
 
 		iomuxc: pinctrl {

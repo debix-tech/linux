@@ -17,6 +17,8 @@
 #include <linux/regulator/consumer.h>
 
 #include <linux/phy/phy-dp.h>
+#include <linux/phy/phy-ethernet.h>
+#include <linux/phy/phy-lvds.h>
 #include <linux/phy/phy-mipi-dphy.h>
 
 struct phy;
@@ -38,10 +40,69 @@ enum phy_mode {
 	PHY_MODE_UFS_HS_B,
 	PHY_MODE_PCIE,
 	PHY_MODE_ETHERNET,
+	PHY_MODE_ETHERNET_LINKMODE,
 	PHY_MODE_MIPI_DPHY,
 	PHY_MODE_SATA,
 	PHY_MODE_LVDS,
 	PHY_MODE_DP
+};
+
+enum phy_media {
+	PHY_MEDIA_DEFAULT,
+	PHY_MEDIA_SR,
+	PHY_MEDIA_DAC,
+};
+
+enum phy_status_type {
+	/* Valid for PHY_MODE_ETHERNET and PHY_MODE_ETHERNET_LINKMODE */
+	PHY_STATUS_CDR_LOCK,
+	PHY_STATUS_PCVT_ADDR,
+};
+
+/* enum phy_pcvt_type - PHY protocol converter type
+ *
+ * @PHY_PCVT_ETHERNET_PCS: Ethernet Physical Coding Sublayer, top-most layer of
+ *			   an Ethernet PHY. Connects through MII to the MAC,
+ *			   and handles link status detection and the conversion
+ *			   of MII signals to link-specific code words (8b/10b,
+ *			   64b/66b etc).
+ * @PHY_PCVT_ETHERNET_ANLT: Ethernet Auto-Negotiation and Link Training,
+ *			    bottom-most layer of an Ethernet PHY, beneath the
+ *			    PMA and PMD. Its activity is only visible on the
+ *			    physical medium, and it is responsible for
+ *			    selecting the most adequate PCS/PMA/PMD set that
+ *			    can operate on that medium.
+ */
+enum phy_pcvt_type {
+	PHY_PCVT_ETHERNET_PCS,
+	PHY_PCVT_ETHERNET_ANLT,
+};
+
+struct phy_status_opts_pcvt {
+	enum phy_pcvt_type type;
+	union {
+		unsigned int mdio;
+	} addr;
+};
+
+/* If the CDR (Clock and Data Recovery) block is able to lock onto the RX bit
+ * stream, it means that the stream contains valid bit transitions for the
+ * configured protocol. This indicates that a link partner is physically
+ * present and powered on.
+ */
+struct phy_status_opts_cdr {
+	bool cdr_locked;
+};
+
+/**
+ * union phy_status_opts - Opaque generic phy status
+ *
+ * @cdr:	Configuration set applicable for PHY_STATUS_CDR_LOCK.
+ * @pcvt:	Configuration set applicable for PHY_STATUS_PCVT_ADDR.
+ */
+union phy_status_opts {
+	struct phy_status_opts_cdr		cdr;
+	struct phy_status_opts_pcvt		pcvt;
 };
 
 /**
@@ -51,10 +112,16 @@ enum phy_mode {
  *		the MIPI_DPHY phy mode.
  * @dp:		Configuration set applicable for phys supporting
  *		the DisplayPort protocol.
+ * @lvds:	Configuration set applicable for phys supporting
+ *		the LVDS phy mode.
+ * @ethernet:	Configuration set applicable for phys supporting
+ *		the ethernet and ethtool phy mode.
  */
 union phy_configure_opts {
 	struct phy_configure_opts_mipi_dphy	mipi_dphy;
 	struct phy_configure_opts_dp		dp;
+	struct phy_configure_opts_lvds		lvds;
+	struct phy_configure_opts_ethernet	ethernet;
 };
 
 /**
@@ -64,8 +131,11 @@ union phy_configure_opts {
  * @power_on: powering on the phy
  * @power_off: powering off the phy
  * @set_mode: set the mode of the phy
+ * @set_media: set the media type of the phy (optional)
+ * @set_speed: set the speed of the phy (optional)
  * @reset: resetting the phy
  * @calibrate: calibrate the phy
+ * @get_status: get the mode-specific status of the phy
  * @release: ops to be performed while the consumer relinquishes the PHY
  * @owner: the module owner containing the ops
  */
@@ -75,6 +145,8 @@ struct phy_ops {
 	int	(*power_on)(struct phy *phy);
 	int	(*power_off)(struct phy *phy);
 	int	(*set_mode)(struct phy *phy, enum phy_mode mode, int submode);
+	int	(*set_media)(struct phy *phy, enum phy_media media);
+	int	(*set_speed)(struct phy *phy, int speed);
 
 	/**
 	 * @configure:
@@ -108,6 +180,20 @@ struct phy_ops {
 			    union phy_configure_opts *opts);
 	int	(*reset)(struct phy *phy);
 	int	(*calibrate)(struct phy *phy);
+
+	/**
+	 * @get_status:
+	 *
+	 * Optional.
+	 *
+	 * Used to query the mode-specific status of the phy. Must have no side
+	 * effects.
+	 *
+	 * Returns: 0 if the operation was successful, negative error code
+	 * otherwise.
+	 */
+	int	(*get_status)(struct phy *phy, enum phy_status_type type,
+			      union phy_status_opts *opts);
 	void	(*release)(struct phy *phy);
 	struct module *owner;
 };
@@ -115,7 +201,7 @@ struct phy_ops {
 /**
  * struct phy_attrs - represents phy attributes
  * @bus_width: Data path width implemented by PHY
- * @max_link_rate: Maximum link rate supported by PHY (in Mbps)
+ * @max_link_rate: Maximum link rate supported by PHY (units to be decided by producer and consumer)
  * @mode: PHY mode
  */
 struct phy_attrs {
@@ -134,6 +220,7 @@ struct phy_attrs {
  * @power_count: used to protect when the PHY is used by multiple consumers
  * @attrs: used to specify PHY specific attributes
  * @pwr: power regulator associated with the phy
+ * @debugfs: debugfs directory
  */
 struct phy {
 	struct device		dev;
@@ -144,6 +231,7 @@ struct phy {
 	int			power_count;
 	struct phy_attrs	attrs;
 	struct regulator	*pwr;
+	struct dentry		*debugfs;
 };
 
 /**
@@ -201,8 +289,6 @@ static inline void *phy_get_drvdata(struct phy *phy)
 	return dev_get_drvdata(&phy->dev);
 }
 
-extern struct dentry *phy_debugfs_root;
-
 #if IS_ENABLED(CONFIG_GENERIC_PHY)
 int phy_pm_runtime_get(struct phy *phy);
 int phy_pm_runtime_get_sync(struct phy *phy);
@@ -217,9 +303,13 @@ int phy_power_off(struct phy *phy);
 int phy_set_mode_ext(struct phy *phy, enum phy_mode mode, int submode);
 #define phy_set_mode(phy, mode) \
 	phy_set_mode_ext(phy, mode, 0)
+int phy_set_media(struct phy *phy, enum phy_media media);
+int phy_set_speed(struct phy *phy, int speed);
 int phy_configure(struct phy *phy, union phy_configure_opts *opts);
 int phy_validate(struct phy *phy, enum phy_mode mode, int submode,
 		 union phy_configure_opts *opts);
+int phy_get_status(struct phy *phy, enum phy_status_type type,
+		   union phy_status_opts *opts);
 
 static inline enum phy_mode phy_get_mode(struct phy *phy)
 {
@@ -236,11 +326,12 @@ static inline void phy_set_bus_width(struct phy *phy, int bus_width)
 	phy->attrs.bus_width = bus_width;
 }
 struct phy *phy_get(struct device *dev, const char *string);
-struct phy *phy_optional_get(struct device *dev, const char *string);
 struct phy *devm_phy_get(struct device *dev, const char *string);
 struct phy *devm_phy_optional_get(struct device *dev, const char *string);
 struct phy *devm_of_phy_get(struct device *dev, struct device_node *np,
 			    const char *con_id);
+struct phy *devm_of_phy_optional_get(struct device *dev, struct device_node *np,
+				     const char *con_id);
 struct phy *devm_of_phy_get_by_index(struct device *dev, struct device_node *np,
 				     int index);
 void of_phy_put(struct phy *phy);
@@ -346,6 +437,20 @@ static inline int phy_set_mode_ext(struct phy *phy, enum phy_mode mode,
 #define phy_set_mode(phy, mode) \
 	phy_set_mode_ext(phy, mode, 0)
 
+static inline int phy_set_media(struct phy *phy, enum phy_media media)
+{
+	if (!phy)
+		return 0;
+	return -ENODEV;
+}
+
+static inline int phy_set_speed(struct phy *phy, int speed)
+{
+	if (!phy)
+		return 0;
+	return -ENODEV;
+}
+
 static inline enum phy_mode phy_get_mode(struct phy *phy)
 {
 	return PHY_MODE_INVALID;
@@ -383,6 +488,15 @@ static inline int phy_validate(struct phy *phy, enum phy_mode mode, int submode,
 	return -ENOSYS;
 }
 
+static inline int phy_get_status(struct phy *phy, enum phy_status_type type,
+				 union phy_status_opts *opts)
+{
+	if (!phy)
+		return 0;
+
+	return -ENOSYS;
+}
+
 static inline int phy_get_bus_width(struct phy *phy)
 {
 	return -ENOSYS;
@@ -394,12 +508,6 @@ static inline void phy_set_bus_width(struct phy *phy, int bus_width)
 }
 
 static inline struct phy *phy_get(struct device *dev, const char *string)
-{
-	return ERR_PTR(-ENOSYS);
-}
-
-static inline struct phy *phy_optional_get(struct device *dev,
-					   const char *string)
 {
 	return ERR_PTR(-ENOSYS);
 }
@@ -420,6 +528,13 @@ static inline struct phy *devm_of_phy_get(struct device *dev,
 					  const char *con_id)
 {
 	return ERR_PTR(-ENOSYS);
+}
+
+static inline struct phy *devm_of_phy_optional_get(struct device *dev,
+						   struct device_node *np,
+						   const char *con_id)
+{
+	return NULL;
 }
 
 static inline struct phy *devm_of_phy_get_by_index(struct device *dev,

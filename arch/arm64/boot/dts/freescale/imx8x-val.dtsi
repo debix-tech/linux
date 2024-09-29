@@ -10,75 +10,67 @@
 		stdout-path = &lpuart0;
 	};
 
-	regulators {
-		compatible = "simple-bus";
-		#address-cells = <1>;
-		#size-cells = <0>;
+	reg_usdhc2_vmmc: usdhc2_vmmc {
+		compatible = "regulator-fixed";
+		regulator-name = "SD1_SPWR";
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3000000>;
+		gpio = <&lsio_gpio4 19 GPIO_ACTIVE_HIGH>;
+		off-on-delay = <2720>;
+		enable-active-high;
+	};
 
-		reg_usdhc2_vmmc: usdhc2_vmmc {
-			compatible = "regulator-fixed";
-			regulator-name = "SD1_SPWR";
-			regulator-min-microvolt = <3000000>;
-			regulator-max-microvolt = <3000000>;
-			gpio = <&lsio_gpio4 19 GPIO_ACTIVE_HIGH>;
-			off-on-delay = <2720>;
-			enable-active-high;
-		};
+	reg_can_en: regulator-can-gen {
+		compatible = "regulator-fixed";
+		regulator-name = "can-en";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pca9557_b 5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
 
-		reg_can_en: regulator-can-gen {
-			compatible = "regulator-fixed";
-			regulator-name = "can-en";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
-			gpio = <&pca9557_b 5 GPIO_ACTIVE_HIGH>;
-			enable-active-high;
-		};
+	reg_can_stby: regulator-can-stby {
+		compatible = "regulator-fixed";
+		regulator-name = "can-stby";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&pca9557_b 4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&reg_can_en>;
+	};
 
-		reg_can_stby: regulator-can-stby {
-			compatible = "regulator-fixed";
-			regulator-name = "can-stby";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
-			gpio = <&pca9557_b 4 GPIO_ACTIVE_HIGH>;
-			enable-active-high;
-			vin-supply = <&reg_can_en>;
-		};
+	reg_audio: fixedregulator-0 {
+		compatible = "regulator-fixed";
+		regulator-name = "cs42888_supply";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+	};
 
-		reg_audio: fixedregulator@0 {
-			compatible = "regulator-fixed";
-			reg = <2>;
-			regulator-name = "cs42888_supply";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
-			regulator-always-on;
-		};
+	reg_baseboard: fixedregulator-1 {
+		compatible = "regulator-fixed";
+		regulator-name = "baseboard_supply";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		gpio = <&lsio_gpio5 9 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
 
-		reg_baseboard: fixedregulator@1 {
-			compatible = "regulator-fixed";
-			reg = <2>;
-			regulator-name = "baseboard_supply";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
-			regulator-always-on;
-			gpio = <&lsio_gpio5 9 GPIO_ACTIVE_HIGH>;
-			enable-active-high;
-		};
+	reg_fec2_supply: fec2_nvcc {
+		compatible = "regulator-fixed";
+		regulator-name = "fec2_nvcc";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		gpio = <&max7322 0 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
 
-		reg_fec2_supply: fec2_nvcc {
-			compatible = "regulator-fixed";
-			regulator-name = "fec2_nvcc";
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1800000>;
-			gpio = <&max7322 0 GPIO_ACTIVE_HIGH>;
-			enable-active-high;
-		};
-
-		reg_adc_vref_1v8: adc_vref_1v8 {
-			compatible = "regulator-fixed";
-			regulator-name = "vref_1v8";
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1800000>;
-		};
+	reg_adc_vref_1v8: adc_vref_1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vref_1v8";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
 	};
 
 	sound-cs42888 {
@@ -472,7 +464,7 @@
 	phy-mode = "rgmii-txid";
 	phy-handle = <&ethphy0>;
 	fsl,magic-packet;
-	fsl,rgmii_rxc_dly;
+	rx-internal-delay-ps = <2000>;
 	status = "okay";
 
 	mdio {
@@ -482,16 +474,26 @@
 		ethphy0: ethernet-phy@0 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			reg = <0>;
-			at803x,eee-disabled;
-			at803x,vddio-1p8v;
+			qca,disable-smarteee;
+			vddio-supply = <&vddio0>;
+
+			vddio0: vddio-regulator {
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
 		};
 
 		ethphy1: ethernet-phy@1 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			reg = <1>;
-			at803x,eee-disabled;
-			at803x,vddio-1p8v;
+			qca,disable-smarteee;
+			vddio-supply = <&vddio1>;
 			status = "disabled";
+
+			vddio1: vddio-regulator {
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
 		};
 	};
 };
@@ -503,7 +505,7 @@
 	phy-handle = <&ethphy1>;
 	phy-supply = <&reg_fec2_supply>;
 	fsl,magic-packet;
-	fsl,rgmii_rxc_dly;
+	rx-internal-delay-ps = <2000>;
 	status = "disabled";
 };
 
@@ -529,14 +531,11 @@
 };
 
 &mipi_csi_0 {
-	#address-cells = <1>;
-	#size-cells = <0>;
 	virtual-channel;
 	status = "okay";
 
 	/* Camera 0  MIPI CSI-2 (CSIS0) */
-	port@0 {
-		reg = <0>;
+	port {
 		mipi_csi0_ep: endpoint {
 			remote-endpoint = <&max9286_0_ep>;
 			data-lanes = <1 2 3 4>;
@@ -830,8 +829,4 @@
 			};
 		};
 	};
-};
-
-&vpu_encoder {
-	status = "okay";
 };

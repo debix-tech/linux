@@ -435,12 +435,6 @@ static int fsl_hdmi_soc_prepare(struct snd_pcm_substream *substream,
 	return 0;
 }
 
-static struct snd_soc_dai_ops fsl_hdmi_soc_dai_ops = {
-	.startup = fsl_hdmi_soc_startup,
-	.shutdown = fsl_hdmi_soc_shutdown,
-	.prepare = fsl_hdmi_soc_prepare,
-};
-
 /* IEC60958 status functions */
 static int fsl_hdmi_iec_info(struct snd_kcontrol *kcontrol,
 		struct snd_ctl_elem_info *uinfo)
@@ -608,8 +602,14 @@ static int fsl_hdmi_soc_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
+static struct snd_soc_dai_ops fsl_hdmi_soc_dai_ops = {
+	.probe = fsl_hdmi_soc_dai_probe,
+	.startup = fsl_hdmi_soc_startup,
+	.shutdown = fsl_hdmi_soc_shutdown,
+	.prepare = fsl_hdmi_soc_prepare,
+};
+
 static struct snd_soc_dai_driver fsl_hdmi_dai = {
-	.probe = &fsl_hdmi_soc_dai_probe,
 	.playback = {
 		.channels_min = 2,
 		.channels_max = 8,
@@ -621,6 +621,7 @@ static struct snd_soc_dai_driver fsl_hdmi_dai = {
 
 static const struct snd_soc_component_driver fsl_hdmi_component = {
 	.name		= "fsl-hdmi",
+	.legacy_dai_naming	= 1,
 };
 
 /* HDMI audio codec callbacks */
@@ -661,7 +662,7 @@ static int fsl_hdmi_dai_probe(struct platform_device *pdev)
 
 	if (!hdmi_get_registered()) {
 		dev_err(&pdev->dev, "failed to probe. Load HDMI-video first.\n");
-		return -ENOMEM;
+		return -EPROBE_DEFER;
 	}
 
 	hdmi_data = devm_kzalloc(&pdev->dev, sizeof(*hdmi_data), GFP_KERNEL);

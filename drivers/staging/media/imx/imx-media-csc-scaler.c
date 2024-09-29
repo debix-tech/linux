@@ -167,7 +167,7 @@ static int ipu_csc_scaler_enum_fmt(struct file *file, void *fh,
 	int ret;
 
 	ret = imx_media_enum_pixel_formats(&fourcc, f->index,
-					   PIXFMT_SEL_YUV_RGB);
+					   PIXFMT_SEL_YUV_RGB, 0);
 	if (ret)
 		return ret;
 
@@ -803,6 +803,7 @@ static int ipu_csc_scaler_release(struct file *file)
 
 	dev_dbg(priv->dev, "Releasing instance %p\n", ctx);
 
+	v4l2_ctrl_handler_free(&ctx->ctrl_hdlr);
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
 	v4l2_fh_del(&ctx->fh);
 	v4l2_fh_exit(&ctx->fh);
@@ -820,7 +821,7 @@ static const struct v4l2_file_operations ipu_csc_scaler_fops = {
 	.mmap		= v4l2_m2m_fop_mmap,
 };
 
-static struct v4l2_m2m_ops m2m_ops = {
+static const struct v4l2_m2m_ops m2m_ops = {
 	.device_run	= device_run,
 	.job_abort	= job_abort,
 };

@@ -48,7 +48,7 @@ int fsl_mc_obj_open(struct fsl_mc_io *mc_io,
 		    u16 *token)
 {
 	struct fsl_mc_command cmd = { 0 };
-	struct obj_cmd_open *cmd_params;
+	struct fsl_mc_obj_cmd_open *cmd_params;
 	int err = 0;
 	int cmd_id = fsl_mc_get_open_cmd_id(obj_type);
 
@@ -56,9 +56,8 @@ int fsl_mc_obj_open(struct fsl_mc_io *mc_io,
 		return -ENODEV;
 
 	/* prepare command */
-	cmd.header = mc_encode_cmd_header(fsl_mc_get_open_cmd_id(obj_type),
-					  cmd_flags, 0);
-	cmd_params = (struct obj_cmd_open *)cmd.params;
+	cmd.header = mc_encode_cmd_header(cmd_id, cmd_flags, 0);
+	cmd_params = (struct fsl_mc_obj_cmd_open *)cmd.params;
 	cmd_params->obj_id = cpu_to_le32(obj_id);
 
 	/* send command to mc*/
@@ -102,4 +101,3 @@ int fsl_mc_obj_reset(struct fsl_mc_io *mc_io,
 	return mc_send_command(mc_io, &cmd);
 }
 EXPORT_SYMBOL_GPL(fsl_mc_obj_reset);
-

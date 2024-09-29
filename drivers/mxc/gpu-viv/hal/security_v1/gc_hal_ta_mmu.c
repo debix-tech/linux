@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2020 Vivante Corporation
+*    Copyright (c) 2014 - 2023 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2020 Vivante Corporation
+*    Copyright (C) 2014 - 2023 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -103,10 +103,11 @@
 #define gcdMMU_STLB_EXCEPTION       0x00000002
 #define gcdMMU_STLB_SECURITY        (1 << 4)
 
+#define gcdUSE_MMU_EXCEPTION        1
+
 #define gcdMMU_SECURE_AREA_START    ((gcdMMU_MTLB_ENTRY_NUM - gcdMMU_SECURE_AREA_SIZE) << gcdMMU_MTLB_SHIFT)
 
-typedef enum _gceMMU_TYPE
-{
+typedef enum _gceMMU_TYPE {
     gcvMMU_USED     = (0 << 4),
     gcvMMU_SINGLE   = (1 << 4),
     gcvMMU_FREE     = (2 << 4),
@@ -114,8 +115,7 @@ typedef enum _gceMMU_TYPE
 gceMMU_TYPE;
 
 typedef struct _gcsMMU_STLB *gcsMMU_STLB_PTR;
-typedef struct _gcsMMU_STLB
-{
+typedef struct _gcsMMU_STLB {
     gctPHYS_ADDR    physical;
     gctUINT32_PTR   logical;
     gctSIZE_T       size;
@@ -136,7 +136,7 @@ typedef struct _gcsMMU_STLB
 /*
 * Helper
 */
-gctUINT32
+static gctUINT32
 _MtlbOffset(
     gctUINT32 Address
     )
@@ -144,7 +144,7 @@ _MtlbOffset(
     return (Address & gcdMMU_MTLB_MASK) >> gcdMMU_MTLB_SHIFT;
 }
 
-gctUINT32
+static gctUINT32
 _StlbOffset(
     gctUINT32 Address
     )
@@ -184,8 +184,7 @@ _FillPageTable(
 {
     gctUINT i;
 
-    for (i = 0; i < PageCount; i++)
-    {
+    for (i = 0; i < PageCount; i++) {
         _WritePageEntry(PageTable + i, EntryValue);
     }
 
@@ -202,7 +201,6 @@ _AllocateStlb(
     gceSTATUS status;
     gcsMMU_STLB_PTR stlb;
     gctPOINTER pointer = gcvNULL;
-    gctUINT64 mmuException = 1;
 
     /* Allocate slave TLB record. */
     gcmkONERROR(gctaOS_Allocate(gcmSIZEOF(gcsMMU_STLB), &pointer));
@@ -220,15 +218,11 @@ _AllocateStlb(
 
     gcmkONERROR(gctaOS_GetPhysicalAddress(Os, stlb->logical, &stlb->physBase));
 
-    gctaOS_QueryOption(Os, "mmuException", &mmuException);
-    if (mmuException)
-    {
-        _FillPageTable(stlb->logical, (gctUINT32)stlb->size / 4, gcdMMU_STLB_EXCEPTION);
-    }
-    else
-    {
-        gctaOS_ZeroMemory((gctUINT8_PTR)stlb->logical, (gctUINT32)stlb->size);
-    }
+#if gcdUSE_MMU_EXCEPTION
+    _FillPageTable(stlb->logical, (gctUINT32)stlb->size / 4, gcdMMU_STLB_EXCEPTION);
+#else
+    gctaOS_ZeroMemory(stlb->logical, (gctUINT32)stlb->size);
+#endif
 
     *Stlb = stlb;
 
@@ -250,7 +244,6 @@ gctaMMU_Construct(
     gctSIZE_T bytes = 4096;
 
     gcTA_MMU mmu = gcvNULL;
-    gctUINT64 mmuException = 1;
 
     gcmkONERROR(gctaOS_Allocate(
         gcmSIZEOF(gcsTA_MMU),
@@ -275,16 +268,11 @@ gctaMMU_Construct(
         &mmu->mtlbPhysical
         ));
 
-    gctaOS_QueryOption(mmu->os, "mmuException", &mmuException);
-    mmu->mmuException = (gctUINT)mmuException;
-    if (mmu->mmuException)
-    {
-        _FillPageTable(mmu->mtlbLogical, (gctUINT32)mmu->mtlbBytes / 4, gcdMMU_STLB_EXCEPTION);
-    }
-    else
-    {
-        gctaOS_ZeroMemory((gctUINT8_PTR)mmu->mtlbLogical, (gctUINT32)mmu->mtlbBytes);
-    }
+#if gcdUSE_MMU_EXCEPTION
+    _FillPageTable(mmu->mtlbLogical, (gctUINT32)mmu->mtlbBytes / 4, gcdMMU_STLB_EXCEPTION);
+#else
+    gctaOS_ZeroMemory(mmu->mtlbLogical, (gctUINT32)mmu->mtlbBytes);
+#endif
 
     /* Allocate a array to store stlbs. */
     gcmkONERROR(gctaOS_Allocate((gctUINT32)mmu->mtlbBytes, &mmu->stlbs));
@@ -318,10 +306,8 @@ gctaMMU_Construct(
     return gcvSTATUS_OK;
 
 OnError:
-    if (mmu)
-    {
-        if (mmu->safePageLogical)
-        {
+    if (mmu) {
+        if (mmu->safePageLogical) {
             gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
                 TA->os,
                 4096,
@@ -330,8 +316,7 @@ OnError:
                 ));
         }
 
-        if (mmu->nonSecureSafePageLogical)
-        {
+        if (mmu->nonSecureSafePageLogical) {
             gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
                 TA->os,
                 4096,
@@ -340,8 +325,7 @@ OnError:
                 ));
         }
 
-        if (mmu->mtlbLogical)
-        {
+        if (mmu->mtlbLogical) {
             gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
                 TA->os,
                 4096,
@@ -350,8 +334,7 @@ OnError:
                 ));
         }
 
-        if (mmu->stlbs)
-        {
+        if (mmu->stlbs) {
             gcmkVERIFY_OK(gctaOS_Free((gctPOINTER)mmu->stlbs));
         }
 
@@ -367,8 +350,7 @@ gctaMMU_Destory(
 {
     gctaOS os = Mmu->os;
 
-    if (Mmu->safePageLogical)
-    {
+    if (Mmu->safePageLogical) {
         gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
             os,
             4096,
@@ -377,8 +359,7 @@ gctaMMU_Destory(
             ));
     }
 
-    if (Mmu->nonSecureSafePageLogical)
-    {
+    if (Mmu->nonSecureSafePageLogical) {
         gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
             os,
             4096,
@@ -387,8 +368,7 @@ gctaMMU_Destory(
             ));
     }
 
-    if (Mmu->mtlbLogical)
-    {
+    if (Mmu->mtlbLogical) {
         gcmkVERIFY_OK(gctaOS_FreeSecurityMemory(
             os,
             4096,
@@ -397,8 +377,7 @@ gctaMMU_Destory(
             ));
     }
 
-    if (Mmu->stlbs)
-    {
+    if (Mmu->stlbs) {
         gcmkVERIFY_OK(gctaOS_Free((gctPOINTER)Mmu->stlbs));
     }
 
@@ -413,7 +392,7 @@ gctaMMU_GetPageEntry(
     IN gctUINT32 Address,
     OUT gctUINT32_PTR MtlbEntry,
     OUT gctUINT32_PTR *PageTable,
-    OUT gctBOOL * Secure
+    OUT gctBOOL *Secure
     )
 {
     gceSTATUS status;
@@ -430,8 +409,7 @@ gctaMMU_GetPageEntry(
 
     stlb = stlbs[offset];
 
-    if (stlb == gcvNULL)
-    {
+    if (stlb == gcvNULL) {
         gcmkONERROR(_AllocateStlb(Mmu->os, &stlb));
 
         mtlbEntry = (gctUINT32)(stlb->physBase & 0xFFFFFFFF)
@@ -439,8 +417,7 @@ gctaMMU_GetPageEntry(
                   | gcdMMU_MTLB_PRESENT
                   ;
 
-        if (secure)
-        {
+        if (secure) {
             /* Secure MTLB. */
             mtlbEntry |= (1 << 4);
         }
@@ -451,8 +428,7 @@ gctaMMU_GetPageEntry(
         /* Record stlb. */
         stlbs[offset] = stlb;
 
-        if (MtlbEntry)
-        {
+        if (MtlbEntry) {
             /* Return entry value of new mtlb entry. */
             *MtlbEntry = mtlbEntry;
         }
@@ -461,9 +437,7 @@ gctaMMU_GetPageEntry(
     *PageTable = &stlb->logical[_StlbOffset(Address)];
 
     if (Secure)
-    {
         *Secure = secure;
-    }
 
     /* Success. */
     gcmkFOOTER_NO();
@@ -509,18 +483,14 @@ gctaMMU_FreePages(
     gcmkHEADER_ARG("Mmu=%p", Mmu);
 
     /* Fill in page table. */
-    for (i = 0; i < PageCount; i++)
-    {
+    for (i = 0; i < PageCount; i++) {
         gcmkONERROR(gctaMMU_GetPageEntry(Mmu, Address, gcvNULL, &entry, gcvNULL));
 
-        if (Mmu->mmuException)
-        {
-            *entry = gcdMMU_STLB_EXCEPTION;
-        }
-        else
-        {
-            *entry = 0;
-        }
+#if gcdUSE_MMU_EXCEPTION
+        *entry = gcdMMU_STLB_EXCEPTION;
+#else
+        *entry = 0;
+#endif
 
         Address += 4096;
     }
@@ -579,15 +549,12 @@ gctaMMU_DumpPagetableEntry(
     gcmkPRINT("    Offset = 0x%08X (%d)\n", offsetInPage, offsetInPage);
 
 
-    if (stlb == gcvNULL)
-    {
+    if (stlb == gcvNULL) {
         /* Dmp mtlb entry. */
         entry = mtlbLogical[mtlb];
 
         gcmkPRINT("   mtlb entry [%d] = %x", mtlb, entry);
-    }
-    else
-    {
+    } else {
         stlbLogical = stlb->logical;
 
         gcmkPRINT("    stlb entry = 0x%08X", stlbLogical[stlbOffset]);

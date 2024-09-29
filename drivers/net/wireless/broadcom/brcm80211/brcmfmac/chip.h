@@ -8,16 +8,14 @@
 #include <linux/types.h>
 
 #define CORE_CC_REG(base, field) \
-		((base) + offsetof(struct chipcregs, field))
-
-#define CORE_GCI_REG(base, field) \
-		((base) + offsetof(struct chipgciregs, field))
+		(base + offsetof(struct chipcregs, field))
 
 /**
  * struct brcmf_chip - chip level information.
  *
  * @chip: chip identifier.
  * @chiprev: chip revision.
+ * @enum_base: base address of core enumeration space.
  * @cc_caps: chipcommon core capabilities.
  * @cc_caps_ext: chipcommon core extended capabilities.
  * @pmucaps: PMU capabilities.
@@ -30,6 +28,7 @@
 struct brcmf_chip {
 	u32 chip;
 	u32 chiprev;
+	u32 enum_base;
 	u32 cc_caps;
 	u32 cc_caps_ext;
 	u32 pmucaps;
@@ -73,7 +72,7 @@ struct brcmf_buscore_ops {
 };
 
 int brcmf_chip_get_raminfo(struct brcmf_chip *pub);
-struct brcmf_chip *brcmf_chip_attach(void *ctx,
+struct brcmf_chip *brcmf_chip_attach(void *ctx, u16 devid,
 				     const struct brcmf_buscore_ops *ops);
 void brcmf_chip_detach(struct brcmf_chip *chip);
 struct brcmf_core *brcmf_chip_get_core(struct brcmf_chip *chip, u16 coreid);
@@ -88,9 +87,6 @@ void brcmf_chip_set_passive(struct brcmf_chip *ci);
 bool brcmf_chip_set_active(struct brcmf_chip *ci, u32 rstvec);
 bool brcmf_chip_sr_capable(struct brcmf_chip *pub);
 char *brcmf_chip_name(u32 chipid, u32 chiprev, char *buf, uint len);
-void brcmf_chip_reset_watchdog(struct brcmf_chip *pub);
-void brcmf_chip_ulp_reset_lhl_regs(struct brcmf_chip *pub);
-void brcmf_chip_reset_pmu_regs(struct brcmf_chip *pub);
-void brcmf_chip_set_default_min_res_mask(struct brcmf_chip *pub);
+u32 brcmf_chip_enum_base(u16 devid);
 
 #endif /* BRCMF_AXIDMP_H */

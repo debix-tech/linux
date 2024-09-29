@@ -82,8 +82,14 @@ static int rcpm_pm_prepare(struct device *dev)
 		if (ret)
 			continue;
 
+		/*
+		 * For DT mode, would handle devices with "fsl,rcpm-wakeup"
+		 * pointing to the current RCPM node.
+		 *
+		 * For ACPI mode, currently we assume there is only one
+		 * RCPM controller existing.
+		 */
 		if (is_of_node(dev->fwnode))
-			/*  Should refer to current rcpm device */
 			if (np->phandle != value[0])
 				continue;
 
@@ -140,7 +146,6 @@ static const struct dev_pm_ops rcpm_pm_ops = {
 static int rcpm_probe(struct platform_device *pdev)
 {
 	struct device	*dev = &pdev->dev;
-	struct resource *r;
 	struct rcpm	*rcpm;
 	int ret;
 
@@ -148,11 +153,7 @@ static int rcpm_probe(struct platform_device *pdev)
 	if (!rcpm)
 		return -ENOMEM;
 
-	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!r)
-		return -ENODEV;
-
-	rcpm->ippdexpcr_base = devm_ioremap_resource(&pdev->dev, r);
+	rcpm->ippdexpcr_base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(rcpm->ippdexpcr_base)) {
 		ret =  PTR_ERR(rcpm->ippdexpcr_base);
 		return ret;

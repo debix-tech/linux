@@ -30,7 +30,6 @@
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-device.h>
 #include <linux/pm_domain.h>
-#include <linux/pm_runtime.h>
 
 #include "imx8-common.h"
 
@@ -287,7 +286,7 @@ struct mxc_mipi_csi2_dev {
 	struct csis_hw_reset hw_reset;
 	struct csis_phy_gpr  phy_gpr;
 
-	struct v4l2_async_subdev    asd;
+	struct v4l2_async_connection asd;
 	struct v4l2_async_notifier  subdev_notifier;
 	struct v4l2_async_subdev    *async_subdevs[2];
 
@@ -305,6 +304,7 @@ struct mxc_mipi_csi2_dev {
 	u8  data_lanes[4];
 	u8  vchannel;
 	u8  running;
+	bool runtime_suspend;
 };
 
 struct mxc_hs_info {
@@ -325,35 +325,6 @@ enum mxc_mipi_csi2_pm_state {
  * 250~1.5Gbps: 0x6
  */
 static u8 rxhs_settle[3] = {0xD, 0xA, 0x7};
-
-static struct mxc_hs_info hs_setting[] = {
-	{2592, 1944, 30, 0x0B},
-	{2592, 1944, 15, 0x10},
-
-	{1920, 1080, 30, 0x0B},
-	{1920, 1080, 15, 0x10},
-
-	{1280, 720,  30, 0x11},
-	{1280, 720,  15, 0x16},
-
-	{1024, 768,  30, 0x11},
-	{1024, 768,  15, 0x23},
-
-	{720,  576,  30, 0x1E},
-	{720,  576,  15, 0x23},
-
-	{720,  480,  30, 0x1E},
-	{720,  480,  15, 0x23},
-
-	{640,  480,  30, 0x1E},
-	{640,  480,  15, 0x23},
-
-	{320,  240,  30, 0x1E},
-	{320,  240,  15, 0x23},
-
-	{176,  144,  30, 0x1E},
-	{176,  144,  15, 0x23},
-};
 
 static struct imx_sc_ipc *pm_ipc_handle;
 
@@ -449,31 +420,6 @@ static int mipi_sc_fw_init(struct mxc_mipi_csi2_dev *csi2dev, int enable)
 		return ops->reset(csi2dev, enable);
 
 	return 0;
-}
-
-static uint16_t find_hs_configure(struct v4l2_subdev_format *sd_fmt)
-{
-	struct v4l2_mbus_framefmt *fmt = &sd_fmt->format;
-	u32 frame_rate;
-	int i;
-
-	if (!fmt)
-		return -EINVAL;
-
-	frame_rate = fmt->reserved[1];
-
-	for (i = 0; i < ARRAY_SIZE(hs_setting); i++) {
-		if (hs_setting[i].width  == fmt->width &&
-		    hs_setting[i].height == fmt->height &&
-		    hs_setting[i].frame_rate == frame_rate)
-			return hs_setting[i].val;
-	}
-
-	if (i == ARRAY_SIZE(hs_setting))
-		pr_err("can not find HS setting for w/h@fps=(%d, %d)@%d\n",
-		       fmt->width, fmt->height, frame_rate);
-
-	return -EINVAL;
 }
 
 static void mxc_mipi_csi2_reset(struct mxc_mipi_csi2_dev *csi2dev)
@@ -592,7 +538,7 @@ static struct media_pad *mxc_csi2_get_remote_sensor_pad(struct mxc_mipi_csi2_dev
 			sink_pad = &subdev->entity.pads[i];
 
 			if (sink_pad->flags & MEDIA_PAD_FL_SINK) {
-				source_pad = media_entity_remote_pad(sink_pad);
+				source_pad = media_pad_remote_pad_first(sink_pad);
 				if (source_pad)
 					break;
 			}
@@ -636,6 +582,7 @@ static int mxc_csi2_get_sensor_fmt(struct mxc_mipi_csi2_dev *csi2dev)
 	struct v4l2_subdev *sen_sd;
 	struct v4l2_subdev_format src_fmt;
 	struct media_pad *source_pad;
+	s64 link_freq;
 	int ret;
 
 	/* Get remote source pad */
@@ -662,12 +609,17 @@ static int mxc_csi2_get_sensor_fmt(struct mxc_mipi_csi2_dev *csi2dev)
 	dev_dbg(&csi2dev->pdev->dev, "width=%d, height=%d, fmt.code=0x%x\n",
 		mf->width, mf->height, mf->code);
 
-	/* Get rxhs settle */
-	if (src_fmt.format.reserved[0] != 0) {
+	/* get link rate from transmitter */
+	link_freq = v4l2_get_link_freq(sen_sd->ctrl_handler,
+				src_fmt.format.width,
+				csi2dev->num_lanes * 2);
+
+	if (link_freq == -ENOENT && src_fmt.format.reserved[0] != 0) {
 		csi2dev->hs_settle =
 			calc_hs_settle(csi2dev, src_fmt.format.reserved[0]);
-	} else if (src_fmt.format.reserved[1] != 0) {
-		csi2dev->hs_settle = find_hs_configure(&src_fmt);
+	} else if (link_freq > 0) {
+		csi2dev->hs_settle =
+			calc_hs_settle(csi2dev, div_s64(link_freq * 2, 1000000));
 	} else {
 		if (src_fmt.format.height * src_fmt.format.width > 1024 * 768)
 			csi2dev->hs_settle = rxhs_settle[2];
@@ -1069,6 +1021,16 @@ static int mipi_csi2_s_frame_interval(struct v4l2_subdev *sd,
 	return v4l2_subdev_call(sen_sd, video, s_frame_interval, interval);
 }
 
+static void mipi_csi2_hw_config(struct mxc_mipi_csi2_dev *csi2dev)
+{
+	mxc_csi2_get_sensor_fmt(csi2dev);
+	mxc_mipi_csi2_hc_config(csi2dev);
+	mxc_mipi_csi2_reset(csi2dev);
+	mxc_mipi_csi2_csr_config(csi2dev);
+	mxc_mipi_csi2_enable(csi2dev);
+	mxc_mipi_csi2_reg_dump(csi2dev);
+}
+
 static int mipi_csi2_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
@@ -1081,17 +1043,14 @@ static int mipi_csi2_s_stream(struct v4l2_subdev *sd, int enable)
 	if (enable) {
 		pm_runtime_get_sync(dev);
 		if (!csi2dev->running++) {
-			mxc_csi2_get_sensor_fmt(csi2dev);
-			mxc_mipi_csi2_hc_config(csi2dev);
-			mxc_mipi_csi2_reset(csi2dev);
-			mxc_mipi_csi2_csr_config(csi2dev);
-			mxc_mipi_csi2_enable(csi2dev);
-			mxc_mipi_csi2_reg_dump(csi2dev);
+			if (!csi2dev->runtime_suspend)
+				mipi_csi2_hw_config(csi2dev);
 		}
 	} else {
-		if (!--csi2dev->running)
-			mxc_mipi_csi2_disable(csi2dev);
-
+		if (!--csi2dev->running) {
+			if (!csi2dev->runtime_suspend)
+				mxc_mipi_csi2_disable(csi2dev);
+		}
 		pm_runtime_put(dev);
 	}
 
@@ -1099,7 +1058,7 @@ static int mipi_csi2_s_stream(struct v4l2_subdev *sd, int enable)
 }
 
 static int mipi_csi2_enum_framesizes(struct v4l2_subdev *sd,
-				     struct v4l2_subdev_pad_config *cfg,
+				     struct v4l2_subdev_state *sd_state,
 				     struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
@@ -1113,7 +1072,7 @@ static int mipi_csi2_enum_framesizes(struct v4l2_subdev *sd,
 }
 
 static int mipi_csi2_enum_frame_interval(struct v4l2_subdev *sd,
-					 struct v4l2_subdev_pad_config *cfg,
+					 struct v4l2_subdev_state *sd_state,
 					 struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
@@ -1127,7 +1086,7 @@ static int mipi_csi2_enum_frame_interval(struct v4l2_subdev *sd,
 }
 
 static int mipi_csi2_get_fmt(struct v4l2_subdev *sd,
-			     struct v4l2_subdev_pad_config *cfg,
+			     struct v4l2_subdev_state *sd_state,
 			     struct v4l2_subdev_format *fmt)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
@@ -1142,7 +1101,7 @@ static int mipi_csi2_get_fmt(struct v4l2_subdev *sd,
 }
 
 static int mipi_csi2_set_fmt(struct v4l2_subdev *sd,
-			     struct v4l2_subdev_pad_config *cfg,
+			     struct v4l2_subdev_state *sd_state,
 			     struct v4l2_subdev_format *fmt)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
@@ -1206,6 +1165,8 @@ static int mipi_csi2_parse_dt(struct mxc_mipi_csi2_dev *csi2dev)
 	csi2dev->id = of_alias_get_id(node, "csi");
 
 	csi2dev->vchannel = of_property_read_bool(node, "virtual-channel");
+
+	csi2dev->runtime_suspend = of_property_read_bool(node, "runtime_suspend");
 
 	node = of_graph_get_next_endpoint(node, NULL);
 	if (!node) {
@@ -1332,20 +1293,21 @@ static int mipi_csi2_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int  mipi_csi2_pm_suspend(struct device *dev)
+static int mipi_csi2_pm_suspend(struct device *dev)
 {
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct mxc_mipi_csi2_dev *csi2dev = sd_to_mxc_mipi_csi2_dev(sd);
+	struct mxc_mipi_csi2_dev *csi2dev = dev_get_drvdata(dev);
 
-	if (csi2dev->running > 0) {
-		dev_warn(dev, "running, prevent entering suspend.\n");
-		return -EAGAIN;
+	if (!csi2dev->runtime_suspend) {
+		if (csi2dev->running > 0) {
+			dev_warn(dev, "running, prevent entering suspend.\n");
+			return -EAGAIN;
+		}
 	}
 
 	return pm_runtime_force_suspend(dev);
 }
 
-static int  mipi_csi2_pm_resume(struct device *dev)
+static int mipi_csi2_pm_resume(struct device *dev)
 {
 	return pm_runtime_force_resume(dev);
 }
@@ -1353,25 +1315,58 @@ static int  mipi_csi2_pm_resume(struct device *dev)
 static int  mipi_csi2_runtime_suspend(struct device *dev)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = dev_get_drvdata(dev);
+	struct v4l2_subdev *sen_sd;
+	int ret;
+
+	if (csi2dev->runtime_suspend) {
+		if (csi2dev->running > 0) {
+			sen_sd = mxc_get_remote_subdev(csi2dev, __func__);
+			if (!sen_sd)
+				return -EINVAL;
+
+			ret = v4l2_subdev_call(sen_sd, video, s_stream, 0);
+			if (ret < 0 && ret != -ENOIOCTLCMD)
+				return ret;
+		}
+
+		mxc_mipi_csi2_disable(csi2dev);
+		mipi_sc_fw_init(csi2dev, 0);
+	}
 
 	mipi_csi2_clk_disable(csi2dev);
+
 	return 0;
 }
 
 static int  mipi_csi2_runtime_resume(struct device *dev)
 {
 	struct mxc_mipi_csi2_dev *csi2dev = dev_get_drvdata(dev);
+	struct v4l2_subdev *sen_sd;
 	int ret;
 
 	ret = mipi_csi2_clk_enable(csi2dev);
 	if (ret)
 		return ret;
 
+	if (csi2dev->runtime_suspend) {
+		mipi_sc_fw_init(csi2dev, 1);
+		mipi_csi2_hw_config(csi2dev);
+		if (csi2dev->running > 0) {
+			sen_sd = mxc_get_remote_subdev(csi2dev, __func__);
+			if (!sen_sd)
+				return -EINVAL;
+
+			ret = v4l2_subdev_call(sen_sd, video, s_stream, 1);
+			if (ret < 0 && ret != -ENOIOCTLCMD)
+				return ret;
+		}
+	}
+
 	return 0;
 }
 
 static const struct dev_pm_ops mipi_csi_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(mipi_csi2_pm_suspend, mipi_csi2_pm_resume)
+	LATE_SYSTEM_SLEEP_PM_OPS(mipi_csi2_pm_suspend, mipi_csi2_pm_resume)
 	SET_RUNTIME_PM_OPS(mipi_csi2_runtime_suspend, mipi_csi2_runtime_resume, NULL)
 };
 

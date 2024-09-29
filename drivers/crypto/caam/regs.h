@@ -3,7 +3,7 @@
  * CAAM hardware register-level view
  *
  * Copyright 2008-2011 Freescale Semiconductor, Inc.
- * Copyright 2018 NXP
+ * Copyright 2018, 2023 NXP
  */
 
 #ifndef REGS_H
@@ -320,7 +320,11 @@ struct version_regs {
 #define CHA_VER_VID_MASK	(0xffull << CHA_VER_VID_SHIFT)
 
 /* CHA Miscellaneous Information - AESA_MISC specific */
-#define CHA_VER_MISC_AES_GCM	BIT(1 + CHA_VER_MISC_SHIFT)
+#define CHA_VER_MISC_AES_NUM_MASK	GENMASK(7, 0)
+#define CHA_VER_MISC_AES_GCM		BIT(1 + CHA_VER_MISC_SHIFT)
+
+/* CHA Miscellaneous Information - PKHA_MISC specific */
+#define CHA_VER_MISC_PKHA_NO_CRYPT	BIT(7 + CHA_VER_MISC_SHIFT)
 
 /*
  * caam_perfmon - Performance Monitor/Secure Memory Status/
@@ -417,6 +421,7 @@ struct caam_perfmon {
 #define CTPR_MS_PG_SZ_MASK	0x10
 #define CTPR_MS_PG_SZ_SHIFT	4
 	u32 comp_parms_ms;	/* CTPR - Compile Parameters Register	*/
+#define CTPR_LS_BLOB           BIT(1)
 	u32 comp_parms_ls;	/* CTPR - Compile Parameters Register	*/
 	/* Secure Memory State Visibility */
 	u32 rsvd1;
@@ -430,6 +435,9 @@ struct caam_perfmon {
 	u32 faultdetail;	/* FADR - Fault Addr Detail	*/
 #define CSTA_PLEND		BIT(10)
 #define CSTA_ALT_PLEND		BIT(18)
+#define CSTA_MOO		GENMASK(9, 8)
+#define CSTA_MOO_SECURE		1
+#define CSTA_MOO_TRUSTED	2
 	u32 rsvd3;
 	u32 status;		/* CSTA - CAAM Status */
 	u32 smpart;		/* Secure Memory Partition Parameters */

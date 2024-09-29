@@ -308,7 +308,7 @@ bool dpa_skb_is_recyclable(struct sk_buff *skb)
 		return false;
 
 	/* or if it's an userspace buffer */
-	if (skb_shinfo(skb)->tx_flags & SKBTX_DEV_ZEROCOPY)
+	if (skb_shinfo(skb)->flags & SKBFL_ZEROCOPY_ENABLE)
 		return false;
 
 	/* or if it's cloned or shared */
@@ -366,7 +366,8 @@ EXPORT_SYMBOL(dpa_buf_is_recyclable);
  * accommodate the shared info area of the skb.
  */
 static struct sk_buff *__hot contig_fd_to_skb(const struct dpa_priv_s *priv,
-	const struct qm_fd *fd, int *use_gro)
+					      const struct qm_fd *fd,
+					      bool *use_gro, bool dcl4c_valid)
 {
 	dma_addr_t addr = qm_fd_addr(fd);
 	ssize_t fd_off = dpa_fd_offset(fd);
@@ -403,7 +404,7 @@ static struct sk_buff *__hot contig_fd_to_skb(const struct dpa_priv_s *priv,
 	/* Peek at the parse results for csum validation */
 	parse_results = (const fm_prs_result_t *)(vaddr +
 				DPA_RX_PRIV_DATA_SIZE);
-	_dpa_process_parse_results(parse_results, fd, skb, use_gro);
+	_dpa_process_parse_results(parse_results, fd, skb, use_gro, dcl4c_valid);
 
 #ifdef CONFIG_FSL_DPAA_1588
 	if (priv->tsu && priv->tsu->valid && priv->tsu->hwts_rx_en_ioctl)
@@ -424,8 +425,8 @@ static struct sk_buff *__hot contig_fd_to_skb(const struct dpa_priv_s *priv,
  * The page fragment holding the S/G Table is recycled here.
  */
 static struct sk_buff *__hot sg_fd_to_skb(const struct dpa_priv_s *priv,
-			       const struct qm_fd *fd, int *use_gro,
-			       int *count_ptr)
+					  const struct qm_fd *fd, bool *use_gro,
+					  int *count_ptr, bool dcl4c_valid)
 {
 	const struct qm_sg_entry *sgt;
 	dma_addr_t addr = qm_fd_addr(fd);
@@ -480,7 +481,7 @@ static struct sk_buff *__hot sg_fd_to_skb(const struct dpa_priv_s *priv,
 			parse_results = (const fm_prs_result_t *)(vaddr +
 						DPA_RX_PRIV_DATA_SIZE);
 			_dpa_process_parse_results(parse_results, fd, skb,
-						   use_gro);
+						   use_gro, dcl4c_valid);
 
 			/* Make sure forwarded skbs will have enough space
 			 * on Tx, if extra headers are added.
@@ -561,13 +562,14 @@ void __hot _dpa_rx(struct net_device *net_dev,
 		u32 fqid,
 		int *count_ptr)
 {
+	bool dcl4c_valid = !!(net_dev->features & NETIF_F_RXCSUM);
+	bool use_gro = !!(net_dev->features & NETIF_F_GRO);
 	struct dpa_bp *dpa_bp;
 	struct sk_buff *skb;
 	dma_addr_t addr = qm_fd_addr(fd);
 	u32 fd_status = fd->status;
 	unsigned int skb_len;
 	struct rtnl_link_stats64 *percpu_stats = &percpu_priv->stats;
-	int use_gro = net_dev->features & NETIF_F_GRO;
 
 	if (unlikely(fd_status & FM_FD_STAT_RX_ERRORS) != 0) {
 		if (netif_msg_hw(priv) && net_ratelimit())
@@ -598,9 +600,9 @@ void __hot _dpa_rx(struct net_device *net_dev,
 			return;
 		}
 #endif
-		skb = contig_fd_to_skb(priv, fd, &use_gro);
+		skb = contig_fd_to_skb(priv, fd, &use_gro, dcl4c_valid);
 	} else {
-		skb = sg_fd_to_skb(priv, fd, &use_gro, count_ptr);
+		skb = sg_fd_to_skb(priv, fd, &use_gro, count_ptr, dcl4c_valid);
 		percpu_priv->rx_sg++;
 	}
 
@@ -623,25 +625,21 @@ void __hot _dpa_rx(struct net_device *net_dev,
 	skb_record_rx_queue(skb, raw_smp_processor_id());
 
 	if (use_gro) {
-		gro_result_t gro_result;
 		const struct qman_portal_config *pc =
 					qman_p_get_portal_config(portal);
 		struct dpa_napi_portal *np = &percpu_priv->np[pc->index];
 
 		np->p = portal;
-		gro_result = napi_gro_receive(&np->napi, skb);
-		/* If frame is dropped by the stack, rx_dropped counter is
-		 * incremented automatically, so no need for us to update it
+		/* The stack doesn't report if the frame was dropped but it
+		 * will increment rx_dropped automatically.
 		 */
-		if (unlikely(gro_result == GRO_DROP))
-			goto packet_dropped;
+		napi_gro_receive(&np->napi, skb);
 	} else if (unlikely(netif_receive_skb(skb) == NET_RX_DROP))
-		goto packet_dropped;
+		return;
 
 	percpu_stats->rx_packets++;
 	percpu_stats->rx_bytes += skb_len;
 
-packet_dropped:
 	return;
 
 _release_frame:
@@ -1073,6 +1071,8 @@ int __hot dpa_tx_extended(struct sk_buff *skb, struct net_device *net_dev,
 	bool nonlinear, skb_changed, skb_need_wa;
 	int *countptr, offset = 0;
 	struct sk_buff *nskb;
+	struct netdev_queue *txq;
+	int txq_id = skb_get_queue_mapping(skb);
 
 	/* Flags to help optimize the A050385 errata restriction checks.
 	 *
@@ -1222,7 +1222,11 @@ int __hot dpa_tx_extended(struct sk_buff *skb, struct net_device *net_dev,
 	if (unlikely(dpa_xmit(priv, percpu_stats, &fd, egress_fq, conf_fq) < 0))
 		goto xmit_failed;
 
-	netif_trans_update(net_dev);
+	/* LLTX forces us to update our own jiffies for each netdev queue.
+	 * Use the queue mapping registered in the skb.
+	 */
+	txq = netdev_get_tx_queue(net_dev, txq_id);
+	txq->trans_start = jiffies;
 	return NETDEV_TX_OK;
 
 xmit_failed:

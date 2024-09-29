@@ -1,7 +1,7 @@
 /*
  * Samsung MIPI DSIM Bridge
  *
- * Copyright 2018-2021 NXP
+ * Copyright 2018-2022 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +20,9 @@
 #include <linux/delay.h>
 #include <linux/gcd.h>
 #include <linux/log2.h>
+#include <linux/media-bus-format.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/of_graph.h>
 #include <linux/pm_runtime.h>
 #include <drm/bridge/sec_mipi_dsim.h>
@@ -316,9 +318,11 @@ struct sec_mipi_dsim {
 	unsigned int p;
 	unsigned int m;
 	unsigned int s;
+	unsigned int pms_delta;
 	unsigned long long lp_data_rate;
 	unsigned long long hs_data_rate;
 	struct videomode vmode;
+	bool enabled;
 
 	struct completion pll_stable;
 	struct completion ph_tx_done;
@@ -451,9 +455,9 @@ static int sec_mipi_dsim_host_attach(struct mipi_dsi_host *host,
 	if (dsim->channel)
 		return -EINVAL;
 
-	if (!(dsi->mode_flags & MIPI_DSI_MODE_VIDEO)		||
-	    !((dsi->mode_flags & MIPI_DSI_MODE_VIDEO_BURST)	||
-	      (dsi->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE))) {
+	if (dsi->mode_flags & MIPI_DSI_MODE_VIDEO &&
+	    dsi->mode_flags & MIPI_DSI_MODE_VIDEO_BURST &&
+	    dsi->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE) {
 		dev_err(dev, "unsupported dsi mode\n");
 		return -EINVAL;
 	}
@@ -933,14 +937,15 @@ static void sec_mipi_dsim_config_dpi(struct sec_mipi_dsim *dsim)
 
 	if (dsim->mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS) {
 		config |= CONFIG_NON_CONTINUOUS_CLOCK_LANE;
-		config |= CONFIG_CLKLANE_STOP_START;
+		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO)
+			config |= CONFIG_CLKLANE_STOP_START;
 	}
 
 	if (dsim->mode_flags & MIPI_DSI_MODE_VSYNC_FLUSH)
 		config |= CONFIG_MFLUSH_VS;
 
 	/* disable EoT packets in HS mode */
-	if (dsim->mode_flags & MIPI_DSI_MODE_EOT_PACKET)
+	if (dsim->mode_flags & MIPI_DSI_MODE_NO_EOT_PACKET)
 		config |= CONFIG_EOT_R03;
 
 	if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO) {
@@ -958,36 +963,37 @@ static void sec_mipi_dsim_config_dpi(struct sec_mipi_dsim *dsim)
 		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_HSE)
 			config |= CONFIG_HSEDISABLEMODE;
 
-		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_HFP)
+		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HFP)
 			config |= CONFIG_HFPDISABLEMODE;
 
-		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_HBP)
+		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HBP)
 			config |= CONFIG_HBPDISABLEMODE;
 
-		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_HSA)
+		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO_NO_HSA)
 			config |= CONFIG_HSADISABLEMODE;
 	}
 
 	config |= CONFIG_SET_MAINVC(dsim->channel);
 
-	if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO) {
-		switch (dsim->format) {
-		case MIPI_DSI_FMT_RGB565:
-			config |= CONFIG_SET_MAINPIXFORMAT(0x4);
-			break;
-		case MIPI_DSI_FMT_RGB666_PACKED:
+	switch (dsim->format) {
+	case MIPI_DSI_FMT_RGB565:
+		config |= dsim->mode_flags & MIPI_DSI_MODE_VIDEO ?
+			  CONFIG_SET_MAINPIXFORMAT(0x4) :
+			  CONFIG_SET_MAINPIXFORMAT(0x3);
+		break;
+	case MIPI_DSI_FMT_RGB666_PACKED:
+		if (dsim->mode_flags & MIPI_DSI_MODE_VIDEO)
 			config |= CONFIG_SET_MAINPIXFORMAT(0x5);
-			break;
-		case MIPI_DSI_FMT_RGB666:
-			config |= CONFIG_SET_MAINPIXFORMAT(0x6);
-			break;
-		case MIPI_DSI_FMT_RGB888:
-			config |= CONFIG_SET_MAINPIXFORMAT(0x7);
-			break;
-		default:
-			config |= CONFIG_SET_MAINPIXFORMAT(0x7);
-			break;
-		}
+		break;
+	case MIPI_DSI_FMT_RGB666:
+		config |= CONFIG_SET_MAINPIXFORMAT(0x6);
+		break;
+	case MIPI_DSI_FMT_RGB888:
+		config |= CONFIG_SET_MAINPIXFORMAT(0x7);
+		break;
+	default:
+		config |= CONFIG_SET_MAINPIXFORMAT(0x7);
+		break;
 	}
 
 	/* config data lanes number and enable lanes */
@@ -1227,6 +1233,8 @@ struct dsim_pll_pms *sec_mipi_dsim_calc_pmsk(struct sec_mipi_dsim *dsim)
 		return ERR_PTR(-EINVAL);
 	}
 
+	dsim->pms_delta = best_delta;
+
 	pll_pms->p = best_p;
 	pll_pms->m = best_m;
 	pll_pms->s = best_s;
@@ -1295,14 +1303,53 @@ int sec_mipi_dsim_check_pll_out(void *driver_private,
 }
 EXPORT_SYMBOL(sec_mipi_dsim_check_pll_out);
 
-static void sec_mipi_dsim_bridge_enable(struct drm_bridge *bridge)
+static
+struct drm_crtc *sec_mipi_dsim_get_new_crtc(struct sec_mipi_dsim *dsim,
+					    struct drm_atomic_state *state)
+{
+	struct drm_encoder *encoder = dsim->encoder;
+	struct drm_connector *connector;
+	struct drm_connector_state *conn_state;
+
+	connector = drm_atomic_get_new_connector_for_encoder(state, encoder);
+	if (!connector)
+		return NULL;
+
+	conn_state = drm_atomic_get_new_connector_state(state, connector);
+	if (!conn_state)
+		return NULL;
+
+	return conn_state->crtc;
+}
+
+static void
+sec_mipi_dsim_bridge_atomic_enable(struct drm_bridge *bridge,
+				   struct drm_bridge_state *old_bridge_state)
 {
 	int ret;
 	struct sec_mipi_dsim *dsim = bridge->driver_private;
+	struct drm_atomic_state *old_state = old_bridge_state->base.state;
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *old_crtc_state;
 
 	/* At this moment, the dsim bridge's preceding encoder has
 	 * already been enabled. So the dsim can be configed here
 	 */
+
+	crtc = sec_mipi_dsim_get_new_crtc(dsim, old_state);
+	if (!crtc) {
+		dev_err(dsim->dev, "bridge is enabling without CRTC\n");
+		return;
+	}
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(old_state, crtc);
+	/* Don't do enablement operation if we're coming back from PSR. */
+	if (old_crtc_state && old_crtc_state->self_refresh_active &&
+	    dsim->enabled)
+		return;
+
+	if (dsim->enabled)
+		return;
 
 	/* config main display mode */
 	sec_mipi_dsim_set_main_mode(dsim);
@@ -1347,6 +1394,8 @@ static void sec_mipi_dsim_bridge_enable(struct drm_bridge *bridge)
 	/* enable data transfer of dsim */
 	sec_mipi_dsim_set_standby(dsim, true);
 
+	dsim->enabled = true;
+
 	return;
 
 panel_unprepare:
@@ -1381,10 +1430,29 @@ static void sec_mipi_dsim_disable_pll(struct sec_mipi_dsim *dsim)
 	dsim_write(dsim, pllctrl, DSIM_PLLCTRL);
 }
 
-static void sec_mipi_dsim_bridge_disable(struct drm_bridge *bridge)
+static void
+sec_mipi_dsim_bridge_atomic_disable(struct drm_bridge *bridge,
+				    struct drm_bridge_state *old_bridge_state)
 {
 	int ret;
 	struct sec_mipi_dsim *dsim = bridge->driver_private;
+	struct drm_atomic_state *old_state = old_bridge_state->base.state;
+	struct drm_crtc *crtc;
+	struct drm_crtc_state *new_crtc_state;
+
+	crtc = sec_mipi_dsim_get_new_crtc(dsim, old_state);
+	/* No CRTC means we're doing a full shutdown. */
+	if (!crtc)
+		goto disable;
+
+	new_crtc_state = drm_atomic_get_new_crtc_state(old_state, crtc);
+	/* Don't do disablement operation if we're entering PSR. */
+	if (!new_crtc_state || new_crtc_state->self_refresh_active)
+		return;
+
+disable:
+	if (!dsim->enabled)
+		return;
 
 	/* disable panel if exists */
 	if (dsim->panel) {
@@ -1408,6 +1476,8 @@ static void sec_mipi_dsim_bridge_disable(struct drm_bridge *bridge)
 		if (unlikely(ret))
 			dev_err(dsim->dev, "panel unprepare failed: %d\n", ret);
 	}
+
+	dsim->enabled = false;
 }
 
 static void sec_mipi_dsim_bridge_mode_set(struct drm_bridge *bridge,
@@ -1507,6 +1577,13 @@ static int sec_mipi_dsim_bridge_atomic_check(struct drm_bridge *bridge,
 	struct drm_bus_cfg *input_bus_cfg = &bridge_state->input_bus_cfg;
 	struct sec_mipi_dsim *dsim = bridge->driver_private;
 
+	/*
+	 * If the DSI mode is not video mode, it implies
+	 * that the connector is self refresh aware.
+	 */
+	if (!(dsim->mode_flags & MIPI_DSI_MODE_VIDEO))
+		conn_state->self_refresh_aware = true;
+
 	/* seems unnecessary to check the input bus format
 	 * again, since during the negotiation process, it
 	 * has already been checked
@@ -1573,6 +1650,40 @@ static int sec_mipi_dsim_bridge_atomic_check(struct drm_bridge *bridge,
 	return 0;
 }
 
+static enum drm_mode_status
+sec_mipi_dsim_bridge_mode_valid(struct drm_bridge *bridge,
+				const struct drm_display_info *info,
+				const struct drm_display_mode *mode)
+{
+	struct sec_mipi_dsim *dsim = bridge->driver_private;
+	const struct sec_mipi_dsim_plat_data *pdata = dsim->pdata;
+	struct drm_bridge *next_bridge = bridge;
+	int ret;
+
+	/*
+	 * When MIPI2HDMI converter connected such as ADV7535,
+	 * video modes that pixel clock rate are not
+	 * exactly supported by MIPI PHY PLL will be removed.
+	 */
+	while (drm_bridge_get_next_bridge(next_bridge))
+		next_bridge = drm_bridge_get_next_bridge(next_bridge);
+
+	if ((next_bridge->ops & DRM_BRIDGE_OP_DETECT) &&
+	    (next_bridge->ops & DRM_BRIDGE_OP_EDID)) {
+		ret = sec_mipi_dsim_check_pll_out(dsim, mode);
+		if (ret)
+			return MODE_CLOCK_RANGE;
+
+		if (dsim->pms_delta != 0)
+			return MODE_CLOCK_RANGE;
+	}
+
+	if (pdata->mode_valid)
+		return pdata->mode_valid(dsim->encoder, mode);
+
+	return MODE_OK;
+};
+
 static const struct drm_bridge_funcs sec_mipi_dsim_bridge_funcs = {
 	.atomic_check = sec_mipi_dsim_bridge_atomic_check,
 	.atomic_reset = drm_atomic_helper_bridge_reset,
@@ -1580,9 +1691,10 @@ static const struct drm_bridge_funcs sec_mipi_dsim_bridge_funcs = {
 	.atomic_destroy_state = drm_atomic_helper_bridge_destroy_state,
 	.atomic_get_input_bus_fmts = sec_mipi_dsim_atomic_get_input_bus_fmts,
 	.attach     = sec_mipi_dsim_bridge_attach,
-	.enable     = sec_mipi_dsim_bridge_enable,
-	.disable    = sec_mipi_dsim_bridge_disable,
+	.atomic_enable	= sec_mipi_dsim_bridge_atomic_enable,
+	.atomic_disable	= sec_mipi_dsim_bridge_atomic_disable,
 	.mode_set   = sec_mipi_dsim_bridge_mode_set,
+	.mode_valid = sec_mipi_dsim_bridge_mode_valid,
 };
 
 void sec_mipi_dsim_suspend(struct device *dev)

@@ -300,7 +300,7 @@ static struct rpmsg_driver pwm_rpmsg_driver = {
 	.callback	= pwm_rpmsg_cb,
 };
 
-static void pwm_rpchip_get_state(struct pwm_chip *chip,
+static int pwm_rpchip_get_state(struct pwm_chip *chip,
 				  struct pwm_device *pwm,
 				  struct pwm_state *state)
 {
@@ -318,6 +318,8 @@ static void pwm_rpchip_get_state(struct pwm_chip *chip,
 	ret = pwm_rpsmg_get(&pwm_rpmsg, state);
 
 	mutex_unlock(&pwm_rpmsg.lock);
+
+	return 0;
 }
 
 static int pwm_rpchip_apply(struct pwm_chip *chip,
@@ -385,7 +387,7 @@ static int pwm_rpchip_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, rdata);
 
-	ret = pwmchip_add(&rdata->chip);
+	ret = devm_pwmchip_add(&pdev->dev, &rdata->chip);
 	if (ret) {
 		dev_err(&pdev->dev, "failed to add PWM chip: %d\n", ret);
 		return ret;
@@ -393,14 +395,7 @@ static int pwm_rpchip_probe(struct platform_device *pdev)
 
 	dev_info(dev, "add PWM chip %d successfully\n", rdata->chip_id);
 
-	return 0;
-}
-
-static int pwm_rpchip_remove(struct platform_device *pdev)
-{
-	struct imx_rpmsg_pwm_data *rdata = platform_get_drvdata(pdev);
-
-	return pwmchip_remove(&rdata->chip);
+	return ret;
 }
 
 static const struct of_device_id imx_rpmsg_pwm_dt_ids[] = {
@@ -415,7 +410,6 @@ static struct platform_driver imx_rpmsg_pwm_driver = {
 		.of_match_table = imx_rpmsg_pwm_dt_ids,
 	},
 	.probe		= pwm_rpchip_probe,
-	.remove		= pwm_rpchip_remove
 };
 
 static int __init imx_rpmsg_pwm_driver_init(void)

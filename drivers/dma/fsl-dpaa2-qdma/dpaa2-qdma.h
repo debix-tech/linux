@@ -6,6 +6,7 @@
 
 #define DPAA2_QDMA_STORE_SIZE 16
 #define NUM_CH 8
+#define DPAA2_QDMA_DEFAULT_PRIORITY 0
 
 struct dpaa2_qdma_sd_d {
 	u32 rsv:32;
@@ -122,8 +123,8 @@ struct dpaa2_qdma_priv {
 	struct dpaa2_qdma_engine	*dpaa2_qdma;
 	struct dpaa2_qdma_priv_per_prio	*ppriv;
 
-	struct dpdmai_rx_queue_attr rx_queue_attr[DPDMAI_PRIO_NUM];
-	u32 tx_fqid[DPDMAI_PRIO_NUM];
+	struct dpdmai_rx_queue_attr rx_queue_attr[DPDMAI_MAX_QUEUE_NUM];
+	struct dpdmai_tx_queue_attr tx_queue_attr[DPDMAI_MAX_QUEUE_NUM];
 };
 
 struct dpaa2_qdma_priv_per_prio {
@@ -139,7 +140,7 @@ struct dpaa2_qdma_priv_per_prio {
 
 static struct soc_device_attribute soc_fixup_tuning[] = {
 	{ .family = "QorIQ LX2160A"},
-	{ },
+	{ /* sentinel */ }
 };
 
 /* FD pool size: one FD + 3 Frame list + 2 source/destination descriptor */

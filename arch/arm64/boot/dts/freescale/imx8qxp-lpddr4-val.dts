@@ -21,16 +21,6 @@
 		#size-cells = <2>;
 		ranges;
 
-		/*
-		 * 0x8800_0000 ~ 0x8FFF_FFFF is reserved for M4
-		 * Shouldn't be used at A core and Linux side.
-		 *
-		 */
-		m4_reserved: m4@0x88000000 {
-			no-map;
-			reg = <0 0x88000000 0 0x8000000>;
-		};
-
 		decoder_boot: decoder-boot@84000000 {
 			reg = <0 0x84000000 0 0x2000000>;
 			no-map;
@@ -41,12 +31,12 @@
 			no-map;
 		};
 
-		decoder_rpc: decoder-rpc@0x92000000 {
-			reg = <0 0x92000000 0 0x200000>;
+		decoder_rpc: decoder-rpc@92000000 {
+			reg = <0 0x92000000 0 0x100000>;
 			no-map;
 		};
 
-		encoder_rpc: encoder-rpc@0x92200000 {
+		encoder_rpc: encoder-rpc@92200000 {
 			reg = <0 0x92200000 0 0x200000>;
 			no-map;
 		};
@@ -103,7 +93,7 @@
 		enable-active-high;
 	};
 
-	reg_audio: fixedregulator@2 {
+	reg_audio: fixedregulator-2 {
 		compatible = "regulator-fixed";
 		regulator-name = "cs42888_supply";
 		regulator-min-microvolt = <3300000>;
@@ -202,7 +192,7 @@
 	fsl,magic-packet;
 	nvmem-cells = <&fec_mac0>;
 	nvmem-cell-names = "mac-address";
-	fsl,rgmii_rxc_dly;
+	rx-internal-delay-ps = <2000>;
 	status = "okay";
 
 	mdio {
@@ -212,16 +202,26 @@
 		ethphy0: ethernet-phy@0 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			reg = <0>;
-			at803x,eee-disabled;
-			at803x,vddio-1p8v;
+			qca,disable-smarteee;
+			vddio-supply = <&vddio0>;
+
+			vddio0: vddio-regulator {
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
 		};
 
 		ethphy1: ethernet-phy@1 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			reg = <1>;
-			at803x,eee-disabled;
-			at803x,vddio-1p8v;
+			qca,disable-smarteee;
+			vddio-supply = <&vddio1>;
 			status = "disabled";
+
+			vddio1: vddio-regulator {
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
 		};
 	};
 };

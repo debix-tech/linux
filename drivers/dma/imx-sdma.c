@@ -8,13 +8,13 @@
 //
 // Based on code from Freescale:
 //
-// Copyright 2004-2016 Freescale Semiconductor, Inc. All Rights Reserved.
-// Copyright 2018 NXP.
+// Copyright 2004-2009 Freescale Semiconductor, Inc. All Rights Reserved.
 
 #include <linux/init.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/types.h>
+#include <linux/bitfield.h>
 #include <linux/bitops.h>
 #include <linux/mm.h>
 #include <linux/interrupt.h>
@@ -33,13 +33,11 @@
 #include <linux/dmaengine.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
-#include <linux/of_device.h>
 #include <linux/of_dma.h>
 #include <linux/workqueue.h>
 
 #include <asm/irq.h>
-#include <linux/platform_data/dma-imx-sdma.h>
-#include <linux/platform_data/dma-imx.h>
+#include <linux/dma/imx-dma.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
@@ -78,8 +76,6 @@
 #define SDMA_CHNENBL0_IMX31	0x080
 #define SDMA_CHNPRI_0		0x100
 #define SDMA_DONE0_CONFIG	0x1000
-#define SDMA_DONE0_CONFIG_DONE_SEL	0x7
-#define SDMA_DONE0_CONFIG_DONE_DIS	0x6
 
 /*
  * Buffer descriptor status values.
@@ -129,6 +125,7 @@
  */
 #define CHANGE_ENDIANNESS   0x80
 
+#define SPBA_BUS_NUM_MAX    0x4
 /*
  *  p_2_p watermark_level description
  *	Bits		Name			Description
@@ -190,11 +187,75 @@
 				 BIT(DMA_MEM_TO_DEV) | \
 				 BIT(DMA_DEV_TO_DEV))
 
-#define SDMA_WATERMARK_LEVEL_FIFOS_OFF	12
-#define SDMA_WATERMARK_LEVEL_FIFO_OFF_OFF 16
+#define SDMA_WATERMARK_LEVEL_N_FIFOS	GENMASK(15, 12)
+#define SDMA_WATERMARK_LEVEL_OFF_FIFOS  GENMASK(19, 16)
+#define SDMA_WATERMARK_LEVEL_WORDS_PER_FIFO   GENMASK(31, 28)
 #define SDMA_WATERMARK_LEVEL_SW_DONE	BIT(23)
 #define SDMA_WATERMARK_LEVEL_SW_DONE_SEL_OFF 24
-#define SDMA_WATERMARK_LEVEL_WORDS_PER_FIFO_OFF 28
+
+#define SDMA_DONE0_CONFIG_DONE_SEL	0x7
+#define SDMA_DONE0_CONFIG_DONE_DIS	0x6
+
+/**
+ * struct sdma_script_start_addrs - SDMA script start pointers
+ *
+ * start addresses of the different functions in the physical
+ * address space of the SDMA engine.
+ */
+struct sdma_script_start_addrs {
+	s32 ap_2_ap_addr;
+	s32 ap_2_bp_addr;
+	s32 ap_2_ap_fixed_addr;
+	s32 bp_2_ap_addr;
+	s32 loopback_on_dsp_side_addr;
+	s32 mcu_interrupt_only_addr;
+	s32 firi_2_per_addr;
+	s32 firi_2_mcu_addr;
+	s32 per_2_firi_addr;
+	s32 mcu_2_firi_addr;
+	s32 uart_2_per_addr;
+	s32 uart_2_mcu_addr;
+	s32 per_2_app_addr;
+	s32 mcu_2_app_addr;
+	s32 per_2_per_addr;
+	s32 uartsh_2_per_addr;
+	s32 uartsh_2_mcu_addr;
+	s32 per_2_shp_addr;
+	s32 mcu_2_shp_addr;
+	s32 ata_2_mcu_addr;
+	s32 mcu_2_ata_addr;
+	s32 app_2_per_addr;
+	s32 app_2_mcu_addr;
+	s32 shp_2_per_addr;
+	s32 shp_2_mcu_addr;
+	s32 mshc_2_mcu_addr;
+	s32 mcu_2_mshc_addr;
+	s32 spdif_2_mcu_addr;
+	s32 mcu_2_spdif_addr;
+	s32 asrc_2_mcu_addr;
+	s32 ext_mem_2_ipu_addr;
+	s32 descrambler_addr;
+	s32 dptc_dvfs_addr;
+	s32 utra_addr;
+	s32 ram_code_start_addr;
+	/* End of v1 array */
+	s32 mcu_2_ssish_addr;
+	s32 ssish_2_mcu_addr;
+	s32 hdmi_dma_addr;
+	/* End of v2 array */
+	s32 zcanfd_2_mcu_addr;
+	s32 zqspi_2_mcu_addr;
+	s32 mcu_2_ecspi_addr;
+	s32 mcu_2_sai_addr;
+	s32 sai_2_mcu_addr;
+	s32 uart_2_mcu_rom_addr;
+	s32 uartsh_2_mcu_rom_addr;
+	s32 i2c_2_mcu_addr;
+	s32 mcu_2_i2c_addr;
+	/* End of v3 array */
+	s32 mcu_2_zqspi_addr;
+	/* End of v4 array */
+};
 
 /*
  * Mode/Count of data node descriptors - IPCv2
@@ -373,6 +434,14 @@ struct sdma_desc {
  * @data:		specific sdma interface structure
  * @bd_pool:		dma_pool for bd
  * @terminate_worker:	used to call back into terminate work function
+ * @terminated:		terminated list
+ * @is_ram_script:	flag for script in ram
+ * @n_fifos_src:	number of source device fifos
+ * @n_fifos_dst:	number of destination device fifos
+ * @stride_fifos_src:	stride for source device FIFOs
+ * @stride_fifos_dst:	stride for destination device FIFOs
+ * @words_per_fifo:	copy number of words one time for one FIFO
+ * @sw_done:		software done flag
  */
 struct sdma_channel {
 	struct virt_dma_chan		vc;
@@ -381,7 +450,7 @@ struct sdma_channel {
 	unsigned int			channel;
 	enum dma_transfer_direction	direction;
 	struct dma_slave_config		slave_config;
-	struct sdma_audio_config	*audio_config;
+	struct sdma_peripheral_config	*audio_config;
 	enum sdma_peripheral_type	peripheral_type;
 	unsigned int			event_id0;
 	unsigned int			event_id1;
@@ -400,6 +469,12 @@ struct sdma_channel {
 	struct list_head                terminated;
 	bool				is_ram_script;
 	int				prio;
+	unsigned int                    n_fifos_src;
+	unsigned int                    n_fifos_dst;
+	unsigned int                    stride_fifos_src;
+	unsigned int                    stride_fifos_dst;
+	unsigned int                    words_per_fifo;
+	bool                            sw_done;
 };
 
 #define IMX_DMA_SG_LOOP		BIT(0)
@@ -451,8 +526,8 @@ struct sdma_driver_data {
 	bool check_ratio;
 	/*
 	 * ecspi ERR009165 fixed should be done in sdma script
-	 * and it be fixed in soc from i.mx6ul.
-	 * please get more information from below link:
+	 * and it has been fixed in soc from i.mx6ul.
+	 * please get more information from the below link:
 	 * https://www.nxp.com/docs/en/errata/IMX6DQCE.pdf
 	 */
 	bool ecspi_fixed;
@@ -486,8 +561,8 @@ struct sdma_engine {
 	struct sdma_buffer_descriptor	*bd0;
 	/* clock ratio for AHB:SDMA core. 1:1 is 1, 2:1 is 0*/
 	bool				clk_ratio;
+	bool                            fw_loaded;
 	struct gen_pool			*iram_pool;
-	bool				fw_loaded;
 	u32				fw_fail;
 	u8				*fw_data;
 	unsigned short			ram_code_start;
@@ -587,28 +662,16 @@ static struct sdma_driver_data sdma_imx6q = {
 	.script_addrs = &sdma_script_imx6q,
 };
 
-static struct sdma_script_start_addrs sdma_script_imx6sx = {
-	.ap_2_ap_addr = 642,
-	.uart_2_mcu_addr = 817,
-	.mcu_2_app_addr = 747,
-	.uartsh_2_mcu_addr = 1032,
-	.mcu_2_shp_addr = 960,
-	.app_2_mcu_addr = 683,
-	.shp_2_mcu_addr = 891,
-	.spdif_2_mcu_addr = 1100,
-	.mcu_2_spdif_addr = 1134,
-};
-
 static struct sdma_driver_data sdma_imx6sx = {
 	.chnenbl0 = SDMA_CHNENBL0_IMX35,
 	.num_events = 48,
-	.script_addrs = &sdma_script_imx6sx,
+	.script_addrs = &sdma_script_imx6q,
 };
 
 static struct sdma_driver_data sdma_imx6ul = {
 	.chnenbl0 = SDMA_CHNENBL0_IMX35,
 	.num_events = 48,
-	.script_addrs = &sdma_script_imx6sx,
+	.script_addrs = &sdma_script_imx6q,
 	.ecspi_fixed = true,
 };
 
@@ -647,46 +710,6 @@ static struct sdma_driver_data sdma_imx8mp = {
 	.pm_runtime = true,
 };
 
-static const struct platform_device_id sdma_devtypes[] = {
-	{
-		.name = "imx25-sdma",
-		.driver_data = (unsigned long)&sdma_imx25,
-	}, {
-		.name = "imx31-sdma",
-		.driver_data = (unsigned long)&sdma_imx31,
-	}, {
-		.name = "imx35-sdma",
-		.driver_data = (unsigned long)&sdma_imx35,
-	}, {
-		.name = "imx51-sdma",
-		.driver_data = (unsigned long)&sdma_imx51,
-	}, {
-		.name = "imx53-sdma",
-		.driver_data = (unsigned long)&sdma_imx53,
-	}, {
-		.name = "imx6q-sdma",
-		.driver_data = (unsigned long)&sdma_imx6q,
-	}, {
-		.name = "imx6sx-sdma",
-		.driver_data = (unsigned long)&sdma_imx6sx,
-	}, {
-		.name = "imx7d-sdma",
-		.driver_data = (unsigned long)&sdma_imx7d,
-	}, {
-		.name = "imx6ul-sdma",
-		.driver_data = (unsigned long)&sdma_imx6ul,
-	}, {
-		.name = "imx8mq-sdma",
-		.driver_data = (unsigned long)&sdma_imx8mq,
-	}, {
-		.name = "imx8mp-sdma",
-		.driver_data = (unsigned long)&sdma_imx8mp,
-	}, {
-		/* sentinel */
-	}
-};
-MODULE_DEVICE_TABLE(platform, sdma_devtypes);
-
 static const struct of_device_id sdma_dt_ids[] = {
 	{ .compatible = "fsl,imx6q-sdma", .data = &sdma_imx6q, },
 	{ .compatible = "fsl,imx53-sdma", .data = &sdma_imx53, },
@@ -694,8 +717,8 @@ static const struct of_device_id sdma_dt_ids[] = {
 	{ .compatible = "fsl,imx35-sdma", .data = &sdma_imx35, },
 	{ .compatible = "fsl,imx31-sdma", .data = &sdma_imx31, },
 	{ .compatible = "fsl,imx25-sdma", .data = &sdma_imx25, },
-	{ .compatible = "fsl,imx6sx-sdma", .data = &sdma_imx6sx, },
 	{ .compatible = "fsl,imx7d-sdma", .data = &sdma_imx7d, },
+	{ .compatible = "fsl,imx6sx-sdma", .data = &sdma_imx6sx, },
 	{ .compatible = "fsl,imx6ul-sdma", .data = &sdma_imx6ul, },
 	{ .compatible = "fsl,imx8mq-sdma", .data = &sdma_imx8mq, },
 	{ .compatible = "fsl,imx8mp-sdma", .data = &sdma_imx8mp, },
@@ -707,6 +730,30 @@ MODULE_DEVICE_TABLE(of, sdma_dt_ids);
 #define SDMA_H_CONFIG_RTD_PINS	BIT(11) /* indicates if Real-Time Debug pins are enabled */
 #define SDMA_H_CONFIG_ACR	BIT(4)  /* indicates if AHB freq /core freq = 2 or 1 */
 #define SDMA_H_CONFIG_CSM	(3)       /* indicates which context switch mode is selected*/
+
+static void sdma_pm_clk_enable(struct sdma_engine *sdma, bool direct, bool enable)
+{
+	if (enable) {
+		if (sdma->drvdata->pm_runtime)
+			pm_runtime_get_sync(sdma->dev);
+		else {
+			clk_enable(sdma->clk_ipg);
+			clk_enable(sdma->clk_ahb);
+		}
+	} else {
+		if (sdma->drvdata->pm_runtime) {
+			if (direct) {
+				pm_runtime_put_sync_suspend(sdma->dev);
+			} else {
+				pm_runtime_mark_last_busy(sdma->dev);
+				pm_runtime_put_autosuspend(sdma->dev);
+			}
+		} else {
+			clk_disable(sdma->clk_ipg);
+			clk_disable(sdma->clk_ahb);
+		}
+	}
+}
 
 static inline u32 chnenbl_ofs(struct sdma_engine *sdma, unsigned int event)
 {
@@ -750,6 +797,11 @@ static int sdma_config_ownership(struct sdma_channel *sdmac,
 	return 0;
 }
 
+static int is_sdma_channel_enabled(struct sdma_engine *sdma, int channel)
+{
+	return !!(readl(sdma->regs + SDMA_H_STATSTOP) & BIT(channel));
+}
+
 static void sdma_enable_channel(struct sdma_engine *sdma, int channel)
 {
 	writel(BIT(channel), sdma->regs + SDMA_H_START);
@@ -764,7 +816,9 @@ static int sdma_run_channel0(struct sdma_engine *sdma)
 	u32 reg;
 
 	sdma_enable_channel(sdma, 0);
-
+	/* enlarge timeout to 5ms for safe since many highest channel
+	 * also may run at the same time like asrc/easrc tough test.
+	 */
 	ret = readl_relaxed_poll_timeout_atomic(sdma->regs + SDMA_H_STATSTOP,
 						reg, !(reg & 1), 1, 5000);
 	if (ret)
@@ -780,13 +834,14 @@ static int sdma_run_channel0(struct sdma_engine *sdma)
 	return ret;
 }
 
+
 #define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V1	34
 #define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V2	38
 #define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V3	47
 #define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V4	48
 
 static void sdma_add_scripts(struct sdma_engine *sdma,
-		const struct sdma_script_start_addrs *addr)
+			     const struct sdma_script_start_addrs *addr)
 {
 	s32 *addr_arr = (u32 *)addr;
 	s32 *saddr_arr = (u32 *)sdma->script_addrs;
@@ -807,6 +862,19 @@ static void sdma_add_scripts(struct sdma_engine *sdma,
 	for (i = 0; i < sdma->script_number; i++)
 		if (addr_arr[i] > 0)
 			saddr_arr[i] = addr_arr[i];
+
+	/*
+	 * For compatibility with NXP internal legacy kernel before 4.19 which
+	 * is based on uart ram script and mainline kernel based on uart rom
+	 * script, both uart ram/rom scripts are present in newer sdma
+	 * firmware. Use the rom versions if they are present (V3 or newer).
+	 */
+	if (sdma->script_number >= SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V3) {
+		if (addr->uart_2_mcu_rom_addr)
+			sdma->script_addrs->uart_2_mcu_addr = addr->uart_2_mcu_rom_addr;
+		if (addr->uartsh_2_mcu_rom_addr)
+			sdma->script_addrs->uartsh_2_mcu_addr = addr->uartsh_2_mcu_rom_addr;
+	}
 }
 
 static int sdma_load_script(struct sdma_engine *sdma)
@@ -869,7 +937,8 @@ static void sdma_event_enable(struct sdma_channel *sdmac, unsigned int event)
 	writel_relaxed(val, sdma->regs + chnenbl);
 
 	/* Set SDMA_DONEx_CONFIG is sw_done enabled */
-	if (sdmac->audio_config && sdmac->audio_config->sw_done_sel & BIT(31)) {
+	if (sdmac->audio_config && (sdmac->audio_config->sw_done_sel & BIT(31) ||
+					sdmac->sw_done)) {
 		u32 sw_done_sel = sdmac->audio_config->sw_done_sel & 0xff;
 		u32 offset = SDMA_DONE0_CONFIG + sw_done_sel / 4;
 		u32 done_sel = SDMA_DONE0_CONFIG_DONE_SEL +
@@ -886,7 +955,7 @@ static void sdma_event_enable(struct sdma_channel *sdmac, unsigned int event)
 }
 
 static int sdma_set_channel_priority(struct sdma_channel *sdmac,
-		unsigned int priority)
+				     unsigned int priority)
 {
 	struct sdma_engine *sdma = sdmac->sdma;
 	int channel = sdmac->channel;
@@ -943,7 +1012,6 @@ static void sdma_update_channel_loop(struct sdma_channel *sdmac)
 	struct sdma_buffer_descriptor *bd;
 	int error = 0;
 	enum dma_status	old_status = sdmac->status;
-	int count = 0;
 
 	/*
 	 * loop mode. Iterate over descriptors, re-setup them and
@@ -953,17 +1021,6 @@ static void sdma_update_channel_loop(struct sdma_channel *sdmac)
 		struct sdma_desc *desc = sdmac->desc;
 
 		bd = &desc->bd[desc->buf_tail];
-
-		/*
-		 * re-enable HSTART_HE if all bds consumed at the last time,
-		 * that happens in high loading case which sdma_handle_channel_
-		 * loop can't be handled in time while all bds run out in sdma
-		 * side, then sdma script clear HE and cause channel stop.
-		 */
-		if (count == desc->num_bd) {
-			dev_warn(sdmac->sdma->dev, "All bds consumed,restart now.\n");
-			sdma_enable_channel(sdmac->sdma, sdmac->channel);
-		}
 
 		if (bd->mode.status & BD_DONE)
 			break;
@@ -990,7 +1047,6 @@ static void sdma_update_channel_loop(struct sdma_channel *sdmac)
 		bd->mode.count = desc->period_len;
 		desc->buf_ptail = desc->buf_tail;
 		desc->buf_tail = (desc->buf_tail + 1) % desc->num_bd;
-		count++;
 
 		/*
 		 * The callback is called from the interrupt context in order
@@ -1002,8 +1058,20 @@ static void sdma_update_channel_loop(struct sdma_channel *sdmac)
 		dmaengine_desc_get_callback_invoke(&desc->vd.tx, NULL);
 		spin_lock(&sdmac->vc.lock);
 
+		/* Assign buffer ownership to SDMA */
+		bd->mode.status |= BD_DONE;
+
 		if (error)
 			sdmac->status = old_status;
+	}
+
+	/*
+	 * SDMA stops cyclic channel when DMA request triggers a channel and no SDMA
+	 * owned buffer is available (i.e. BD_DONE was set too late).
+	 */
+	if (sdmac->desc && !is_sdma_channel_enabled(sdmac->sdma, sdmac->channel)) {
+		dev_warn(sdmac->sdma->dev, "restart cyclic channel %d\n", sdmac->channel);
+		sdma_enable_channel(sdmac->sdma, sdmac->channel);
 	}
 }
 
@@ -1021,9 +1089,9 @@ static void mxc_sdma_handle_channel_normal(struct sdma_channel *data)
 	for (i = 0; i < sdmac->desc->num_bd; i++) {
 		bd = &sdmac->desc->bd[i];
 
-		 if (bd->mode.status & (BD_DONE | BD_RROR))
+		if (bd->mode.status & (BD_DONE | BD_RROR))
 			error = -EIO;
-		 sdmac->desc->chn_real_count += bd->mode.count;
+		sdmac->desc->chn_real_count += bd->mode.count;
 	}
 
 	if (error)
@@ -1037,13 +1105,7 @@ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 	struct sdma_engine *sdma = dev_id;
 	unsigned long stat;
 
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdma->dev);
-	else {
-		clk_enable(sdma->clk_ipg);
-		clk_enable(sdma->clk_ahb);
-	}
-
+	sdma_pm_clk_enable(sdma, false, true);
 	stat = readl_relaxed(sdma->regs + SDMA_H_INTR);
 	writel_relaxed(stat, sdma->regs + SDMA_H_INTR);
 	/* channel 0 is special and not handled here, see run_channel0() */
@@ -1073,13 +1135,7 @@ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 		__clear_bit(channel, &stat);
 	}
 
-	if (sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdma->dev);
-		pm_runtime_put_autosuspend(sdma->dev);
-	} else {
-		clk_disable(sdma->clk_ipg);
-		clk_disable(sdma->clk_ahb);
-	}
+	sdma_pm_clk_enable(sdma, false, false);
 
 	return IRQ_HANDLED;
 }
@@ -1087,7 +1143,7 @@ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 /*
  * sets the pc of SDMA script according to the peripheral type
  */
-static void sdma_get_pc(struct sdma_channel *sdmac,
+static int sdma_get_pc(struct sdma_channel *sdmac,
 		enum sdma_peripheral_type peripheral_type)
 {
 	struct sdma_engine *sdma = sdmac->sdma;
@@ -1102,6 +1158,7 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
 	sdmac->pc_to_device = 0;
 	sdmac->device_to_device = 0;
 	sdmac->pc_to_pc = 0;
+	sdmac->is_ram_script = false;
 
 	switch (peripheral_type) {
 	case IMX_DMATYPE_MEMORY:
@@ -1129,8 +1186,15 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
 		break;
 	case IMX_DMATYPE_CSPI:
 		per_2_emi = sdma->script_addrs->app_2_mcu_addr;
-		emi_2_per = sdma->script_addrs->mcu_2_ecspi_addr;
-		sdmac->is_ram_script = true;
+
+		/* Use rom script mcu_2_app if ERR009165 fixed */
+		if (sdmac->sdma->drvdata->ecspi_fixed) {
+			emi_2_per = sdma->script_addrs->mcu_2_app_addr;
+		} else {
+			emi_2_per = sdma->script_addrs->mcu_2_ecspi_addr;
+			sdmac->is_ram_script = true;
+		}
+
 		break;
 	case IMX_DMATYPE_EXT:
 	case IMX_DMATYPE_SSI:
@@ -1162,7 +1226,6 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
 		per_2_emi = sdma->script_addrs->shp_2_mcu_addr;
 		emi_2_per = sdma->script_addrs->mcu_2_shp_addr;
 		per_2_per = sdma->script_addrs->per_2_per_addr;
-		sdmac->is_ram_script = true;
 		break;
 	case IMX_DMATYPE_MSHC:
 		per_2_emi = sdma->script_addrs->mshc_2_mcu_addr;
@@ -1178,10 +1241,6 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
 	case IMX_DMATYPE_IPU_MEMORY:
 		emi_2_per = sdma->script_addrs->ext_mem_2_ipu_addr;
 		break;
-	case IMX_DMATYPE_HDMI:
-		emi_2_per = sdma->script_addrs->hdmi_dma_addr;
-		sdmac->is_ram_script = true;
-		break;
 	case IMX_DMATYPE_MULTI_SAI:
 		per_2_emi = sdma->script_addrs->sai_2_mcu_addr;
 		emi_2_per = sdma->script_addrs->mcu_2_sai_addr;
@@ -1191,14 +1250,30 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
 		per_2_emi = sdma->script_addrs->i2c_2_mcu_addr;
 		emi_2_per = sdma->script_addrs->mcu_2_i2c_addr;
 		sdmac->is_ram_script = true;
-	default:
 		break;
+	case IMX_DMATYPE_HDMI:
+		emi_2_per = sdma->script_addrs->hdmi_dma_addr;
+		sdmac->is_ram_script = true;
+		break;
+	default:
+		dev_err(sdma->dev, "Unsupported transfer type %d\n",
+			peripheral_type);
+		return -EINVAL;
 	}
 
 	sdmac->pc_from_device = per_2_emi;
 	sdmac->pc_to_device = emi_2_per;
 	sdmac->device_to_device = per_2_per;
 	sdmac->pc_to_pc = emi_2_emi;
+
+	if (sdma->ram_code_start &&
+	   ((sdmac->pc_from_device >= sdma->ram_code_start) ||
+	   (sdmac->pc_to_device >= sdma->ram_code_start) ||
+	   (sdmac->device_to_device >= sdma->ram_code_start ||
+	   (sdmac->pc_to_pc >= sdma->ram_code_start))))
+		sdmac->is_ram_script = true;
+
+	return 0;
 }
 
 static int sdma_load_context(struct sdma_channel *sdmac)
@@ -1322,9 +1397,7 @@ static int sdma_terminate_all(struct dma_chan *chan)
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 	unsigned long flags;
 
-	if (sdmac->sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
-
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
 	spin_lock_irqsave(&sdmac->vc.lock, flags);
 
 	sdma_disable_channel(chan);
@@ -1344,10 +1417,7 @@ static int sdma_terminate_all(struct dma_chan *chan)
 
 	spin_unlock_irqrestore(&sdmac->vc.lock, flags);
 
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 
 	return 0;
 }
@@ -1400,53 +1470,49 @@ static void sdma_set_watermarklevel_for_p2p(struct sdma_channel *sdmac)
 
 	sdmac->watermark_level |= SDMA_WATERMARK_LEVEL_CONT;
 
-	if (sdmac->audio_config->src_fifo_num > 1)
+	if (sdmac->n_fifos_src > 1)
 		sdmac->watermark_level |= SDMA_WATERMARK_LEVEL_SD;
-	if (sdmac->audio_config->dst_fifo_num > 1)
+	if (sdmac->n_fifos_dst > 1)
 		sdmac->watermark_level |= SDMA_WATERMARK_LEVEL_DD;
 }
 
 static void sdma_set_watermarklevel_for_sais(struct sdma_channel *sdmac)
 {
-	u8 fifo_num = sdmac->audio_config->src_fifo_num |
-		      sdmac->audio_config->dst_fifo_num;
-	u8 fifo_offset = sdmac->audio_config->src_fifo_off |
-			 sdmac->audio_config->dst_fifo_off;
-	u8 words_per_fifo = sdmac->audio_config->words_per_fifo;
+	unsigned int n_fifos;
+	unsigned int stride_fifos;
+	unsigned int words_per_fifo;
 
-	sdmac->watermark_level &= ~(0xFF << SDMA_WATERMARK_LEVEL_FIFOS_OFF |
-				    SDMA_WATERMARK_LEVEL_SW_DONE |
-				    0xf << SDMA_WATERMARK_LEVEL_SW_DONE_SEL_OFF |
-				    0xf << SDMA_WATERMARK_LEVEL_FIFO_OFF_OFF |
-				    0xf << SDMA_WATERMARK_LEVEL_WORDS_PER_FIFO_OFF);
-
-	if (sdmac->audio_config->sw_done_sel & BIT(31))
+	if (sdmac->audio_config && (sdmac->audio_config->sw_done_sel & BIT(31) ||
+					sdmac->sw_done))
 		sdmac->watermark_level |= SDMA_WATERMARK_LEVEL_SW_DONE |
 				(sdmac->audio_config->sw_done_sel & 0xff) <<
 				SDMA_WATERMARK_LEVEL_SW_DONE_SEL_OFF;
 
-	/* For fifo_num
-	 * bit 12-15 is the fifo number;
-	 * bit 16-19 is the fifo offset,
-	 * bit 28-31 is the channels per fifo.
-	 * so here only need to shift left fifo_num 12 bit for watermake_level
-	 */
-	if (fifo_num)
-		sdmac->watermark_level |= fifo_num <<
-					SDMA_WATERMARK_LEVEL_FIFOS_OFF;
+	if (sdmac->direction == DMA_DEV_TO_MEM) {
+		n_fifos = sdmac->n_fifos_src;
+		stride_fifos = sdmac->stride_fifos_src;
+	} else {
+		n_fifos = sdmac->n_fifos_dst;
+		stride_fifos = sdmac->stride_fifos_dst;
+	}
 
-	if (fifo_offset)
-		sdmac->watermark_level |= fifo_offset <<
-					SDMA_WATERMARK_LEVEL_FIFO_OFF_OFF;
+	words_per_fifo = sdmac->words_per_fifo;
+
+	sdmac->watermark_level |=
+			FIELD_PREP(SDMA_WATERMARK_LEVEL_N_FIFOS, n_fifos);
+
+	sdmac->watermark_level |=
+			FIELD_PREP(SDMA_WATERMARK_LEVEL_OFF_FIFOS, stride_fifos);
 
 	if (words_per_fifo)
-		sdmac->watermark_level |= (words_per_fifo - 1) <<
-					SDMA_WATERMARK_LEVEL_WORDS_PER_FIFO_OFF;
+		sdmac->watermark_level |=
+			FIELD_PREP(SDMA_WATERMARK_LEVEL_WORDS_PER_FIFO, (words_per_fifo - 1));
 }
 
 static int sdma_config_channel(struct dma_chan *chan)
 {
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
+	int ret;
 
 	sdma_disable_channel(chan);
 
@@ -1467,13 +1533,14 @@ static int sdma_config_channel(struct dma_chan *chan)
 		break;
 	}
 
+	ret = sdma_get_pc(sdmac, sdmac->peripheral_type);
+	if (ret)
+		return ret;
 	sdma_set_channel_priority(sdmac, sdmac->prio);
 
 	sdma_event_enable(sdmac, sdmac->event_id0);
 	if (sdmac->event_id1)
 		sdma_event_enable(sdmac, sdmac->event_id1);
-
-	sdma_get_pc(sdmac, sdmac->peripheral_type);
 
 	if ((sdmac->peripheral_type != IMX_DMATYPE_MEMORY) &&
 			(sdmac->peripheral_type != IMX_DMATYPE_DSP)) {
@@ -1483,16 +1550,7 @@ static int sdma_config_channel(struct dma_chan *chan)
 			    sdmac->peripheral_type == IMX_DMATYPE_ASRC)
 				sdma_set_watermarklevel_for_p2p(sdmac);
 		} else {
-			/*
-			 * ERR009165 fixed from i.mx6ul, no errata need,
-			 * set bit31 to let sdma script skip the errata.
-			 */
-			if (sdmac->peripheral_type == IMX_DMATYPE_CSPI &&
-			    sdmac->direction == DMA_MEM_TO_DEV &&
-			    sdmac->sdma->drvdata->ecspi_fixed)
-				__set_bit(31, &sdmac->watermark_level);
-			else if (sdmac->peripheral_type ==
-					IMX_DMATYPE_MULTI_SAI)
+			if (sdmac->peripheral_type == IMX_DMATYPE_MULTI_SAI)
 				sdma_set_watermarklevel_for_sais(sdmac);
 
 			__set_bit(sdmac->event_id0, sdmac->event_mask);
@@ -1692,7 +1750,7 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 	struct imx_dma_data *data = chan->private;
 	struct imx_dma_data mem_data;
-	int prio;
+	int prio, ret;
 
 	/*
 	 * MEMCPY may never setup chan->private by filter function such as
@@ -1711,7 +1769,9 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
 		mem_data.dma_request2 = 0;
 		data = &mem_data;
 
-		sdma_get_pc(sdmac, IMX_DMATYPE_MEMORY);
+		ret = sdma_get_pc(sdmac, IMX_DMATYPE_MEMORY);
+		if (ret)
+			return ret;
 	}
 
 	switch (data->priority) {
@@ -1753,9 +1813,7 @@ static void sdma_free_chan_resources(struct dma_chan *chan)
 	if (unlikely(!sdmac->sdma->fw_data))
 		return;
 
-	if (sdmac->sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
-
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
 	sdma_terminate_all(chan);
 
 	sdma_channel_synchronize(chan);
@@ -1771,22 +1829,13 @@ static void sdma_free_chan_resources(struct dma_chan *chan)
 
 	kfree(sdmac->audio_config);
 	sdmac->audio_config = NULL;
-
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 }
 
 static struct sdma_desc *sdma_transfer_init(struct sdma_channel *sdmac,
 				enum dma_transfer_direction direction, u32 bds)
 {
 	struct sdma_desc *desc;
-
-	if (!sdmac->sdma->fw_loaded && sdmac->is_ram_script) {
-		dev_err(sdmac->sdma->dev, "sdma firmware not ready!\n");
-		goto err_out;
-	}
 
 	desc = kzalloc((sizeof(*desc)), GFP_NOWAIT);
 	if (!desc)
@@ -1807,14 +1856,18 @@ static struct sdma_desc *sdma_transfer_init(struct sdma_channel *sdmac,
 		goto err_desc_out;
 
 	/* No slave_config called in MEMCPY case, so do here */
-	if (direction == DMA_MEM_TO_MEM)
+	if (direction == DMA_MEM_TO_MEM) {
 		sdma_config_ownership(sdmac, false, true, false);
+		sdma_set_channel_priority(sdmac, sdmac->prio);
+	}
 
 	if (sdma_load_context(sdmac))
-		goto err_desc_out;
+		goto err_bd_out;
 
 	return desc;
 
+err_bd_out:
+	sdma_free_bd(desc);
 err_desc_out:
 	kfree(desc);
 err_out:
@@ -1839,14 +1892,11 @@ static struct dma_async_tx_descriptor *sdma_prep_memcpy(
 	dev_dbg(sdma->dev, "memcpy: %pad->%pad, len=%zu, channel=%d.\n",
 		&dma_src, &dma_dst, len, channel);
 
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
-
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
 	desc = sdma_transfer_init(sdmac, DMA_MEM_TO_MEM,
 					len / SDMA_BD_MAX_CNT + 1);
 	if (!desc) {
-		if (sdma->drvdata->pm_runtime)
-			pm_runtime_put_sync_suspend(sdmac->sdma->dev);
+		sdma_pm_clk_enable(sdmac->sdma, true, false);
 		return NULL;
 	}
 
@@ -1880,10 +1930,7 @@ static struct dma_async_tx_descriptor *sdma_prep_memcpy(
 		bd->mode.status = param;
 	} while (len);
 
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 
 	return vchan_tx_prep(&sdmac->vc, &desc->vd, flags);
 }
@@ -1899,11 +1946,12 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
 	int channel = sdmac->channel;
 	struct scatterlist *sg;
 	struct sdma_desc *desc;
+	int ret;
 
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
-
-	sdma_config_write(chan, &sdmac->slave_config, direction);
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
+	ret = sdma_config_write(chan, &sdmac->slave_config, direction);
+	if (ret)
+		goto err_out;
 
 	desc = sdma_transfer_init(sdmac, direction, sg_len);
 	if (!desc)
@@ -1969,10 +2017,7 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
 		bd->mode.status = param;
 	}
 
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 
 	return vchan_tx_prep(&sdmac->vc, &desc->vd, flags);
 err_bd_out:
@@ -1980,8 +2025,8 @@ err_bd_out:
 	kfree(desc);
 err_out:
 	sdmac->status = DMA_ERROR;
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_put_sync_suspend(sdmac->sdma->dev);
+	sdma_pm_clk_enable(sdmac->sdma, true, false);
+
 	return NULL;
 }
 
@@ -1996,16 +2041,18 @@ static struct dma_async_tx_descriptor *sdma_prep_dma_cyclic(
 	int channel = sdmac->channel;
 	int i = 0, buf = 0;
 	struct sdma_desc *desc;
+	int ret;
 
 	dev_dbg(sdma->dev, "%s channel: %d\n", __func__, channel);
 
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
 
 	if (sdmac->peripheral_type != IMX_DMATYPE_HDMI)
 		num_periods = buf_len / period_len;
 
-	sdma_config_write(chan, &sdmac->slave_config, direction);
+	ret = sdma_config_write(chan, &sdmac->slave_config, direction);
+	if (ret)
+		goto err_out;
 
 	desc = sdma_transfer_init(sdmac, direction, num_periods);
 	if (!desc)
@@ -2056,10 +2103,7 @@ static struct dma_async_tx_descriptor *sdma_prep_dma_cyclic(
 		i++;
 	}
 
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 
 	return vchan_tx_prep(&sdmac->vc, &desc->vd, flags);
 err_bd_out:
@@ -2067,8 +2111,8 @@ err_bd_out:
 	kfree(desc);
 err_out:
 	sdmac->status = DMA_ERROR;
-	if (sdma->drvdata->pm_runtime)
-		pm_runtime_put_sync_suspend(sdmac->sdma->dev);
+	sdma_pm_clk_enable(sdmac->sdma, true, false);
+
 	return NULL;
 }
 
@@ -2079,7 +2123,12 @@ static int sdma_config_write(struct dma_chan *chan,
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 
 	sdmac->watermark_level = 0;
-	sdmac->is_ram_script = false;
+	sdma_get_pc(sdmac, sdmac->peripheral_type);
+
+	if (!sdmac->sdma->is_on || (!sdmac->sdma->fw_loaded && sdmac->is_ram_script)) {
+		dev_warn_once(sdmac->sdma->dev, "sdma or sdma firmware not ready!\n");
+		return -EPERM;
+	}
 
 	if (direction == DMA_DEV_TO_MEM) {
 		sdmac->per_address = dmaengine_cfg->src_addr;
@@ -2095,9 +2144,9 @@ static int sdma_config_write(struct dma_chan *chan,
 			SDMA_WATERMARK_LEVEL_HWML;
 		sdmac->word_size = dmaengine_cfg->dst_addr_width;
 	} else if (sdmac->peripheral_type == IMX_DMATYPE_HDMI) {
-			sdmac->per_address = dmaengine_cfg->dst_addr;
-			sdmac->per_address2 = dmaengine_cfg->src_addr;
-			sdmac->watermark_level = 0;
+		sdmac->per_address = dmaengine_cfg->dst_addr;
+		sdmac->per_address2 = dmaengine_cfg->src_addr;
+		sdmac->watermark_level = 0;
 	} else {
 		sdmac->per_address = dmaengine_cfg->dst_addr;
 		sdmac->watermark_level = dmaengine_cfg->dst_maxburst *
@@ -2112,21 +2161,33 @@ static int sdma_config(struct dma_chan *chan,
 		       struct dma_slave_config *dmaengine_cfg)
 {
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
+	struct sdma_engine *sdma = sdmac->sdma;
 	void *tmp;
 
 	memcpy(&sdmac->slave_config, dmaengine_cfg, sizeof(*dmaengine_cfg));
 
-	/* Allocate special sdma_audio_config if it's used */
 	if (dmaengine_cfg->peripheral_config) {
-		tmp = krealloc(sdmac->audio_config,
-			       dmaengine_cfg->peripheral_size, GFP_NOWAIT);
+		struct sdma_peripheral_config *sdmacfg = dmaengine_cfg->peripheral_config;
+		if (dmaengine_cfg->peripheral_size != sizeof(struct sdma_peripheral_config)) {
+			dev_err(sdma->dev, "Invalid peripheral size %zu, expected %zu\n",
+				dmaengine_cfg->peripheral_size,
+				sizeof(struct sdma_peripheral_config));
+			return -EINVAL;
+		}
+
+		tmp = krealloc(sdmac->audio_config, dmaengine_cfg->peripheral_size, GFP_NOWAIT);
 		if (!tmp)
 			return -ENOMEM;
 
-		sdmac->audio_config = (struct sdma_audio_config *)tmp;
+		sdmac->audio_config = (struct sdma_peripheral_config *)tmp;
+		memcpy(tmp, sdmacfg, dmaengine_cfg->peripheral_size);
 
-		memcpy(tmp, dmaengine_cfg->peripheral_config,
-			dmaengine_cfg->peripheral_size);
+		sdmac->n_fifos_src = sdmacfg->n_fifos_src;
+		sdmac->n_fifos_dst = sdmacfg->n_fifos_dst;
+		sdmac->stride_fifos_src = sdmacfg->stride_fifos_src;
+		sdmac->stride_fifos_dst = sdmacfg->stride_fifos_dst;
+		sdmac->words_per_fifo = sdmacfg->words_per_fifo;
+		sdmac->sw_done = sdmacfg->sw_done;
 	}
 
 	/* Set ENBLn earlier to make sure dma request triggered after that */
@@ -2187,18 +2248,13 @@ static void sdma_issue_pending(struct dma_chan *chan)
 	struct sdma_channel *sdmac = to_sdma_chan(chan);
 	unsigned long flags;
 
-	if (sdmac->sdma->drvdata->pm_runtime)
-		pm_runtime_get_sync(sdmac->sdma->dev);
-
+	sdma_pm_clk_enable(sdmac->sdma, false, true);
 	spin_lock_irqsave(&sdmac->vc.lock, flags);
 	if (vchan_issue_pending(&sdmac->vc) && !sdmac->desc)
 		sdma_start_desc(sdmac);
 	spin_unlock_irqrestore(&sdmac->vc.lock, flags);
 
-	if (sdmac->sdma->drvdata->pm_runtime) {
-		pm_runtime_mark_last_busy(sdmac->sdma->dev);
-		pm_runtime_put_autosuspend(sdmac->sdma->dev);
-	}
+	sdma_pm_clk_enable(sdmac->sdma, false, false);
 }
 
 static void sdma_load_firmware(const struct firmware *fw, void *context)
@@ -2211,8 +2267,10 @@ static void sdma_load_firmware(const struct firmware *fw, void *context)
 		if (sdma->fw_fail)
 			dev_info(sdma->dev, "external firmware not found, using ROM firmware\n");
 		else {
+			/*add a bit delay to wait for firmware priv released */
+			msleep(20);
 			request_firmware_nowait(THIS_MODULE,
-					FW_ACTION_HOTPLUG, sdma->fw_name,
+					FW_ACTION_UEVENT, sdma->fw_name,
 					sdma->dev, GFP_KERNEL, sdma,
 					sdma_load_firmware);
 			sdma->fw_fail++;
@@ -2258,7 +2316,7 @@ static void sdma_load_firmware(const struct firmware *fw, void *context)
 		memcpy(sdma->fw_data, fw->data, fw->size);
 
 		if (!sdma->drvdata->pm_runtime)
-			pm_runtime_get_sync(sdma->dev);
+			sdma_runtime_resume(sdma->dev);
 	}
 
 err_firmware:
@@ -2277,7 +2335,7 @@ static int sdma_event_remap(struct sdma_engine *sdma)
 	u32 reg, val, shift, num_map, i;
 	int ret = 0;
 
-	if (IS_ERR(np) || IS_ERR(gpr_np))
+	if (IS_ERR(np) || !gpr_np)
 		goto out;
 
 	event_remap = of_find_property(np, propname, NULL);
@@ -2325,7 +2383,7 @@ static int sdma_event_remap(struct sdma_engine *sdma)
 	}
 
 out:
-	if (!IS_ERR(gpr_np))
+	if (gpr_np)
 		of_node_put(gpr_np);
 
 	return ret;
@@ -2337,7 +2395,7 @@ static int sdma_get_firmware(struct sdma_engine *sdma,
 	int ret;
 
 	ret = request_firmware_nowait(THIS_MODULE,
-			FW_ACTION_HOTPLUG, fw_name, sdma->dev,
+			FW_ACTION_UEVENT, fw_name, sdma->dev,
 			GFP_KERNEL, sdma, sdma_load_firmware);
 
 	return ret;
@@ -2366,9 +2424,9 @@ static int sdma_init_sw(struct sdma_engine *sdma)
 	}
 
 	sdma->context = (void *)sdma->channel_control +
-		MAX_DMA_CHANNELS * sizeof (struct sdma_channel_control);
+		MAX_DMA_CHANNELS * sizeof(struct sdma_channel_control);
 	sdma->context_phys = sdma->ccb_phys +
-		MAX_DMA_CHANNELS * sizeof (struct sdma_channel_control);
+		MAX_DMA_CHANNELS * sizeof(struct sdma_channel_control);
 
 	return 0;
 }
@@ -2417,30 +2475,16 @@ static struct dma_chan *sdma_xlate(struct of_phandle_args *dma_spec,
 
 static int sdma_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *of_id =
-			of_match_device(sdma_dt_ids, &pdev->dev);
 	struct device_node *np = pdev->dev.of_node;
-	struct device_node *spba_bus;
+	struct device_node *spba_bus = NULL;
+	struct device_node *spba_parent_np, *sdma_parent_np;
 	const char *fw_name;
 	int ret;
 	int irq;
-	struct resource *iores;
 	struct resource spba_res;
-	struct sdma_platform_data *pdata = dev_get_platdata(&pdev->dev);
 	int i;
 	struct sdma_engine *sdma;
 	s32 *saddr_arr;
-	const struct sdma_driver_data *drvdata = NULL;
-
-	if (of_id)
-		drvdata = of_id->data;
-	else if (pdev->id_entry)
-		drvdata = (void *)pdev->id_entry->driver_data;
-
-	if (!drvdata) {
-		dev_err(&pdev->dev, "unable to find driver data\n");
-		return -EINVAL;
-	}
 
 	ret = dma_coerce_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (ret)
@@ -2453,14 +2497,13 @@ static int sdma_probe(struct platform_device *pdev)
 	spin_lock_init(&sdma->channel_0_lock);
 
 	sdma->dev = &pdev->dev;
-	sdma->drvdata = drvdata;
+	sdma->drvdata = of_device_get_match_data(sdma->dev);
 
 	irq = platform_get_irq(pdev, 0);
 	if (irq < 0)
 		return irq;
 
-	iores = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	sdma->regs = devm_ioremap_resource(&pdev->dev, iores);
+	sdma->regs = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(sdma->regs))
 		return PTR_ERR(sdma->regs);
 
@@ -2480,8 +2523,8 @@ static int sdma_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_clk;
 
-	ret = devm_request_irq(&pdev->dev, irq, sdma_int_handler, 0, "sdma",
-			       sdma);
+	ret = devm_request_irq(&pdev->dev, irq, sdma_int_handler, 0,
+				dev_name(&pdev->dev), sdma);
 	if (ret)
 		goto err_irq;
 
@@ -2501,6 +2544,7 @@ static int sdma_probe(struct platform_device *pdev)
 	dma_cap_set(DMA_SLAVE, sdma->dma_device.cap_mask);
 	dma_cap_set(DMA_CYCLIC, sdma->dma_device.cap_mask);
 	dma_cap_set(DMA_MEMCPY, sdma->dma_device.cap_mask);
+	dma_cap_set(DMA_PRIVATE, sdma->dma_device.cap_mask);
 
 	INIT_LIST_HEAD(&sdma->dma_device.channels);
 	/* Initialize channel parameters */
@@ -2539,8 +2583,6 @@ static int sdma_probe(struct platform_device *pdev)
 
 	if (sdma->drvdata->script_addrs)
 		sdma_add_scripts(sdma, sdma->drvdata->script_addrs);
-	if (pdata && pdata->script_addrs)
-		sdma_add_scripts(sdma, pdata->script_addrs);
 
 	sdma->dma_device.dev = &pdev->dev;
 
@@ -2576,46 +2618,57 @@ static int sdma_probe(struct platform_device *pdev)
 			goto err_register;
 		}
 
-		spba_bus = of_find_compatible_node(NULL, NULL, "fsl,spba-bus");
-		ret = of_address_to_resource(spba_bus, 0, &spba_res);
-		if (!ret) {
-			sdma->spba_start_addr = spba_res.start;
-			sdma->spba_end_addr = spba_res.end;
+		sdma_parent_np = of_get_parent(np);
+
+		for (i = 0; i < SPBA_BUS_NUM_MAX; i++) {
+			spba_bus = of_find_compatible_node(spba_bus, NULL, "fsl,spba-bus");
+			if (!spba_bus)
+				break;
+
+			spba_parent_np = of_get_parent(spba_bus);
+			if (!strcmp(sdma_parent_np->full_name, spba_parent_np->full_name)) {
+				ret = of_address_to_resource(spba_bus, 0, &spba_res);
+				if (!ret) {
+					sdma->spba_start_addr = spba_res.start;
+					sdma->spba_end_addr = spba_res.end;
+				}
+				of_node_put(spba_bus);
+				of_node_put(spba_parent_np);
+				break;
+			}
+			of_node_put(spba_bus);
+			of_node_put(spba_parent_np);
 		}
-		of_node_put(spba_bus);
+		of_node_put(sdma_parent_np);
 	}
 
-	if (pdata) {
-		sdma->fw_name = pdata->fw_name;
-	} else {
-		/*
-		 * Because that device tree does not encode ROM script address,
-		 * the RAM script in firmware is mandatory for device tree
-		 * probe, otherwise it fails.
-		 */
-		ret = of_property_read_string(np, "fsl,sdma-ram-script-name",
-					      &fw_name);
-		if (ret)
-			dev_warn(&pdev->dev, "failed to get firmware name\n");
-		else
-			sdma->fw_name = fw_name;
+	/*
+	 * Because that device tree does not encode ROM script address,
+	 * the RAM script in firmware is mandatory for device tree
+	 * probe, otherwise it fails.
+	 */
+	ret = of_property_read_string(np, "fsl,sdma-ram-script-name",
+				      &fw_name);
+	if (ret)
+		dev_warn(&pdev->dev, "failed to get firmware name\n");
+	else
+		sdma->fw_name = fw_name;
 
-		ret = sdma_get_firmware(sdma, sdma->fw_name);
-		if (ret)
-			dev_warn(sdma->dev, "failed to get firmware.\n");
-	}
+	ret = sdma_get_firmware(sdma, sdma->fw_name);
+	if (ret)
+		dev_warn(sdma->dev, "failed to get firmware.\n");
 
 	/* enable autosuspend for pm_runtime */
 	if (sdma->drvdata->pm_runtime) {
+		/* For the largest period size 64KB, the dma transfer time
+		 * is about 8 sec.
+		 */
 		pm_runtime_set_autosuspend_delay(&pdev->dev, 8000);
 		pm_runtime_use_autosuspend(&pdev->dev);
 		pm_runtime_mark_last_busy(&pdev->dev);
-		//John_gao Modify auto login crashed when loading audio driver
-		//pm_runtime_set_active(&pdev->dev);
 		pm_runtime_set_suspended(&pdev->dev);
+		pm_runtime_enable(&pdev->dev);
 	}
-
-	pm_runtime_enable(&pdev->dev);
 
 	return 0;
 
@@ -2649,9 +2702,12 @@ static int sdma_remove(struct platform_device *pdev)
 		sdma_free_chan_resources(&sdmac->vc.chan);
 	}
 
-	pm_runtime_disable(&pdev->dev);
-	pm_runtime_set_suspended(&pdev->dev);
-	pm_runtime_dont_use_autosuspend(&pdev->dev);
+	if (sdma->drvdata->pm_runtime) {
+		pm_runtime_disable(&pdev->dev);
+		pm_runtime_dont_use_autosuspend(&pdev->dev);
+	} else {
+		sdma_runtime_suspend(&pdev->dev);
+	}
 
 	platform_set_drvdata(pdev, NULL);
 	return 0;
@@ -2664,9 +2720,9 @@ static int sdma_suspend(struct device *dev)
 	struct sdma_engine *sdma = platform_get_drvdata(pdev);
 	int i, ret = 0;
 
-	/* Do nothing if not i.MX6SX or i.MX7D, i.MX8MP */
+	/* Do nothing if not i.MX6SX/6UL or i.MX7D, i.MX8MP */
 	if (sdma->drvdata != &sdma_imx6sx && sdma->drvdata != &sdma_imx7d
-	   && sdma->drvdata != &sdma_imx6ul && sdma->drvdata != &sdma_imx8mp)
+	    && sdma->drvdata != &sdma_imx6ul && sdma->drvdata != &sdma_imx8mp)
 		return 0;
 
 	if (!sdma->is_on)
@@ -2707,7 +2763,7 @@ static int sdma_resume(struct device *dev)
 	struct sdma_engine *sdma = platform_get_drvdata(pdev);
 	int i, ret;
 
-	/* Do nothing if not i.MX6SX or i.MX7D, i.MX8MP*/
+	/* Do nothing if not i.MX6SX/6UL or i.MX7D, i.MX8MP */
 	if (sdma->drvdata != &sdma_imx6sx && sdma->drvdata != &sdma_imx7d
 	    && sdma->drvdata != &sdma_imx6ul && sdma->drvdata != &sdma_imx8mp)
 		return 0;
@@ -2771,7 +2827,6 @@ static struct platform_driver sdma_driver = {
 		.of_match_table = sdma_dt_ids,
 		.pm = &sdma_pm_ops,
 	},
-	.id_table	= sdma_devtypes,
 	.remove		= sdma_remove,
 	.probe		= sdma_probe,
 };
@@ -2783,7 +2838,7 @@ MODULE_DESCRIPTION("i.MX SDMA driver");
 #if IS_ENABLED(CONFIG_SOC_IMX6Q)
 MODULE_FIRMWARE("imx/sdma/sdma-imx6q.bin");
 #endif
-#if IS_ENABLED(CONFIG_SOC_IMX7D)
+#if IS_ENABLED(CONFIG_SOC_IMX7D) || IS_ENABLED(CONFIG_SOC_IMX8M)
 MODULE_FIRMWARE("imx/sdma/sdma-imx7d.bin");
 #endif
 MODULE_LICENSE("GPL");

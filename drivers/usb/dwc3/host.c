@@ -7,13 +7,27 @@
  * Authors: Felipe Balbi <balbi@ti.com>,
  */
 
-#include <linux/acpi.h>
+#include <linux/irq.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 
 #include "../host/xhci.h"
-
 #include "core.h"
 
+static void dwc3_host_fill_xhci_irq_res(struct dwc3 *dwc,
+					int irq, char *name)
+{
+	struct platform_device *pdev = to_platform_device(dwc->dev);
+	struct device_node *np = dev_of_node(&pdev->dev);
+
+	dwc->xhci_resources[1].start = irq;
+	dwc->xhci_resources[1].end = irq;
+	dwc->xhci_resources[1].flags = IORESOURCE_IRQ | irq_get_trigger_type(irq);
+	if (!name && np)
+		dwc->xhci_resources[1].name = of_node_full_name(pdev->dev.of_node);
+	else
+		dwc->xhci_resources[1].name = name;
+}
 
 #define XHCI_HCSPARAMS1		0x4
 #define XHCI_PORTSC_BASE	0x400
@@ -59,25 +73,26 @@ static int dwc3_host_get_irq(struct dwc3 *dwc)
 	int irq;
 
 	irq = platform_get_irq_byname_optional(dwc3_pdev, "host");
-	if (irq > 0)
+	if (irq > 0) {
+		dwc3_host_fill_xhci_irq_res(dwc, irq, "host");
 		goto out;
+	}
 
 	if (irq == -EPROBE_DEFER)
 		goto out;
 
 	irq = platform_get_irq_byname_optional(dwc3_pdev, "dwc_usb3");
-	if (irq > 0)
+	if (irq > 0) {
+		dwc3_host_fill_xhci_irq_res(dwc, irq, "dwc_usb3");
 		goto out;
+	}
 
 	if (irq == -EPROBE_DEFER)
 		goto out;
 
 	irq = platform_get_irq(dwc3_pdev, 0);
 	if (irq > 0)
-		goto out;
-
-	if (!irq)
-		irq = -EINVAL;
+		dwc3_host_fill_xhci_irq_res(dwc, irq, NULL);
 
 out:
 	return irq;
@@ -85,12 +100,10 @@ out:
 
 int dwc3_host_init(struct dwc3 *dwc)
 {
-	struct property_entry	props[4];
+	struct property_entry	props[5];
 	struct platform_device	*xhci;
 	struct dwc3_platform_data *dwc3_pdata;
 	int			ret, irq;
-	struct resource		*res;
-	struct platform_device	*dwc3_pdev = to_platform_device(dwc->dev);
 	int			prop_idx = 0;
 
 	/*
@@ -104,20 +117,6 @@ int dwc3_host_init(struct dwc3 *dwc)
 	if (irq < 0)
 		return irq;
 
-	res = platform_get_resource_byname(dwc3_pdev, IORESOURCE_IRQ, "host");
-	if (!res)
-		res = platform_get_resource_byname(dwc3_pdev, IORESOURCE_IRQ,
-				"dwc_usb3");
-	if (!res)
-		res = platform_get_resource(dwc3_pdev, IORESOURCE_IRQ, 0);
-	if (!res)
-		return -ENOMEM;
-
-	dwc->xhci_resources[1].start = irq;
-	dwc->xhci_resources[1].end = irq;
-	dwc->xhci_resources[1].flags = res->flags;
-	dwc->xhci_resources[1].name = res->name;
-
 	xhci = platform_device_alloc("xhci-hcd", PLATFORM_DEVID_AUTO);
 	if (!xhci) {
 		dev_err(dwc->dev, "couldn't allocate xHCI device\n");
@@ -125,7 +124,6 @@ int dwc3_host_init(struct dwc3 *dwc)
 	}
 
 	xhci->dev.parent	= dwc->dev;
-	ACPI_COMPANION_SET(&xhci->dev, ACPI_COMPANION(dwc->dev));
 
 	dwc->xhci = xhci;
 
@@ -137,6 +135,8 @@ int dwc3_host_init(struct dwc3 *dwc)
 	}
 
 	memset(props, 0, sizeof(struct property_entry) * ARRAY_SIZE(props));
+
+	props[prop_idx++] = PROPERTY_ENTRY_BOOL("xhci-sg-trb-cache-size-quirk");
 
 	if (dwc->usb3_lpm_capable)
 		props[prop_idx++] = PROPERTY_ENTRY_BOOL("usb3-lpm-capable");
@@ -157,7 +157,7 @@ int dwc3_host_init(struct dwc3 *dwc)
 		props[prop_idx++] = PROPERTY_ENTRY_BOOL("quirk-broken-port-ped");
 
 	if (prop_idx) {
-		ret = platform_device_add_properties(xhci, props);
+		ret = device_create_managed_software_node(&xhci->dev, props, NULL);
 		if (ret) {
 			dev_err(dwc->dev, "failed to add properties to xHCI\n");
 			goto err;
@@ -187,4 +187,5 @@ err:
 void dwc3_host_exit(struct dwc3 *dwc)
 {
 	platform_device_unregister(dwc->xhci);
+	dwc->xhci = NULL;
 }

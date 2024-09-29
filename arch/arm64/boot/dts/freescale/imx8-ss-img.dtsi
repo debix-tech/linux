@@ -1,34 +1,36 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2019-2020 NXP
+ * Copyright 2019-2021 NXP
  * Zhou Guoniu <guoniu.zhou@nxp.com>
  */
+
+img_ipg_clk: clock-img-ipg {
+	compatible = "fixed-clock";
+	#clock-cells = <0>;
+	clock-frequency = <200000000>;
+	clock-output-names = "img_ipg_clk";
+};
+
+img_axi_clk: clock-img-axi {
+	compatible = "fixed-clock";
+	#clock-cells = <0>;
+	clock-frequency = <400000000>;
+	clock-output-names = "img_axi_clk";
+};
+
+img_pxl_clk: clock-img-pxl {
+	compatible = "fixed-clock";
+	#clock-cells = <0>;
+	clock-frequency = <600000000>;
+	clock-output-names = "img_pxl_clk";
+};
+
 img_subsys: bus@58000000 {
-	compatible = "simple-bus";
+	compatible = "simple-pm-bus", "simple-bus";
 	#address-cells = <1>;
 	#size-cells = <1>;
 	ranges = <0x58000000 0x0 0x58000000 0x1000000>;
-
-	img_ipg_clk: clock-img-ipg {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <200000000>;
-		clock-output-names = "img_ipg_clk";
-	};
-
-	img_axi_clk: clock-img-axi {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <400000000>;
-		clock-output-names = "img_axi_clk";
-	};
-
-	img_pxl_clk: clock-img-pxl {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <600000000>;
-		clock-output-names = "img_pxl_clk";
-	};
+	power-domains = <&pd IMX_SC_R_ISI_CH0>;
 
 	csi0_core_lpcg: clock-controller@58223018 {
 		compatible = "fsl,imx8qxp-lpcg";
@@ -243,8 +245,8 @@ img_subsys: bus@58000000 {
 		clock-names = "ipg";
 		fsl,channel = <0>;
 		fsl,num-irqs = <32>;
-		power-domains = <&pd IMX_SC_R_CSI_0>, <&pd IMX_SC_R_ISI_CH0>;
-		power-domain-names = "pd_csi", "pd_isi_ch0";
+		power-domains = <&pd IMX_SC_R_CSI_0>;
+		power-domain-names = "pd_csi";
 		status = "disabled";
 	};
 
@@ -259,8 +261,8 @@ img_subsys: bus@58000000 {
 		clock-names = "ipg";
 		fsl,channel = <0>;
 		fsl,num-irqs = <32>;
-		power-domains = <&pd IMX_SC_R_CSI_1>, <&pd IMX_SC_R_ISI_CH0>;
-		power-domain-names = "pd_csi", "pd_isi_ch0";
+		power-domains = <&pd IMX_SC_R_CSI_1>;
+		power-domain-names = "pd_csi";
 		status = "disabled";
 	};
 
@@ -275,22 +277,22 @@ img_subsys: bus@58000000 {
 		clock-names = "ipg";
 		fsl,channel = <0>;
 		fsl,num-irqs = <32>;
-		power-domains = <&pd IMX_SC_R_PI_0>, <&pd IMX_SC_R_ISI_CH0>;
-		power-domain-names = "pd_pi", "pd_isi_ch0";
+		power-domains = <&pd IMX_SC_R_PI_0>;
+		power-domain-names = "pd_pi";
 		status = "disabled";
 	};
 
 	gpio0_mipi_csi0: gpio@58222000 {
 		compatible = "fsl,imx8qm-gpio", "fsl,imx35-gpio";
 		reg = <0x58222000 0x1000>;
-		interrupts = <0 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <0>;
 		interrupt-parent = <&irqsteer_csi0>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
-		power-domains = <&pd IMX_SC_R_CSI_0>, <&pd IMX_SC_R_ISI_CH0>;
-		power-domain-names = "pd_csi", "pd_isi_ch0";
+		power-domains = <&pd IMX_SC_R_CSI_0>;
+		power-domain-names = "pd_csi";
 	};
 
 	i2c_mipi_csi0: i2c@58226000 {
@@ -324,14 +326,14 @@ img_subsys: bus@58000000 {
 	gpio0_mipi_csi1: gpio@58242000 {
 		compatible = "fsl,imx8qm-gpio", "fsl,imx35-gpio";
 		reg = <0x58242000 0x1000>;
-		interrupts = <0 IRQ_TYPE_LEVEL_HIGH>;
+		interrupts = <0>;
 		interrupt-parent = <&irqsteer_csi1>;
 		gpio-controller;
 		#gpio-cells = <2>;
 		interrupt-controller;
 		#interrupt-cells = <2>;
-		power-domains = <&pd IMX_SC_R_CSI_1>, <&pd IMX_SC_R_ISI_CH0>;
-		power-domain-names = "pd_csi", "pd_isi_ch0";
+		power-domains = <&pd IMX_SC_R_CSI_1>;
+		power-domain-names = "pd_csi";
 	};
 
 	i2c_mipi_csi1: i2c@58246000 {

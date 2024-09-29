@@ -6,7 +6,8 @@
 #ifndef __FSL_RPMSG_H
 #define __FSL_RPMSG_H
 
-/* struct fsl_rpmsg_soc_data
+/*
+ * struct fsl_rpmsg_soc_data
  * @rates: supported rates
  * @formats: supported formats
  */
@@ -41,6 +42,6 @@ struct fsl_rpmsg {
 	unsigned int mclk_streams;
 	int force_lpa;
 	int enable_lpa;
-	int buffer_size;
+	int buffer_size[2];
 };
 #endif /* __FSL_RPMSG_H */

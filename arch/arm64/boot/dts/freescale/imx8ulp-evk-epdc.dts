@@ -37,13 +37,6 @@
 		 * V3P3->VGL->VNEG->VGH->VPOS->VCOM
 		 */
 		regulators {
-#if 0		/* could use EPDC_GPIO */
-			en_reg: DISPLAY {
-				regulator-name = "DISPLAY";
-				regulator-soft-start;
-			};
-#endif
-
 			/* fifth enabe VPOS */
 			vpos_reg: VPOS-LDO {
 				regulator-name = "VPOS";
@@ -131,9 +124,6 @@
 	VCOM-supply = <&vcom_reg>;
 	VPOS-supply = <&vpos_reg>;
 	VNEG-supply = <&vneg_reg>;
-#if 0
-	DISPLAY-supply = <&en_reg>;
-#endif
 	status = "okay";
 };
 

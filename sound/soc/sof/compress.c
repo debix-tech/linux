@@ -9,6 +9,8 @@
 #include <sound/compress_driver.h>
 #include "sof-audio.h"
 #include "sof-priv.h"
+#include "sof-utils.h"
+#include "ops.h"
 
 static void sof_set_transferred_bytes(struct sof_compr_stream *sstream,
 				      u64 host_pos, u64 buffer_size)
@@ -45,22 +47,29 @@ void snd_sof_compr_init_elapsed_work(struct work_struct *work)
  */
 void snd_sof_compr_fragment_elapsed(struct snd_compr_stream *cstream)
 {
-	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct sof_compr_stream *sstream = runtime->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
+	struct snd_soc_pcm_runtime *rtd;
+	struct snd_compr_runtime *crtd;
+	struct snd_soc_component *component;
+	struct sof_compr_stream *sstream;
 	struct snd_sof_pcm *spcm;
+
+	if (!cstream)
+		return;
+
+	rtd = cstream->private_data;
+	crtd = cstream->runtime;
+	sstream = crtd->private_data;
+	component = snd_soc_rtdcom_lookup(rtd, SOF_AUDIO_PCM_DRV_NAME);
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
 	if (!spcm) {
 		dev_err(component->dev,
-			"error: fragment elapsed for unknown stream!\n");
+			"fragment elapsed called for unknown stream!\n");
 		return;
 	}
 
 	sof_set_transferred_bytes(sstream, spcm->stream[cstream->direction].posn.host_posn,
-				  runtime->buffer_size);
+				  crtd->buffer_size);
 
 	/* use the same workqueue-based solution as for PCM, cf. snd_sof_pcm_elapsed */
 	schedule_work(&spcm->stream[cstream->direction].period_elapsed_work);
@@ -70,8 +79,8 @@ static int create_page_table(struct snd_soc_component *component,
 			     struct snd_compr_stream *cstream,
 			     unsigned char *dma_area, size_t size)
 {
-	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_dma_buffer *dmab = cstream->runtime->dma_buffer_p;
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	int dir = cstream->direction;
 	struct snd_sof_pcm *spcm;
 
@@ -83,11 +92,11 @@ static int create_page_table(struct snd_soc_component *component,
 					 spcm->stream[dir].page_table.area, size);
 }
 
-int sof_compr_open(struct snd_soc_component *component,
-		   struct snd_compr_stream *cstream)
+static int sof_compr_open(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream)
 {
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_compr_runtime *runtime = cstream->runtime;
+	struct snd_compr_runtime *crtd = cstream->runtime;
 	struct sof_compr_stream *sstream;
 	struct snd_sof_pcm *spcm;
 	int dir;
@@ -114,20 +123,18 @@ int sof_compr_open(struct snd_soc_component *component,
 	spcm->stream[dir].posn.dai_posn = 0;
 	spcm->prepared[dir] = false;
 
-	runtime->private_data = sstream;
+	crtd->private_data = sstream;
 
 	return 0;
 }
 
-int sof_compr_free(struct snd_soc_component *component,
-		   struct snd_compr_stream *cstream)
+static int sof_compr_free(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct sof_compr_stream *sstream = cstream->runtime->private_data;
 	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
-	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct sof_compr_stream *sstream = runtime->private_data;
 	struct sof_ipc_stream stream;
-	struct sof_ipc_reply reply;
 	struct snd_sof_pcm *spcm;
 	int ret = 0;
 
@@ -140,9 +147,7 @@ int sof_compr_free(struct snd_soc_component *component,
 	stream.comp_id = spcm->stream[cstream->direction].comp_id;
 
 	if (spcm->prepared[cstream->direction]) {
-		ret = sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd,
-					 &stream, sizeof(stream),
-					 &reply, sizeof(reply));
+		ret = sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
 		if (!ret)
 			spcm->prepared[cstream->direction] = false;
 	}
@@ -154,74 +159,119 @@ int sof_compr_free(struct snd_soc_component *component,
 	return ret;
 }
 
-int sof_compr_set_params(struct snd_soc_component *component,
-			 struct snd_compr_stream *cstream, struct snd_compr_params *params)
+static int sof_compr_set_params(struct snd_soc_component *component,
+				struct snd_compr_stream *cstream, struct snd_compr_params *params)
 {
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
-	struct snd_soc_pcm_runtime *rtd_pcm = cstream->private_data;
-	struct snd_compr_runtime *rtd = cstream->runtime;
-	struct sof_compr_stream *sstream = rtd->private_data;
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct snd_compr_runtime *crtd = cstream->runtime;
 	struct sof_ipc_pcm_params_reply ipc_params_reply;
-	struct sof_ipc_pcm_params pcm;
+	struct sof_ipc_fw_ready *ready = &sdev->fw_ready;
+	struct sof_ipc_fw_version *v = &ready->version;
+	struct sof_compr_stream *sstream;
+	struct sof_ipc_pcm_params *pcm;
 	struct snd_sof_pcm *spcm;
+	size_t ext_data_size;
 	int ret;
 
-	spcm = snd_sof_find_spcm_dai(component, rtd_pcm);
+	if (v->abi_version < SOF_ABI_VER(3, 22, 0)) {
+		dev_err(component->dev,
+			"Compress params not supported with FW ABI version %d:%d:%d\n",
+			SOF_ABI_VERSION_MAJOR(v->abi_version),
+			SOF_ABI_VERSION_MINOR(v->abi_version),
+			SOF_ABI_VERSION_PATCH(v->abi_version));
+		return -EINVAL;
+	}
+
+	sstream = crtd->private_data;
+
+	spcm = snd_sof_find_spcm_dai(component, rtd);
+
 	if (!spcm)
 		return -EINVAL;
 
+	ext_data_size = sizeof(params->codec);
+
+	if (sizeof(*pcm) + ext_data_size > sdev->ipc->max_payload_size)
+		return -EINVAL;
+
+	pcm = kzalloc(sizeof(*pcm) + ext_data_size, GFP_KERNEL);
+	if (!pcm)
+		return -ENOMEM;
+
 	cstream->dma_buffer.dev.type = SNDRV_DMA_TYPE_DEV_SG;
 	cstream->dma_buffer.dev.dev = sdev->dev;
-	ret = snd_compr_malloc_pages(cstream, rtd->buffer_size);
+	ret = snd_compr_malloc_pages(cstream, crtd->buffer_size);
 	if (ret < 0)
-		return ret;
+		goto out;
 
-	create_page_table(component, cstream, rtd->dma_area, rtd->dma_bytes);
+	ret = create_page_table(component, cstream, crtd->dma_area, crtd->dma_bytes);
+	if (ret < 0)
+		goto out;
 
-	pcm.params.buffer.pages = PFN_UP(rtd->dma_bytes);
-	pcm.hdr.size = sizeof(pcm);
-	pcm.hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_PCM_PARAMS;
+	pcm->params.buffer.pages = PFN_UP(crtd->dma_bytes);
+	pcm->hdr.size = sizeof(*pcm) + ext_data_size;
+	pcm->hdr.cmd = SOF_IPC_GLB_STREAM_MSG | SOF_IPC_STREAM_PCM_PARAMS;
 
-	pcm.comp_id = spcm->stream[cstream->direction].comp_id;
-	pcm.params.hdr.size = sizeof(pcm.params);
-	pcm.params.buffer.phy_addr = spcm->stream[cstream->direction].page_table.addr;
-	pcm.params.buffer.size = rtd->dma_bytes;
-	pcm.params.direction = cstream->direction;
-	pcm.params.channels = params->codec.ch_out;
-	pcm.params.rate = params->codec.sample_rate;
-	pcm.params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
-	pcm.params.frame_fmt = SOF_IPC_FRAME_S32_LE;
-	pcm.params.sample_container_bytes =
+	pcm->comp_id = spcm->stream[cstream->direction].comp_id;
+	pcm->params.hdr.size = sizeof(pcm->params) + ext_data_size;
+	pcm->params.buffer.phy_addr = spcm->stream[cstream->direction].page_table.addr;
+	pcm->params.buffer.size = crtd->dma_bytes;
+	pcm->params.direction = cstream->direction;
+	pcm->params.channels = params->codec.ch_out;
+	pcm->params.rate = params->codec.sample_rate;
+	pcm->params.buffer_fmt = SOF_IPC_BUFFER_INTERLEAVED;
+	pcm->params.frame_fmt = SOF_IPC_FRAME_S32_LE;
+	pcm->params.sample_container_bytes =
 		snd_pcm_format_physical_width(SNDRV_PCM_FORMAT_S32) >> 3;
-	pcm.params.host_period_bytes = params->buffer.fragment_size;
+	pcm->params.host_period_bytes = params->buffer.fragment_size;
+	pcm->params.ext_data_length = ext_data_size;
 
-	ret = sof_ipc_tx_message(sdev->ipc, pcm.hdr.cmd, &pcm, sizeof(pcm),
+	memcpy((u8 *)pcm->params.ext_data, &params->codec, ext_data_size);
+
+	ret = sof_ipc_tx_message(sdev->ipc, pcm, sizeof(*pcm) + ext_data_size,
 				 &ipc_params_reply, sizeof(ipc_params_reply));
 	if (ret < 0) {
 		dev_err(component->dev, "error ipc failed\n");
-		return ret;
+		goto out;
 	}
 
+	ret = snd_sof_set_stream_data_offset(sdev, &spcm->stream[cstream->direction],
+					     ipc_params_reply.posn_offset);
+	if (ret < 0) {
+		dev_err(component->dev, "Invalid stream data offset for Compr %d\n",
+			spcm->pcm.pcm_id);
+		goto out;
+	}
+
+	sstream->sampling_rate = params->codec.sample_rate;
+	sstream->channels = params->codec.ch_out;
+	sstream->sample_container_bytes = pcm->params.sample_container_bytes;
 	sstream->posn_offset = sdev->stream_box.offset + ipc_params_reply.posn_offset;
-	sstream->sample_rate = params->codec.sample_rate;
+
 	spcm->prepared[cstream->direction] = true;
 
+out:
+	kfree(pcm);
+
+	return ret;
+}
+
+static int sof_compr_get_params(struct snd_soc_component *component,
+				struct snd_compr_stream *cstream, struct snd_codec *params)
+{
+	/* TODO: we don't query the supported codecs for now, if the
+	 * application asks for an unsupported codec the set_params() will fail.
+	 */
 	return 0;
 }
 
-int sof_compr_get_params(struct snd_soc_component *component,
-			 struct snd_compr_stream *cstream, struct snd_codec *params)
+static int sof_compr_trigger(struct snd_soc_component *component,
+			     struct snd_compr_stream *cstream, int cmd)
 {
-	return 0;
-}
-
-int sof_compr_trigger(struct snd_soc_component *component,
-		      struct snd_compr_stream *cstream, int cmd)
-{
-	struct sof_ipc_stream stream;
-	struct sof_ipc_reply reply;
-	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
 	struct snd_sof_dev *sdev = snd_soc_component_get_drvdata(component);
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct sof_ipc_stream stream;
 	struct snd_sof_pcm *spcm;
 
 	spcm = snd_sof_find_spcm_dai(component, rtd);
@@ -250,22 +300,15 @@ int sof_compr_trigger(struct snd_soc_component *component,
 		break;
 	}
 
-	return sof_ipc_tx_message(sdev->ipc, stream.hdr.cmd,
-				  &stream, sizeof(stream),
-				  &reply, sizeof(reply));
+	return sof_ipc_tx_message_no_reply(sdev->ipc, &stream, sizeof(stream));
 }
 
-int sof_compr_copy(struct snd_soc_component *component,
-		   struct snd_compr_stream *cstream,
-		   char __user *buf, size_t count)
+static int sof_compr_copy_playback(struct snd_compr_runtime *rtd,
+				   char __user *buf, size_t count)
 {
-	struct snd_compr_runtime *rtd = cstream->runtime;
-	unsigned int offset, n;
 	void *ptr;
+	unsigned int offset, n;
 	int ret;
-
-	if (count > rtd->buffer_size)
-		count = rtd->buffer_size;
 
 	div_u64_rem(rtd->total_bytes_available, rtd->buffer_size, &offset);
 	ptr = rtd->dma_area + offset;
@@ -281,16 +324,131 @@ int sof_compr_copy(struct snd_soc_component *component,
 	return count - ret;
 }
 
+static int sof_compr_copy_capture(struct snd_compr_runtime *rtd,
+				  char __user *buf, size_t count)
+{
+	void *ptr;
+	unsigned int offset, n;
+	int ret;
+
+	div_u64_rem(rtd->total_bytes_transferred, rtd->buffer_size, &offset);
+	ptr = rtd->dma_area + offset;
+	n = rtd->buffer_size - offset;
+
+	if (count < n) {
+		ret = copy_to_user(buf, ptr, count);
+	} else {
+		ret = copy_to_user(buf, ptr, n);
+		ret += copy_to_user(buf + n, rtd->dma_area, count - n);
+	}
+
+	return count - ret;
+}
+
+static int sof_compr_copy(struct snd_soc_component *component,
+			  struct snd_compr_stream *cstream,
+			  char __user *buf, size_t count)
+{
+	struct snd_compr_runtime *rtd = cstream->runtime;
+
+	if (count > rtd->buffer_size)
+		count = rtd->buffer_size;
+
+	if (cstream->direction == SND_COMPRESS_PLAYBACK)
+		return sof_compr_copy_playback(rtd, buf, count);
+	else
+		return sof_compr_copy_capture(rtd, buf, count);
+}
+
 static int sof_compr_pointer(struct snd_soc_component *component,
 			     struct snd_compr_stream *cstream,
 			     struct snd_compr_tstamp *tstamp)
 {
-	struct snd_compr_runtime *runtime = cstream->runtime;
-	struct sof_compr_stream *sstream = runtime->private_data;
+	struct snd_sof_pcm *spcm;
+	struct snd_soc_pcm_runtime *rtd = cstream->private_data;
+	struct sof_compr_stream *sstream = cstream->runtime->private_data;
 
-	tstamp->sampling_rate = sstream->sample_rate;
+	spcm = snd_sof_find_spcm_dai(component, rtd);
+	if (!spcm)
+		return -EINVAL;
+
+	tstamp->sampling_rate = sstream->sampling_rate;
 	tstamp->copied_total = sstream->copied_total;
+	tstamp->pcm_io_frames = div_u64(spcm->stream[cstream->direction].posn.dai_posn,
+					sstream->channels * sstream->sample_container_bytes);
 
+	return 0;
+}
+
+static int sof_compr_get_caps(struct snd_soc_component *component,
+			      struct snd_compr_stream *cstream,
+			      struct snd_compr_caps *caps)
+{
+	caps->num_codecs = 3;
+	caps->min_fragment_size = 3840;
+	caps->max_fragment_size = 3840;
+	caps->min_fragments = 2;
+	caps->max_fragments = 2;
+	caps->codecs[0] = SND_AUDIOCODEC_MP3;
+	caps->codecs[1] = SND_AUDIOCODEC_AAC;
+	caps->codecs[2] = SND_AUDIOCODEC_PCM;
+
+	return 0;
+}
+
+static struct snd_compr_codec_caps caps_pcm = {
+	.num_descriptors = 1,
+	.descriptor[0].max_ch = 2,
+	.descriptor[0].sample_rates[0] = 48000,
+	.descriptor[0].num_sample_rates = 1,
+	.descriptor[0].bit_rate = {1536, 3072},
+	.descriptor[0].num_bitrates = 2,
+	.descriptor[0].profiles = SND_AUDIOPROFILE_PCM,
+	.descriptor[0].modes = 0,
+	.descriptor[0].formats = SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S32_LE,
+};
+
+static struct snd_compr_codec_caps caps_mp3 = {
+	.num_descriptors = 1,
+	.descriptor[0].max_ch = 2,
+	.descriptor[0].sample_rates[0] = 48000,
+	.descriptor[0].num_sample_rates = 1,
+	.descriptor[0].bit_rate = {32, 40, 48, 56, 64, 80, 96, 112, 224, 256, 320},
+	.descriptor[0].num_bitrates = 11,
+	.descriptor[0].profiles = 0,
+	.descriptor[0].modes = SND_AUDIOCHANMODE_MP3_STEREO,
+	.descriptor[0].formats = 0,
+};
+
+static struct snd_compr_codec_caps caps_aac = {
+	.num_descriptors = 1,
+	.descriptor[0].max_ch = 2,
+	.descriptor[0].sample_rates[0] = 48000,
+	.descriptor[0].num_sample_rates = 1,
+	.descriptor[0].bit_rate = {128, 192},
+	.descriptor[0].num_bitrates = 2,
+	.descriptor[0].profiles = 0,
+	.descriptor[0].modes = 0,
+	.descriptor[0].formats = SND_AUDIOSTREAMFORMAT_MP4ADTS | SND_AUDIOSTREAMFORMAT_MP2ADTS,
+};
+
+static int sof_compr_get_codec_caps(struct snd_soc_component *component,
+				    struct snd_compr_stream *cstream,
+				    struct snd_compr_codec_caps *codec)
+{
+	switch (codec->codec) {
+	case SND_AUDIOCODEC_MP3:
+		*codec = caps_mp3;
+		break;
+	case SND_AUDIOCODEC_AAC:
+		*codec = caps_aac;
+		break;
+	case SND_AUDIOCODEC_PCM:
+		*codec = caps_pcm;
+		break;
+	default:
+		return -EINVAL;
+	}
 	return 0;
 }
 
@@ -302,5 +460,7 @@ struct snd_compress_ops sof_compressed_ops = {
 	.trigger	= sof_compr_trigger,
 	.pointer	= sof_compr_pointer,
 	.copy		= sof_compr_copy,
+	.get_caps	= sof_compr_get_caps,
+	.get_codec_caps	= sof_compr_get_codec_caps,
 };
 EXPORT_SYMBOL(sof_compressed_ops);

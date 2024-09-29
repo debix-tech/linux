@@ -30,6 +30,7 @@ struct mmc_bus_ops {
 	int (*hw_reset)(struct mmc_host *);
 	int (*sw_reset)(struct mmc_host *);
 	bool (*cache_enabled)(struct mmc_host *);
+	int (*flush_cache)(struct mmc_host *);
 };
 
 void mmc_attach_bus(struct mmc_host *host, const struct mmc_bus_ops *ops);
@@ -69,6 +70,7 @@ static inline void mmc_delay(unsigned int ms)
 
 void mmc_rescan(struct work_struct *work);
 void mmc_start_host(struct mmc_host *host);
+void __mmc_stop_host(struct mmc_host *host);
 void mmc_stop_host(struct mmc_host *host);
 
 void _mmc_detect_change(struct mmc_host *host, unsigned long delay,
@@ -84,11 +86,26 @@ int mmc_attach_sdio(struct mmc_host *host);
 extern bool use_spi_crc;
 
 /* Debugfs information for hosts and cards */
+#ifdef CONFIG_DEBUG_FS
 void mmc_add_host_debugfs(struct mmc_host *host);
 void mmc_remove_host_debugfs(struct mmc_host *host);
 
 void mmc_add_card_debugfs(struct mmc_card *card);
 void mmc_remove_card_debugfs(struct mmc_card *card);
+#else
+static inline void mmc_add_host_debugfs(struct mmc_host *host)
+{
+}
+static inline void mmc_remove_host_debugfs(struct mmc_host *host)
+{
+}
+static inline void mmc_add_card_debugfs(struct mmc_card *card)
+{
+}
+static inline void mmc_remove_card_debugfs(struct mmc_card *card)
+{
+}
+#endif
 
 int mmc_execute_tuning(struct mmc_card *card);
 int mmc_hs200_to_hs400(struct mmc_card *card);
@@ -117,6 +134,8 @@ int __mmc_claim_host(struct mmc_host *host, struct mmc_ctx *ctx,
 void mmc_release_host(struct mmc_host *host);
 void mmc_get_card(struct mmc_card *card, struct mmc_ctx *ctx);
 void mmc_put_card(struct mmc_card *card, struct mmc_ctx *ctx);
+
+int mmc_card_alternative_gpt_sector(struct mmc_card *card, sector_t *sector);
 
 /**
  *	mmc_claim_host - exclusively claim a host
@@ -170,6 +189,14 @@ static inline bool mmc_cache_enabled(struct mmc_host *host)
 		return host->bus_ops->cache_enabled(host);
 
 	return false;
+}
+
+static inline int mmc_flush_cache(struct mmc_host *host)
+{
+	if (host->bus_ops->flush_cache)
+		return host->bus_ops->flush_cache(host);
+
+	return 0;
 }
 
 #endif

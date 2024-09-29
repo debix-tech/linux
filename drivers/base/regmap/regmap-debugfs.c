@@ -48,7 +48,7 @@ static ssize_t regmap_name_read_file(struct file *file,
 		name = map->dev->driver->name;
 
 	ret = snprintf(buf, PAGE_SIZE, "%s\n", name);
-	if (ret < 0) {
+	if (ret >= PAGE_SIZE) {
 		kfree(buf);
 		return ret;
 	}
@@ -226,8 +226,8 @@ static ssize_t regmap_read_debugfs(struct regmap *map, unsigned int from,
 	if (*ppos < 0 || !count)
 		return -EINVAL;
 
-	if (count > (PAGE_SIZE << (MAX_ORDER - 1)))
-		count = PAGE_SIZE << (MAX_ORDER - 1);
+	if (count > (PAGE_SIZE << MAX_ORDER))
+		count = PAGE_SIZE << MAX_ORDER;
 
 	buf = kmalloc(count, GFP_KERNEL);
 	if (!buf)
@@ -368,13 +368,13 @@ static ssize_t regmap_reg_ranges_read_file(struct file *file,
 	char *buf;
 	char *entry;
 	int ret;
-	unsigned entry_len;
+	unsigned int entry_len;
 
 	if (*ppos < 0 || !count)
 		return -EINVAL;
 
-	if (count > (PAGE_SIZE << (MAX_ORDER - 1)))
-		count = PAGE_SIZE << (MAX_ORDER - 1);
+	if (count > (PAGE_SIZE << MAX_ORDER))
+		count = PAGE_SIZE << MAX_ORDER;
 
 	buf = kmalloc(count, GFP_KERNEL);
 	if (!buf)
@@ -556,9 +556,10 @@ void regmap_debugfs_init(struct regmap *map)
 	 * a mutex or a spinlock, but if the regmap owner decided to disable
 	 * all locking mechanisms, this is no longer the case. For safety:
 	 * don't create the debugfs entries if locking is disabled.
+	 * Or disabled explicitly in driver.
 	 */
 	if (map->debugfs_disable) {
-		dev_dbg(map->dev, "regmap locking disabled - not creating debugfs entries\n");
+		dev_dbg(map->dev, "regmap debugfs disabled - not creating debugfs entries\n");
 		return;
 	}
 
@@ -598,7 +599,7 @@ void regmap_debugfs_init(struct regmap *map)
 		map->debugfs_name = kasprintf(GFP_KERNEL, "dummy%d",
 						dummy_index);
 		if (!map->debugfs_name)
-				return;
+			return;
 		name = map->debugfs_name;
 		dummy_index++;
 	}
@@ -635,6 +636,17 @@ void regmap_debugfs_init(struct regmap *map)
 				    &map->cache_bypass,
 				    &regmap_cache_bypass_fops);
 	}
+
+	/*
+	 * This could interfere with driver operation. Therefore, don't provide
+	 * any real compile time configuration option for this feature. One will
+	 * have to modify the source code directly in order to use it.
+	 */
+#undef REGMAP_ALLOW_FORCE_WRITE_FIELD_DEBUGFS
+#ifdef REGMAP_ALLOW_FORCE_WRITE_FIELD_DEBUGFS
+	debugfs_create_bool("force_write_field", 0600, map->debugfs,
+			    &map->force_write_field);
+#endif
 
 	next = rb_first(&map->range_tree);
 	while (next) {

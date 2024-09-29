@@ -95,7 +95,9 @@ static ssize_t HDCPRX_enable_store(struct device *dev,
 		return -1;
 	}
 
-    sscanf(buf, "%d", &value);
+	if (sscanf(buf, "%d", &value) != 1)
+		return -EINVAL;
+
     /* HDCP start/stop and load/unload of modules will be handled
        in the tmdsmon function. We just setup the flags here.
     */
@@ -498,7 +500,7 @@ static const struct media_entity_operations hdmi_media_ops = {
  * v4l2_subdev_pad_ops
  */
 static int hdmirx_enum_framesizes(struct v4l2_subdev *sd,
-			       struct v4l2_subdev_pad_config *cfg,
+			       struct v4l2_subdev_state *state,
 			       struct v4l2_subdev_frame_size_enum *fse)
 {
 	struct cdns_hdmirx_device *hdmirx = cdns_sd_to_hdmi(sd);
@@ -519,7 +521,7 @@ static int hdmirx_enum_framesizes(struct v4l2_subdev *sd,
 	return 0;
 }
 static int hdmirx_enum_frame_interval(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_state *state,
 				   struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct cdns_hdmirx_device *hdmirx = cdns_sd_to_hdmi(sd);
@@ -541,7 +543,7 @@ static int hdmirx_enum_frame_interval(struct v4l2_subdev *sd,
 }
 
 static int hdmirx_enum_mbus_code(struct v4l2_subdev *sd,
-				  struct v4l2_subdev_pad_config *cfg,
+				  struct v4l2_subdev_state *state,
 				  struct v4l2_subdev_mbus_code_enum *code)
 {
 	if (code->index != 0)
@@ -553,7 +555,7 @@ static int hdmirx_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 static int hdmirx_get_format(struct v4l2_subdev *sd,
-				   struct v4l2_subdev_pad_config *cfg,
+				   struct v4l2_subdev_state *state,
 				   struct v4l2_subdev_format *sdformat)
 {
 	struct cdns_hdmirx_device *hdmirx = cdns_sd_to_hdmi(sd);
@@ -563,9 +565,6 @@ static int hdmirx_get_format(struct v4l2_subdev *sd,
 		dev_warn(&hdmirx->pdev->dev, "No Cable Connected!\n");
 		return -EINVAL;
 	}
-
-	if (sdformat->pad != MXC_HDMI_RX_PAD_SOURCE)
-		return -EINVAL;
 
 	switch (hdmirx->pixel_encoding) {
 	case PIXEL_ENCODING_YUV422:
@@ -717,7 +716,11 @@ void imx8qm_hdmi_phy_reset(struct cdns_hdmirx_device *hdmirx, u8 reset)
 
 	dev_dbg(&hdmirx->pdev->dev, "%s\n", __func__);
 
-	imx_scu_get_handle(&handle);
+	ret = imx_scu_get_handle(&handle);
+	if (ret) {
+		DRM_ERROR("Failed to get scu ipc handle (%d)\n", ret);
+		return;
+	}
 	/* set the pixel link mode and pixel type */
 	ret = imx_sc_misc_set_control(handle, IMX_SC_R_HDMI_RX, IMX_SC_C_PHY_RESET, reset);
 	if (ret)
@@ -938,6 +941,8 @@ static int tmdsmon_fn(void *data)
 			continue;
 
 		if (change) {
+			char event_string[32];
+			char *envp[] = { event_string, NULL };
 			if (hdmirx->initialized) {
 				if (hdmirx->hdcp_fw_loaded && !hdmirx->allow_hdcp)
 					cdns_hdcprx_disable(hdmirx);
@@ -986,6 +991,12 @@ static int tmdsmon_fn(void *data)
 			startup_attempts = 0;
 			hdmirx->initialized = true;
 			hdmirx->cable_plugin = true;
+
+			/* Only send the UEVENT after HDMI RX is ready */
+			sprintf(event_string, "EVENT=hdmirxin");
+			kobject_uevent_env(&hdmirx->pdev->dev.kobj,
+					   KOBJ_CHANGE, envp);
+
 		} else {
 			if (hdmirx->initialized) {
 
@@ -1102,10 +1113,6 @@ static void hpd5v_work_func(struct work_struct *work)
 		}
 		hdmirx->initialized = 0;
 		hdmirx->tmds_clk = -1;
-
-		sprintf(event_string, "EVENT=hdmirxin");
-		kobject_uevent_env(&hdmirx->pdev->dev.kobj, KOBJ_CHANGE, envp);
-		hdmirx->cable_plugin = true;
 #ifdef CONFIG_MHDP_HDMIRX_CEC
 		if (hdmirx->is_cec) {
 			hdmirx_cec_init(hdmirx);
@@ -1146,7 +1153,7 @@ static void hpd5v_work_func(struct work_struct *work)
 		dev_warn(&hdmirx->pdev->dev, "HDMI RX Cable State unknow\n");
 }
 
-#define HOTPLUG_DEBOUNCE_MS		200
+#define RX_HOTPLUG_DEBOUNCE_MS		200
 static irqreturn_t hdp5v_irq_thread(int irq, void *data)
 {
 	struct cdns_hdmirx_device *hdmirx =  data;
@@ -1156,7 +1163,7 @@ static irqreturn_t hdp5v_irq_thread(int irq, void *data)
 	disable_irq_nosync(irq);
 
 	mod_delayed_work(system_wq, &hdmirx->hpd5v_work,
-			msecs_to_jiffies(HOTPLUG_DEBOUNCE_MS));
+			msecs_to_jiffies(RX_HOTPLUG_DEBOUNCE_MS));
 
 	return IRQ_HANDLED;
 }
@@ -1254,8 +1261,13 @@ static int hdmirx_probe(struct platform_device *pdev)
 
 	hdmirx->is_cec = of_property_read_bool(pdev->dev.of_node, "fsl,cec");
 
-	of_property_read_string(pdev->dev.of_node, "firmware-name",
-					&hdmirx->firmware_name);
+	ret = of_property_read_string(pdev->dev.of_node, "firmware-name",
+				&hdmirx->firmware_name);
+	if (ret < 0) {
+		v4l2_async_unregister_subdev(&hdmirx->sd);
+		media_entity_cleanup(&hdmirx->sd.entity);
+		return ret;
+	}
 
 	hdmirx_clock_init(hdmirx);
 
@@ -1492,3 +1504,7 @@ static struct platform_driver hdmirx_driver = {
 };
 
 module_platform_driver(hdmirx_driver);
+
+MODULE_DESCRIPTION("Cadence HDMI RX driver");
+MODULE_LICENSE("GPL");
+MODULE_ALIAS("platform:cdns-hdmirx");

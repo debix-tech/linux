@@ -931,8 +931,12 @@ static int qman_ccsrmempeek(u32 *val, u32 offset)
 static int qman_ccsrmempeek_show(struct seq_file *file, void *offset)
 {
 	u32 b;
+	int err;
 
-	qman_ccsrmempeek(&b, qman_register_data.val);
+	err = qman_ccsrmempeek(&b, qman_register_data.val);
+	if (err)
+		return err;
+
 	seq_printf(file, "QMan register offset = 0x%x\n",
 		   qman_register_data.val);
 	seq_printf(file, "value = 0x%08x\n", b);
@@ -1211,7 +1215,7 @@ static int qman_fqd_dest_wq_show(struct seq_file *file, void *offset)
 	for (i = 0; i < 0xFFFF; i++) {
 		if (wq[i])
 			seq_printf(file, "Channel: 0x%x WQ: 0x%x WQ_ID: 0x%x, "
-				"count = %u\n", i >> 3, i & 0x3, i, wq[i]);
+				"count = %u\n", i >> 3, i & 0x7, i, wq[i]);
 	}
 	vfree(wq);
 	return 0;

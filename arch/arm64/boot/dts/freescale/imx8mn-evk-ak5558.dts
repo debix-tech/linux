@@ -18,10 +18,11 @@
 	sound-wm8524 {
 		audio-asrc = <0>;
 	};
+
 	sound-ak5558 {
-		asrc-controller = <&easrc>;
 		status = "okay";
 	};
+
 	sound-micfil {
 		status = "disabled";
 	};

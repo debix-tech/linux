@@ -20,11 +20,10 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_drv.h>
-#include <drm/drm_fb_cma_helper.h>
-#include <drm/drm_fb_helper.h>
-#include <drm/drm_gem_cma_helper.h>
-#include <drm/drm_irq.h>
+#include <drm/drm_fbdev_dma.h>
+#include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_modeset_helper.h>
+#include <drm/drm_module.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
 
@@ -51,64 +50,29 @@ static const struct regmap_config fsl_dcu_regmap_config = {
 	.volatile_reg = fsl_dcu_drm_is_volatile_reg,
 };
 
-static void fsl_dcu_irq_uninstall(struct drm_device *dev)
+static int fsl_dcu_scfg_config_ls1021a(void)
+{
+	struct regmap *scfg;
+
+	scfg = syscon_regmap_lookup_by_compatible("fsl,ls1021a-scfg");
+	if (IS_ERR(scfg))
+		return PTR_ERR(scfg);
+
+	/*
+	 * For simplicity, enable the PIXCLK unconditionally. It might
+	 * be possible to disable the clock in PM or on unload as a future
+	 * improvement.
+	 */
+	return regmap_update_bits(scfg, SCFG_PIXCLKCR, SCFG_PIXCLKCR_PXCEN,
+				  SCFG_PIXCLKCR_PXCEN);
+}
+
+static void fsl_dcu_irq_reset(struct drm_device *dev)
 {
 	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
 
 	regmap_write(fsl_dev->regmap, DCU_INT_STATUS, ~0);
 	regmap_write(fsl_dev->regmap, DCU_INT_MASK, ~0);
-}
-
-static int fsl_dcu_load(struct drm_device *dev, unsigned long flags)
-{
-	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
-	int ret;
-
-	ret = fsl_dcu_drm_modeset_init(fsl_dev);
-	if (ret < 0) {
-		dev_err(dev->dev, "failed to initialize mode setting\n");
-		return ret;
-	}
-
-	ret = drm_vblank_init(dev, dev->mode_config.num_crtc);
-	if (ret < 0) {
-		dev_err(dev->dev, "failed to initialize vblank\n");
-		goto done;
-	}
-
-	ret = drm_irq_install(dev, fsl_dev->irq);
-	if (ret < 0) {
-		dev_err(dev->dev, "failed to install IRQ handler\n");
-		goto done;
-	}
-
-	if (legacyfb_depth != 16 && legacyfb_depth != 24 &&
-	    legacyfb_depth != 32) {
-		dev_warn(dev->dev,
-			"Invalid legacyfb_depth.  Defaulting to 24bpp\n");
-		legacyfb_depth = 24;
-	}
-
-	return 0;
-done:
-	drm_kms_helper_poll_fini(dev);
-
-	drm_mode_config_cleanup(dev);
-	drm_irq_uninstall(dev);
-	dev->dev_private = NULL;
-
-	return ret;
-}
-
-static void fsl_dcu_unload(struct drm_device *dev)
-{
-	drm_atomic_helper_shutdown(dev);
-	drm_kms_helper_poll_fini(dev);
-
-	drm_mode_config_cleanup(dev);
-	drm_irq_uninstall(dev);
-
-	dev->dev_private = NULL;
 }
 
 static irqreturn_t fsl_dcu_drm_irq(int irq, void *arg)
@@ -132,16 +96,91 @@ static irqreturn_t fsl_dcu_drm_irq(int irq, void *arg)
 	return IRQ_HANDLED;
 }
 
-DEFINE_DRM_GEM_CMA_FOPS(fsl_dcu_drm_fops);
+static int fsl_dcu_irq_install(struct drm_device *dev, unsigned int irq)
+{
+	if (irq == IRQ_NOTCONNECTED)
+		return -ENOTCONN;
 
-static struct drm_driver fsl_dcu_drm_driver = {
+	fsl_dcu_irq_reset(dev);
+
+	return request_irq(irq, fsl_dcu_drm_irq, 0, dev->driver->name, dev);
+}
+
+static void fsl_dcu_irq_uninstall(struct drm_device *dev)
+{
+	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
+
+	fsl_dcu_irq_reset(dev);
+	free_irq(fsl_dev->irq, dev);
+}
+
+static int fsl_dcu_load(struct drm_device *dev, unsigned long flags)
+{
+	struct fsl_dcu_drm_device *fsl_dev = dev->dev_private;
+	int ret;
+
+	ret = fsl_dcu_drm_modeset_init(fsl_dev);
+	if (ret < 0) {
+		dev_err(dev->dev, "failed to initialize mode setting\n");
+		return ret;
+	}
+
+	if (of_device_is_compatible(fsl_dev->np, "fsl,ls1021a-dcu")) {
+		ret = fsl_dcu_scfg_config_ls1021a();
+		if (ret < 0) {
+			dev_err(dev->dev, "failed to enable pixclk\n");
+			goto done_vblank;
+		}
+	}
+
+	ret = drm_vblank_init(dev, dev->mode_config.num_crtc);
+	if (ret < 0) {
+		dev_err(dev->dev, "failed to initialize vblank\n");
+		goto done_vblank;
+	}
+
+	ret = fsl_dcu_irq_install(dev, fsl_dev->irq);
+	if (ret < 0) {
+		dev_err(dev->dev, "failed to install IRQ handler\n");
+		goto done_irq;
+	}
+
+	if (legacyfb_depth != 16 && legacyfb_depth != 24 &&
+	    legacyfb_depth != 32) {
+		dev_warn(dev->dev,
+			"Invalid legacyfb_depth.  Defaulting to 24bpp\n");
+		legacyfb_depth = 24;
+	}
+
+	return 0;
+done_irq:
+	drm_kms_helper_poll_fini(dev);
+
+	drm_mode_config_cleanup(dev);
+done_vblank:
+	dev->dev_private = NULL;
+
+	return ret;
+}
+
+static void fsl_dcu_unload(struct drm_device *dev)
+{
+	drm_atomic_helper_shutdown(dev);
+	drm_kms_helper_poll_fini(dev);
+
+	drm_mode_config_cleanup(dev);
+	fsl_dcu_irq_uninstall(dev);
+
+	dev->dev_private = NULL;
+}
+
+DEFINE_DRM_GEM_DMA_FOPS(fsl_dcu_drm_fops);
+
+static const struct drm_driver fsl_dcu_drm_driver = {
 	.driver_features	= DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
 	.load			= fsl_dcu_load,
 	.unload			= fsl_dcu_unload,
-	.irq_handler		= fsl_dcu_drm_irq,
-	.irq_preinstall		= fsl_dcu_irq_uninstall,
-	.irq_uninstall		= fsl_dcu_irq_uninstall,
-	DRM_GEM_CMA_DRIVER_OPS,
+	DRM_GEM_DMA_DRIVER_OPS,
 	.fops			= &fsl_dcu_drm_fops,
 	.name			= "fsl-dcu-drm",
 	.desc			= "Freescale DCU DRM",
@@ -234,7 +273,6 @@ static int fsl_dcu_drm_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct resource *res;
 	void __iomem *base;
-	struct drm_driver *driver = &fsl_dcu_drm_driver;
 	struct clk *pix_clk_in;
 	char pix_clk_name[32];
 	const char *pix_clk_in_name;
@@ -304,7 +342,7 @@ static int fsl_dcu_drm_probe(struct platform_device *pdev)
 
 	fsl_dev->tcon = fsl_tcon_init(dev);
 
-	drm = drm_dev_alloc(driver, dev);
+	drm = drm_dev_alloc(&fsl_dcu_drm_driver, dev);
 	if (IS_ERR(drm)) {
 		ret = PTR_ERR(drm);
 		goto unregister_pix_clk;
@@ -320,7 +358,7 @@ static int fsl_dcu_drm_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto put;
 
-	drm_fbdev_generic_setup(drm, legacyfb_depth);
+	drm_fbdev_dma_setup(drm, legacyfb_depth);
 
 	return 0;
 
@@ -333,7 +371,7 @@ disable_clk:
 	return ret;
 }
 
-static int fsl_dcu_drm_remove(struct platform_device *pdev)
+static void fsl_dcu_drm_remove(struct platform_device *pdev)
 {
 	struct fsl_dcu_drm_device *fsl_dev = platform_get_drvdata(pdev);
 
@@ -341,13 +379,11 @@ static int fsl_dcu_drm_remove(struct platform_device *pdev)
 	drm_dev_put(fsl_dev->drm);
 	clk_disable_unprepare(fsl_dev->clk);
 	clk_unregister(fsl_dev->pix_clk);
-
-	return 0;
 }
 
 static struct platform_driver fsl_dcu_drm_platform_driver = {
 	.probe		= fsl_dcu_drm_probe,
-	.remove		= fsl_dcu_drm_remove,
+	.remove_new	= fsl_dcu_drm_remove,
 	.driver		= {
 		.name	= "fsl-dcu",
 		.pm	= &fsl_dcu_drm_pm_ops,
@@ -355,7 +391,7 @@ static struct platform_driver fsl_dcu_drm_platform_driver = {
 	},
 };
 
-module_platform_driver(fsl_dcu_drm_platform_driver);
+drm_module_platform_driver(fsl_dcu_drm_platform_driver);
 
 MODULE_DESCRIPTION("Freescale DCU DRM Driver");
 MODULE_LICENSE("GPL");

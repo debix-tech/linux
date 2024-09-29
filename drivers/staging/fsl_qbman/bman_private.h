@@ -67,7 +67,7 @@ struct bm_portal_config {
 
 #ifdef CONFIG_FSL_BMAN_CONFIG
 /* Hooks from bman_driver.c to bman_config.c */
-int bman_init_ccsr(struct device_node *node);
+int bman_init_ccsr(struct device_node *node, bool *need_cleanup);
 #endif
 
 /* Hooks from bman_driver.c in to bman_high.c */
@@ -153,6 +153,7 @@ u32 bm_pool_free_buffers(u32 bpid);
 
 __init int bman_init(void);
 __init int bman_resource_init(void);
+__init int bman_init_early(void);
 
 const struct bm_portal_config *bman_get_bm_portal_config(
 						struct bman_portal *portal);

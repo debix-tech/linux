@@ -14,7 +14,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_edid.h>
 #include <drm/drm_encoder_slave.h>
-#include <drm/drm_hdcp.h>
+#include <drm/display/drm_hdcp_helper.h>
 #include <drm/drm_of.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
@@ -175,6 +175,7 @@ static int dp_aux_init(struct cdns_mhdp_device *mhdp,
 
 	mhdp->dp.aux.name = "imx_dp_aux";
 	mhdp->dp.aux.dev = dev;
+	mhdp->dp.aux.drm_dev = mhdp->drm_dev;
 	mhdp->dp.aux.transfer = dp_aux_transfer;
 
 	ret = drm_dp_aux_register(&mhdp->dp.aux);
@@ -579,6 +580,14 @@ static void hotplug_work_func(struct work_struct *work)
 			DRM_DEBUG_DRIVER("Finished %s - early\n", __func__);
 			return;
 		}
+		/* Disable HDCP when cable plugout,
+		 * set content_protection to DESIRED, recovery HDCP state after cable plugin
+		 */
+		if (connector->state->content_protection
+				!= DRM_MODE_CONTENT_PROTECTION_UNDESIRED) {
+			connector->state->content_protection = DRM_MODE_CONTENT_PROTECTION_DESIRED;
+			mhdp->hdcp.state = HDCP_STATE_DISABLING;
+		}
 		DRM_DEBUG_DRIVER("Calling drm_kms_helper_hotplug_event\n");
 		/* Note that before we call the helper functions we need
 		 * to force the cdns_dp_connector_detect function from
@@ -613,6 +622,10 @@ static void hotplug_work_func(struct work_struct *work)
 				cdns_dp_connector_detect(connector, false);
 			if (connector_sts == connector_status_connected) {
 				DRM_DEBUG_DRIVER("HDMI/DP Cable Plug In\n");
+				/* Recovery HDCP state */
+				if (connector->state->content_protection
+						!= DRM_MODE_CONTENT_PROTECTION_UNDESIRED)
+					mhdp->hdcp.state = HDCP_STATE_ENABLING;
 				break;
 			}
 		}
@@ -675,6 +688,17 @@ static void cdns_dp_parse_dt(struct cdns_mhdp_device *mhdp)
 		dev_warn(mhdp->dev, "Failed to get lane_mapping - using default 0xc6\n");
 	}
 	dev_info(mhdp->dev, "lane-mapping 0x%02x\n", mhdp->lane_mapping);
+
+	ret = of_property_read_u32(of_node, "i2c-over-aux-retries",
+				   &mhdp->i2c_over_aux_retries);
+	if (ret) {
+		mhdp->i2c_over_aux_retries = 5;
+		dev_warn(mhdp->dev,
+			 "Failed to get i2c-over-aux-retries - using default 5\n");
+	}
+
+	dev_info(mhdp->dev, "i2c-over-aux-retries 0x%02x\n",
+		 mhdp->i2c_over_aux_retries);
 }
 
 static int __cdns_dp_probe(struct platform_device *pdev,
@@ -801,6 +825,9 @@ static void __cdns_dp_remove(struct cdns_mhdp_device *mhdp)
 {
 	dp_aux_destroy(mhdp);
 	cdns_mhdp_unregister_audio_driver(mhdp->dev);
+	cnds_hdcp_remove_device_files(mhdp);
+
+	cdns_mhdp_plat_call(mhdp, power_off);
 }
 
 /* -----------------------------------------------------------------------------

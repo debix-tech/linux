@@ -15,6 +15,7 @@
 
 #include <linux/types.h>
 #include <linux/tracepoint.h>
+#include <linux/usb/chipidea.h>
 #include "ci.h"
 #include "udc.h"
 
@@ -27,11 +28,11 @@ TRACE_EVENT(ci_log,
 	TP_ARGS(ci, vaf),
 	TP_STRUCT__entry(
 		__string(name, dev_name(ci->dev))
-		__dynamic_array(char, msg, CHIPIDEA_MSG_MAX)
+		__vstring(msg, vaf->fmt, vaf->va)
 	),
 	TP_fast_assign(
 		__assign_str(name, dev_name(ci->dev));
-		vsnprintf(__get_str(msg), CHIPIDEA_MSG_MAX, vaf->fmt, *vaf->va);
+		__assign_vstr(msg, vaf->fmt, vaf->va);
 	),
 	TP_printk("%s: %s", __get_str(name), __get_str(msg))
 );
@@ -55,8 +56,8 @@ DECLARE_EVENT_CLASS(ci_log_trb,
 		__entry->td = td;
 		__entry->dma = td->dma;
 		__entry->td_remaining_size = td->td_remaining_size;
-		__entry->next = td->ptr->next;
-		__entry->token = td->ptr->token;
+		__entry->next = le32_to_cpu(td->ptr->next);
+		__entry->token = le32_to_cpu(td->ptr->token);
 		__entry->type = usb_endpoint_type(hwep->ep.desc);
 	),
 	TP_printk("%s: req: %p, td: %p, td_dma_address: %pad, remaining_size: %d, "

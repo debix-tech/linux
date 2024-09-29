@@ -1,5 +1,5 @@
 /* Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
- * Copyright 2020 NXP
+ * Copyright 2020,2023-2024 NXP
  * Authors: Andy Fleming <afleming@freescale.com>
  *	    Timur Tabi <timur@freescale.com>
  *	    Geoff Thorpe <Geoff.Thorpe@freescale.com>
@@ -47,6 +47,7 @@ struct dpa_proxy_priv_s {
 
 struct eventfd_list {
 	struct list_head d_list;
+	struct list_head ctx_list;
 	struct net_device *ndev;
 	struct eventfd_ctx *efd_ctx;
 };
@@ -58,7 +59,8 @@ static void phy_link_updates(struct net_device *net_dev);
 static inline int
 ioctl_usdpaa_get_link_status(struct usdpaa_ioctl_link_status_args *input);
 
-static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args);
+struct ctx;
+static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args, struct ctx *ctx);
 static int ioctl_disable_if_link_status(char *if_name);
 
 /* Physical address range of the memory reservation, exported for mm/mem.c */
@@ -153,6 +155,8 @@ struct ctx {
 	struct list_head maps;
 	/* list of portal maps */
 	struct list_head portals;
+	/* list of event fds */
+	struct list_head events;
 };
 
 /* Different resource classes */
@@ -396,6 +400,7 @@ static int usdpaa_open(struct inode *inode, struct file *filp)
 
 	INIT_LIST_HEAD(&ctx->maps);
 	INIT_LIST_HEAD(&ctx->portals);
+	INIT_LIST_HEAD(&ctx->events);
 	spin_lock_init(&ctx->lock);
 
 	//filp->f_mapping->backing_dev_info = &directly_mappable_cdev_bdi;
@@ -407,7 +412,7 @@ static int usdpaa_open(struct inode *inode, struct file *filp)
 
 
 /* Invalidate a portal */
-void dbci_portal(void *addr)
+static void dbci_portal(void *addr)
 {
 	int i;
 
@@ -597,11 +602,12 @@ static int usdpaa_release(struct inode *inode, struct file *filp)
 	struct mem_mapping *map, *tmpmap;
 	struct portal_mapping *portal, *tmpportal;
 	const struct alloc_backend *backend = &alloc_backends[0];
-	struct active_resource *res;
+	struct active_resource *tmp, *res;
 	struct qm_portal *qm_cleanup_portal = NULL;
 	struct bm_portal *bm_cleanup_portal = NULL;
 	struct qm_portal_config *qm_alloced_portal = NULL;
 	struct bm_portal_config *bm_alloced_portal = NULL;
+	struct eventfd_list *ev_mem, *tmp_ev_mem;
 
 	struct qm_portal **portal_array;
 	int portal_count = 0;
@@ -685,7 +691,7 @@ static int usdpaa_release(struct inode *inode, struct file *filp)
 
 	while (backend->id_type != usdpaa_id_max) {
 		int res_count = 0;
-		list_for_each_entry(res, &ctx->resources[backend->id_type],
+		list_for_each_entry_safe(res, tmp, &ctx->resources[backend->id_type],
 				    list) {
 			if (backend->id_type == usdpaa_id_fqid) {
 				int i = 0;
@@ -699,6 +705,8 @@ static int usdpaa_release(struct inode *inode, struct file *filp)
 			res_count += res->num;
 
 			backend->release(res->id, res->num);
+			list_del(&res->list);
+			kfree(res);
 		}
 		if (res_count)
 			pr_info("USDPAA release: %d %s%s\n",
@@ -728,6 +736,14 @@ static int usdpaa_release(struct inode *inode, struct file *filp)
 		kfree(map);
 	}
 	spin_unlock(&mem_lock);
+
+	/* free eventfds */
+	list_for_each_entry_safe(ev_mem, tmp_ev_mem, &ctx->events, ctx_list) {
+		eventfd_ctx_put(ev_mem->efd_ctx);
+		list_del(&ev_mem->ctx_list);
+		list_del(&ev_mem->d_list);
+		kfree(ev_mem);
+	}
 
 	/* Return portals */
 	list_for_each_entry_safe(portal, tmpportal, &ctx->portals, list) {
@@ -863,28 +879,30 @@ static unsigned long usdpaa_get_unmapped_area(struct file *file,
 {
 	struct vm_area_struct *vma;
 
+	/* Need to align the address to the largest pagesize of the mapping
+	 * because the MMU requires the virtual address to have the same
+	 * alignment as the physical address
+	 */
+	unsigned long align_addr = USDPAA_MEM_ROUNDUP(addr,
+						      largest_page_size(len));
+	VMA_ITERATOR(vmi, current->mm, align_addr);
+
 	if (len % PAGE_SIZE)
 		return -EINVAL;
 	if (!len)
 		return -EINVAL;
 
-	/* Need to align the address to the largest pagesize of the mapping
-	 * because the MMU requires the virtual address to have the same
-	 * alignment as the physical address */
-	addr = USDPAA_MEM_ROUNDUP(addr, largest_page_size(len));
-	vma = find_vma(current->mm, addr);
 	/* Keep searching until we reach the end of currently-used virtual
 	 * address-space or we find a big enough gap. */
-	while (vma) {
-		if ((addr + len) < vma->vm_start)
-			return addr;
+	for_each_vma(vmi, vma) {
+		if ((align_addr + len) < vma->vm_start)
+			return align_addr;
 
-		addr = USDPAA_MEM_ROUNDUP(vma->vm_end,  largest_page_size(len));
-		vma = vma->vm_next;
+		align_addr = USDPAA_MEM_ROUNDUP(vma->vm_end, largest_page_size(len));
 	}
-	if ((TASK_SIZE - len) < addr)
+	if ((TASK_SIZE - len) < align_addr)
 		return -ENOMEM;
-	return addr;
+	return align_addr;
 }
 
 static long ioctl_id_alloc(struct ctx *ctx, void __user *arg)
@@ -1020,15 +1038,19 @@ static long ioctl_dma_map(struct file *fp, struct ctx *ctx,
 	int frag_count = 0;
 	unsigned long next_addr = PAGE_SIZE, populate;
 
-	/* error checking to ensure values copied from user space are valid */
-	if (i->len % PAGE_SIZE)
-		return -EINVAL;
-
 	map = kmalloc(sizeof(*map), GFP_KERNEL);
 	if (!map)
 		return -ENOMEM;
 
 	spin_lock(&mem_lock);
+
+	/* error checking to ensure values copied from user space are valid */
+	if (i->len % PAGE_SIZE) {
+		spin_unlock(&mem_lock);
+		kfree(map);
+		return -EINVAL;
+	}
+
 	if (i->flags & USDPAA_DMA_FLAG_SHARE) {
 		list_for_each_entry(frag, &mem_list, list) {
 			if (frag->refs && (frag->flags &
@@ -1163,8 +1185,8 @@ do_map:
 	if (i->did_create) {
 		size_t name_len = 0;
 		start_frag->flags = i->flags;
-		memset(start_frag->name, '\0', USDPAA_DMA_NAME_MAX);
-		strncpy(start_frag->name, i->name, USDPAA_DMA_NAME_MAX - 1);
+		strncpy(start_frag->name, i->name, USDPAA_DMA_NAME_MAX);
+		start_frag->name[USDPAA_DMA_NAME_MAX - 1] = '\0';
 		name_len = strnlen(start_frag->name, USDPAA_DMA_NAME_MAX);
 		if (name_len >= USDPAA_DMA_NAME_MAX) {
 			ret = -EFAULT;
@@ -1195,6 +1217,7 @@ out:
 					 USDPAA_DMA_FLAG_RDONLY ? 0
 					 : PROT_WRITE),
 					MAP_SHARED,
+					0,
 					start_frag->pfn_base,
 					&populate,
 					NULL);
@@ -1315,21 +1338,22 @@ static long ioctl_dma_lock(struct ctx *ctx, void __user *arg)
 	struct mem_mapping *map;
 	struct vm_area_struct *vma;
 
+	spin_lock(&mem_lock);
 	down_read(&current->mm->mmap_lock);
 	vma = find_vma(current->mm, (unsigned long)arg);
 	if (!vma || (vma->vm_start > (unsigned long)arg)) {
 		up_read(&current->mm->mmap_lock);
+		spin_unlock(&mem_lock);
 		return -EFAULT;
 	}
-	spin_lock(&mem_lock);
 	list_for_each_entry(map, &ctx->maps, list) {
 		if (map->root_frag->pfn_base == vma->vm_pgoff)
 			goto map_match;
 	}
 	map = NULL;
 map_match:
-	spin_unlock(&mem_lock);
 	up_read(&current->mm->mmap_lock);
+	spin_unlock(&mem_lock);
 
 	if (!map)
 		return -EFAULT;
@@ -1344,12 +1368,12 @@ static long ioctl_dma_unlock(struct ctx *ctx, void __user *arg)
 	struct vm_area_struct *vma;
 	int ret;
 
+	spin_lock(&mem_lock);
 	down_read(&current->mm->mmap_lock);
 	vma = find_vma(current->mm, (unsigned long)arg);
 	if (!vma || (vma->vm_start > (unsigned long)arg))
 		ret = -EFAULT;
 	else {
-		spin_lock(&mem_lock);
 		list_for_each_entry(map, &ctx->maps, list) {
 			if (map->root_frag->pfn_base == vma->vm_pgoff) {
 				if (!map->root_frag->has_locking)
@@ -1364,10 +1388,10 @@ static long ioctl_dma_unlock(struct ctx *ctx, void __user *arg)
 			}
 		}
 		ret = -EINVAL;
-map_match:
-		spin_unlock(&mem_lock);
 	}
+map_match:
 	up_read(&current->mm->mmap_lock);
+	spin_unlock(&mem_lock);
 	return ret;
 }
 
@@ -1381,7 +1405,7 @@ static int portal_mmap(struct file *fp, struct resource *res, void **ptr)
 	if (len != (unsigned long)len)
 		return -EINVAL;
 	longret = do_mmap(fp, PAGE_SIZE, (unsigned long)len,
-				PROT_READ | PROT_WRITE, MAP_SHARED,
+				PROT_READ | PROT_WRITE, MAP_SHARED, 0,
 				res->start >> PAGE_SHIFT, &populate, NULL);
 	up_write(&current->mm->mmap_lock);
 
@@ -1906,14 +1930,14 @@ static void phy_link_updates(struct net_device *net_dev)
 
 static int setup_eventfd(struct task_struct *userspace_task,
 			struct usdpaa_ioctl_link_status *args,
-			struct net_device *net_dev)
+			struct net_device *net_dev, struct ctx *ctx)
 {
 	struct file *efd_file = NULL;
 	struct list_head *position = NULL;
 	struct eventfd_list *ev_mem;
 
 	rcu_read_lock();
-	efd_file = fcheck_files(userspace_task->files, args->efd);
+	efd_file = files_lookup_fd_rcu(userspace_task->files, args->efd);
 	rcu_read_unlock();
 
 	/* check if device is already registered */
@@ -1934,6 +1958,7 @@ static int setup_eventfd(struct task_struct *userspace_task,
 		return -ENOMEM;
 	}
 	INIT_LIST_HEAD(&ev_mem->d_list);
+	INIT_LIST_HEAD(&ev_mem->ctx_list);
 
 	ev_mem->ndev = net_dev;
 	ev_mem->efd_ctx = eventfd_ctx_fileget(efd_file);
@@ -1942,6 +1967,7 @@ static int setup_eventfd(struct task_struct *userspace_task,
 		kfree(ev_mem);
 		return -EINVAL;
 	}
+	list_add(&ev_mem->ctx_list, &ctx->events);
 	list_add(&ev_mem->d_list, &eventfd_head);
 
 	return 0;
@@ -1955,7 +1981,7 @@ static int setup_eventfd(struct task_struct *userspace_task,
  * args->efd:		The eventfd value which should be waked up when
  *			there is any link update received.
  */
-static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args)
+static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args, struct ctx *ctx)
 {
 	struct net_device *net_dev = NULL;
 	struct dpa_proxy_priv_s *priv = NULL;
@@ -1980,7 +2006,7 @@ static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args)
 		/* Get current task context from which IOCTL was called */
 		userspace_task = current;
 
-		ret = setup_eventfd(userspace_task, args, net_dev);
+		ret = setup_eventfd(userspace_task, args, net_dev, ctx);
 		if (ret)
 			return ret;
 
@@ -2009,7 +2035,7 @@ static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args)
 			/* Get current task context from which IOCTL was called */
 			userspace_task = current;
 
-			ret = setup_eventfd(userspace_task, args, net_dev);
+			ret = setup_eventfd(userspace_task, args, net_dev, ctx);
 			if (ret) {
 				dev->platform_data = NULL;
 				free_netdev(net_dev);
@@ -2038,7 +2064,7 @@ static int ioctl_en_if_link_status(struct usdpaa_ioctl_link_status *args)
 		/* Get current task context from which IOCTL was called */
 		userspace_task = current;
 
-		ret = setup_eventfd(userspace_task, args, net_dev);
+		ret = setup_eventfd(userspace_task, args, net_dev, ctx);
 		if (ret) {
 			free_netdev(net_dev);
 			return ret;
@@ -2093,6 +2119,7 @@ static int ioctl_disable_if_link_status(char *if_name)
 			ev_mem = list_entry(position, struct eventfd_list, d_list);
 			if (ev_mem->ndev == net_dev) {
 				eventfd_ctx_put(ev_mem->efd_ctx);
+				list_del(&ev_mem->ctx_list);
 				list_del(position);
 				kfree(ev_mem);
 				break;
@@ -2120,6 +2147,7 @@ static int ioctl_disable_if_link_status(char *if_name)
 		ev_mem = list_entry(position, struct eventfd_list, d_list);
 		if (ev_mem->ndev == net_dev) {
 			eventfd_ctx_put(ev_mem->efd_ctx);
+			list_del(&ev_mem->ctx_list);
 			list_del(&ev_mem->d_list);
 			kfree(ev_mem);
 			break;
@@ -2204,12 +2232,14 @@ static long usdpaa_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	}
 	case USDPAA_IOCTL_ENABLE_LINK_STATUS_INTERRUPT:
 	{
-		struct usdpaa_ioctl_link_status input;
+		struct usdpaa_ioctl_link_status input = {0};
 		int ret;
 
 		if (copy_from_user(&input, a, sizeof(input)))
 			return -EFAULT;
-		ret = ioctl_en_if_link_status(&input);
+		input.if_name[IF_NAME_MAX_LEN - 1] = '\0';
+
+		ret = ioctl_en_if_link_status(&input, ctx);
 		if (ret)
 			pr_err("Error(%d) enable link interrupt:IF: %s\n",
 				ret, input.if_name);
@@ -2217,24 +2247,27 @@ static long usdpaa_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	}
 	case USDPAA_IOCTL_DISABLE_LINK_STATUS_INTERRUPT:
 	{
-		char *input;
+		char if_name[IF_NAME_MAX_LEN];
 		int ret;
 
-		if (copy_from_user(&input, a, sizeof(input)))
+		if (copy_from_user(&if_name, a, sizeof(if_name)))
 			return -EFAULT;
-		ret = ioctl_disable_if_link_status(input);
+		if_name[IF_NAME_MAX_LEN - 1] = '\0';
+
+		ret = ioctl_disable_if_link_status(if_name);
 		if (ret)
 			pr_err("Error(%d) Disabling link interrupt:IF: %s\n",
-				ret, input);
+				ret, if_name);
 		return ret;
 	}
 	case USDPAA_IOCTL_GET_LINK_STATUS:
 	{
 		int ret;
-		struct usdpaa_ioctl_link_status_args input;
+		struct usdpaa_ioctl_link_status_args input = {0};
 
 		if (copy_from_user(&input, a, sizeof(input)))
 			return -EFAULT;
+		input.if_name[IF_NAME_MAX_LEN - 1] = '\0';
 
 		ret = ioctl_usdpaa_get_link_status(&input);
 		if (ret)
@@ -2247,11 +2280,12 @@ static long usdpaa_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	}
 	case USDPAA_IOCTL_UPDATE_LINK_STATUS:
 	{
-		struct usdpaa_ioctl_update_link_status input;
+		struct usdpaa_ioctl_update_link_status input = {0};
 		int ret;
 
 		if (copy_from_user(&input, a, sizeof(input)))
 			return -EFAULT;
+		input.if_name[IF_NAME_MAX_LEN - 1] = '\0';
 
 		ret = ioctl_set_link_status(&input);
 		if (ret)
@@ -2270,11 +2304,12 @@ static long usdpaa_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	}
 	case USDPAA_IOCTL_UPDATE_LINK_SPEED:
 	{
-		struct usdpaa_ioctl_update_link_speed input;
+		struct usdpaa_ioctl_update_link_speed input = {0};
 		int ret;
 
 		if (copy_from_user(&input, a, sizeof(input)))
 			return -EFAULT;
+		input.if_name[IF_NAME_MAX_LEN - 1] = '\0';
 
 		ret = ioctl_set_link_speed(&input);
 		if (ret)
@@ -2284,16 +2319,17 @@ static long usdpaa_ioctl(struct file *fp, unsigned int cmd, unsigned long arg)
 	}
 	case USDPAA_IOCTL_RESTART_LINK_AUTONEG:
 	{
-		char *input;
+		char if_name[IF_NAME_MAX_LEN];
 		int ret;
 
-		if (copy_from_user(&input, a, sizeof(input)))
+		if (copy_from_user(&if_name, a, sizeof(if_name)))
 			return -EFAULT;
+		if_name[IF_NAME_MAX_LEN - 1] = '\0';
 
-		ret = ioctl_link_restart_autoneg(input);
+		ret = ioctl_link_restart_autoneg(if_name);
 		if (ret)
 			pr_err("Error(%d) restarting autoneg:IF: %s\n",
-			       ret, input);
+			       ret, if_name);
 		return ret;
 	}
 	}
@@ -2323,7 +2359,8 @@ static long usdpaa_ioctl_compat(struct file *fp, unsigned int cmd,
 		converted.len = input.len;
 		converted.flags = input.flags;
 		memset(converted.name, '\0', USDPAA_DMA_NAME_MAX);
-		strncpy(converted.name, input.name, USDPAA_DMA_NAME_MAX - 1);
+		strncpy(converted.name, input.name, USDPAA_DMA_NAME_MAX);
+		converted.name[USDPAA_DMA_NAME_MAX - 1] = '\0';
 		converted.has_locking = input.has_locking;
 		converted.did_create = input.did_create;
 
@@ -2333,7 +2370,8 @@ static long usdpaa_ioctl_compat(struct file *fp, unsigned int cmd,
 		input.len = converted.len;
 		input.flags = converted.flags;
 		memset(input.name, '\0', USDPAA_DMA_NAME_MAX);
-		strncpy(input.name, converted.name, USDPAA_DMA_NAME_MAX - 1);
+		strncpy(input.name, converted.name, USDPAA_DMA_NAME_MAX);
+		input.name[USDPAA_DMA_NAME_MAX - 1] = '\0';
 		input.has_locking = converted.has_locking;
 		input.did_create = converted.did_create;
 		if (copy_to_user(a, &input, sizeof(input)))

@@ -661,7 +661,9 @@ static void pfe_eth_set_msglevel(struct net_device *ndev, uint32_t data)
  *
  */
 static int pfe_eth_set_coalesce(struct net_device *ndev,
-				struct ethtool_coalesce *ec)
+				struct ethtool_coalesce *ec,
+				struct kernel_ethtool_coalesce *kernel_coal,
+				struct netlink_ext_ack *extack)
 {
 	if (ec->rx_coalesce_usecs > HIF_RX_COAL_MAX_USECS)
 		return -EINVAL;
@@ -682,7 +684,9 @@ static int pfe_eth_set_coalesce(struct net_device *ndev,
  *
  */
 static int pfe_eth_get_coalesce(struct net_device *ndev,
-				struct ethtool_coalesce *ec)
+				struct ethtool_coalesce *ec,
+				struct kernel_ethtool_coalesce *kernel_coal,
+				struct netlink_ext_ack *extack)
 {
 	int reg_val = readl(HIF_INT_COAL);
 
@@ -880,24 +884,6 @@ static int pfe_eth_mdio_mux(u8 muxval)
 	return 0;
 }
 
-static int pfe_eth_mdio_write_addr(struct mii_bus *bus, int mii_id,
-				   int dev_addr, int regnum)
-{
-	struct pfe_mdio_priv_s *priv = (struct pfe_mdio_priv_s *)bus->priv;
-
-	__raw_writel(EMAC_MII_DATA_PA(mii_id) |
-		     EMAC_MII_DATA_RA(dev_addr) |
-		     EMAC_MII_DATA_TA | EMAC_MII_DATA(regnum),
-		     priv->mdio_base + EMAC_MII_DATA_REG);
-
-	if (pfe_eth_mdio_timeout(priv, EMAC_MDIO_TIMEOUT)) {
-		dev_err(&bus->dev, "phy MDIO address write timeout\n");
-		return -1;
-	}
-
-	return 0;
-}
-
 static int pfe_eth_mdio_write(struct mii_bus *bus, int mii_id, int regnum,
 			      u16 value)
 {
@@ -907,22 +893,12 @@ static int pfe_eth_mdio_write(struct mii_bus *bus, int mii_id, int regnum,
 	if ((mii_id) && (pfe->mdio_muxval[mii_id]))
 		pfe_eth_mdio_mux(pfe->mdio_muxval[mii_id]);
 
-	if (regnum & MII_ADDR_C45) {
-		pfe_eth_mdio_write_addr(bus, mii_id, (regnum >> 16) & 0x1f,
-					regnum & 0xffff);
-		__raw_writel(EMAC_MII_DATA_OP_CL45_WR |
-			     EMAC_MII_DATA_PA(mii_id) |
-			     EMAC_MII_DATA_RA((regnum >> 16) & 0x1f) |
-			     EMAC_MII_DATA_TA | EMAC_MII_DATA(value),
-			     priv->mdio_base + EMAC_MII_DATA_REG);
-	} else {
-		/* start a write op */
-		__raw_writel(EMAC_MII_DATA_ST | EMAC_MII_DATA_OP_WR |
-			     EMAC_MII_DATA_PA(mii_id) |
-			     EMAC_MII_DATA_RA(regnum) |
-			     EMAC_MII_DATA_TA | EMAC_MII_DATA(value),
-			     priv->mdio_base + EMAC_MII_DATA_REG);
-	}
+	/* start a write op */
+	__raw_writel(EMAC_MII_DATA_ST | EMAC_MII_DATA_OP_WR |
+		     EMAC_MII_DATA_PA(mii_id) |
+		     EMAC_MII_DATA_RA(regnum) |
+		     EMAC_MII_DATA_TA | EMAC_MII_DATA(value),
+		     priv->mdio_base + EMAC_MII_DATA_REG);
 
 	if (pfe_eth_mdio_timeout(priv, EMAC_MDIO_TIMEOUT)) {
 		dev_err(&bus->dev, "%s: phy MDIO write timeout\n", __func__);
@@ -940,22 +916,12 @@ static int pfe_eth_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 	if ((mii_id) && (pfe->mdio_muxval[mii_id]))
 		pfe_eth_mdio_mux(pfe->mdio_muxval[mii_id]);
 
-	if (regnum & MII_ADDR_C45) {
-		pfe_eth_mdio_write_addr(bus, mii_id, (regnum >> 16) & 0x1f,
-					regnum & 0xffff);
-		__raw_writel(EMAC_MII_DATA_OP_CL45_RD |
-			     EMAC_MII_DATA_PA(mii_id) |
-			     EMAC_MII_DATA_RA((regnum >> 16) & 0x1f) |
-			     EMAC_MII_DATA_TA,
-			     priv->mdio_base + EMAC_MII_DATA_REG);
-	} else {
-		/* start a read op */
-		__raw_writel(EMAC_MII_DATA_ST | EMAC_MII_DATA_OP_RD |
-			     EMAC_MII_DATA_PA(mii_id) |
-			     EMAC_MII_DATA_RA(regnum) |
-			     EMAC_MII_DATA_TA, priv->mdio_base +
-			     EMAC_MII_DATA_REG);
-	}
+	/* start a read op */
+	__raw_writel(EMAC_MII_DATA_ST | EMAC_MII_DATA_OP_RD |
+		     EMAC_MII_DATA_PA(mii_id) |
+		     EMAC_MII_DATA_RA(regnum) |
+		     EMAC_MII_DATA_TA, priv->mdio_base +
+		     EMAC_MII_DATA_REG);
 
 	if (pfe_eth_mdio_timeout(priv, EMAC_MDIO_TIMEOUT)) {
 		dev_err(&bus->dev, "%s: phy MDIO read timeout\n", __func__);
@@ -1927,7 +1893,7 @@ static int pfe_eth_set_mac_address(struct net_device *ndev, void *addr)
 	if (!is_valid_ether_addr(sa->sa_data))
 		return -EADDRNOTAVAIL;
 
-	memcpy(ndev->dev_addr, sa->sa_data, ETH_ALEN);
+	dev_addr_set(ndev, sa->sa_data);
 
 	gemac_set_laddrN(priv->EMAC_baseaddr,
 			 (struct pfe_mac_addr *)ndev->dev_addr, 1);
@@ -2394,7 +2360,7 @@ static int pfe_eth_init_one(struct pfe *pfe,
 	pfe_eth_fast_tx_timeout_init(priv);
 
 	/* Copy the station address into the dev structure, */
-	memcpy(ndev->dev_addr, einfo[id].mac_addr, ETH_ALEN);
+	dev_addr_set(ndev, einfo[id].mac_addr);
 
 	if (us)
 		goto phy_init;
@@ -2430,12 +2396,9 @@ static int pfe_eth_init_one(struct pfe *pfe,
 	priv->msg_enable = NETIF_MSG_IFUP | NETIF_MSG_IFDOWN | NETIF_MSG_LINK |
 				NETIF_MSG_PROBE;
 
-	netif_napi_add(ndev, &priv->low_napi, pfe_eth_low_poll,
-		       HIF_RX_POLL_WEIGHT - 16);
-	netif_napi_add(ndev, &priv->high_napi, pfe_eth_high_poll,
-		       HIF_RX_POLL_WEIGHT - 16);
-	netif_napi_add(ndev, &priv->lro_napi, pfe_eth_lro_poll,
-		       HIF_RX_POLL_WEIGHT - 16);
+	netif_napi_add(ndev, &priv->low_napi, pfe_eth_low_poll);
+	netif_napi_add(ndev, &priv->high_napi, pfe_eth_high_poll);
+	netif_napi_add(ndev, &priv->lro_napi, pfe_eth_lro_poll);
 
 	err = register_netdev(ndev);
 	if (err) {
@@ -2451,7 +2414,7 @@ static int pfe_eth_init_one(struct pfe *pfe,
 	}
 
 phy_init:
-	device_init_wakeup(&ndev->dev, WAKE_MAGIC);
+	device_init_wakeup(&ndev->dev, true);
 
 	err = pfe_phy_init(ndev);
 	if (err) {

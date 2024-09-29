@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: (GPL-2.0 OR MIT)
-/* Felix Switch TSN driver
+/* TSN support for Felix VSC9959 through tsntool
  *
- * Copyright 2020 NXP
+ * Copyright 2020-2023 NXP
  */
 
 #include <soc/mscc/ocelot_qsys.h>
@@ -15,6 +15,7 @@
 #include <linux/pcs-lynx.h>
 #include <linux/io.h>
 #include <net/dsa.h>
+#include <net/pkt_sched.h>
 #include <net/tsn.h>
 #include "felix_tsn.h"
 #include "felix.h"
@@ -24,16 +25,10 @@
 /* MSCC TSN parameters limited */
 #define FELIX_PSFP_SFID_NUM	176
 #define FELIX_FRER_SSID_NUM	128
-
 #define FELIX_STREAM_NUM	2048
 
 struct felix_switch_capa {
 	u8 num_tas_gcl;
-	u32 tas_ct_min;
-	u32 tas_ct_max;
-	u32 tas_cte_max;
-	u32 tas_it_max;
-	u32 tas_it_min;
 	u8 num_hsch;
 	u8 num_psfp_sfid;
 	u8 num_frer_ssid;
@@ -58,9 +53,11 @@ struct felix_switch_capa {
 
 struct stream_filter {
 	struct list_head list;
-	u32 mact_idx;
+	unsigned char mac[ETH_ALEN];
+	u16 vid;
 	u32 index;
 	u8 handle;
+	u8 dst_idx;
 };
 
 static struct list_head streamtable;
@@ -68,11 +65,6 @@ static int hsch_bw[FELIX_QSYS_HSCH_NUM] = {0};
 
 static const struct felix_switch_capa capa = {
 	.num_tas_gcl	= 64,
-	.tas_ct_min	= 100,
-	.tas_ct_max	= 1000000000,
-	.tas_cte_max	= 999999999,
-	.tas_it_max	= 999999999,
-	.tas_it_min	= 1000,
 	.num_hsch	= 72,
 	.num_psfp_sfid	= FELIX_PSFP_SFID_NUM,
 	.num_psfp_sgid	= 184,
@@ -93,203 +85,48 @@ static const struct felix_switch_capa capa = {
 	.frer_his_len_min = 1,
 	.frer_his_len_max = 32,
 	.qos_dscp_max	= 63,
-	.qos_cos_max	= FELIX_NUM_TC - 1,
+	.qos_cos_max	= OCELOT_NUM_TC - 1,
 	.qos_dp_max	= 1,
 };
 
 static u32 felix_tsn_get_cap(struct net_device *ndev)
 {
-	u32 cap = 0;
-
-	cap = (TSN_CAP_QBV | TSN_CAP_QCI | TSN_CAP_QBU | TSN_CAP_CBS |
-	       TSN_CAP_CB | TSN_CAP_TBS | TSN_CAP_CTH);
-
-	return cap;
-}
-
-static void felix_get_basetime(struct ocelot *ocelot, ptptime_t basetime,
-			       u64 cycle_time, struct timespec64 *ts_base)
-{
-	ptptime_t new_basetime;
-	ptptime_t cur_time;
-
-	ocelot_ptp_gettime64(&ocelot->ptp_info, ts_base);
-	cur_time = ts_base->tv_sec * NSEC_PER_SEC + ts_base->tv_nsec;
-
-	new_basetime = basetime;
-	if (cur_time > basetime) {
-		u64 nr_of_cycles = cur_time - basetime;
-
-		do_div(nr_of_cycles, cycle_time);
-		new_basetime += cycle_time * (nr_of_cycles + 1);
-	}
-
-	ts_base->tv_sec = new_basetime / NSEC_PER_SEC;
-	ts_base->tv_nsec = new_basetime % NSEC_PER_SEC;
-}
-
-static int felix_tas_gcl_set(struct ocelot *ocelot, const u8 gcl_ix,
-			     struct tsn_qbv_entry *control_list)
-{
-	if (gcl_ix >= capa.num_tas_gcl) {
-		dev_err(ocelot->dev, "Invalid gcl ix %u\n", gcl_ix);
-		return -EINVAL;
-	}
-	if (control_list->time_interval < capa.tas_it_min ||
-	    control_list->time_interval > capa.tas_it_max) {
-		dev_err(ocelot->dev, "Invalid time_interval %u\n",
-			control_list->time_interval);
-
-		return -EINVAL;
-	}
-
-	ocelot_write(ocelot,
-		     QSYS_GCL_CFG_REG_1_GCL_ENTRY_NUM(gcl_ix) |
-		     QSYS_GCL_CFG_REG_1_GATE_STATE(control_list->gate_state),
-		     QSYS_GCL_CFG_REG_1);
-
-	ocelot_write(ocelot,
-		     control_list->time_interval,
-		     QSYS_GCL_CFG_REG_2);
-
-	return 0;
-}
-
-static u32 felix_tas_read_status(struct ocelot *ocelot)
-{
-	u32 val;
-
-	val = ocelot_read(ocelot, QSYS_TAS_PARAM_CFG_CTRL);
-
-	return val;
+	return TSN_CAP_QBV | TSN_CAP_QCI | TSN_CAP_QBU | TSN_CAP_CBS |
+	       TSN_CAP_CB | TSN_CAP_TBS | TSN_CAP_CTH;
 }
 
 static int felix_qbv_set(struct net_device *ndev,
 			 struct tsn_qbv_conf *shaper_config)
 {
-	struct tsn_qbv_basic *admin_basic = &shaper_config->admin;
-	struct tsn_qbv_entry *control_list = admin_basic->control_list;
-	struct timespec64 ts_base;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int i, ret, port;
-	u32 val;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	struct ocelot_port *ocelot_port;
+	int port = dp->index;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	ocelot_port = ocelot->ports[port];
 
-	if (admin_basic->control_list_length > capa.num_tas_gcl) {
-		dev_err(ocelot->dev,
-			"Invalid admin_control_list_length %u\n",
-			admin_basic->control_list_length);
-		return -EINVAL;
-	}
-
-	if ((admin_basic->cycle_time < capa.tas_ct_min ||
-	     admin_basic->cycle_time > capa.tas_ct_max) &&
-	    shaper_config->gate_enabled) {
-		dev_err(ocelot->dev, "Invalid admin_cycle_time %u ns\n",
-			admin_basic->cycle_time);
-		return -EINVAL;
-	}
-	if (admin_basic->cycle_time_extension > capa.tas_cte_max) {
-		dev_err(ocelot->dev,
-			"Invalid admin_cycle_time_extension %u\n",
-			admin_basic->cycle_time_extension);
-		return -EINVAL;
-	}
-
-	felix_get_basetime(ocelot, admin_basic->base_time,
-			   admin_basic->cycle_time, &ts_base);
-
-	/* Select port */
-	ocelot_rmw(ocelot,
-		   QSYS_TAS_PARAM_CFG_CTRL_ALWAYS_GUARD_BAND_SCH_Q |
-		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM(port),
-		   QSYS_TAS_PARAM_CFG_CTRL_ALWAYS_GUARD_BAND_SCH_Q |
-		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM_M,
-		   QSYS_TAS_PARAM_CFG_CTRL);
-
-	val = ocelot_read(ocelot, QSYS_PARAM_STATUS_REG_8);
-	if (val & QSYS_PARAM_STATUS_REG_8_CONFIG_PENDING) {
-		ocelot_rmw_rix(ocelot, 0, QSYS_TAG_CONFIG_ENABLE,
-			       QSYS_TAG_CONFIG, port);
-	}
-
-	if (!shaper_config->gate_enabled)
-		admin_basic->gate_states = 0xff;
-
-	ocelot_rmw_rix(ocelot,
-		       (shaper_config->gate_enabled ? QSYS_TAG_CONFIG_ENABLE : 0) |
-		       QSYS_TAG_CONFIG_INIT_GATE_STATE(admin_basic->gate_states) |
-		       QSYS_TAG_CONFIG_SCH_TRAFFIC_QUEUES(0xff),
-		       QSYS_TAG_CONFIG_ENABLE |
-		       QSYS_TAG_CONFIG_INIT_GATE_STATE_M |
-		       QSYS_TAG_CONFIG_SCH_TRAFFIC_QUEUES_M,
-		       QSYS_TAG_CONFIG,
-		       port);
-
-	ocelot_write_rix(ocelot, shaper_config->maxsdu,
-			 QSYS_PORT_MAX_SDU, port);
-
-	if (shaper_config->gate_enabled) {
-		ocelot_write(ocelot, ts_base.tv_nsec,
-			     QSYS_PARAM_CFG_REG_1);
-
-		ocelot_write(ocelot, lower_32_bits(ts_base.tv_sec),
-			     QSYS_PARAM_CFG_REG_2);
-
-		val = upper_32_bits(ts_base.tv_sec);
-		ocelot_write(ocelot,
-			     QSYS_PARAM_CFG_REG_3_BASE_TIME_SEC_MSB(val) |
-			     QSYS_PARAM_CFG_REG_3_LIST_LENGTH(admin_basic->control_list_length),
-			     QSYS_PARAM_CFG_REG_3);
-
-		ocelot_write(ocelot, admin_basic->cycle_time,
-			     QSYS_PARAM_CFG_REG_4);
-
-		ocelot_write(ocelot, admin_basic->cycle_time_extension,
-			     QSYS_PARAM_CFG_REG_5);
-
-		for (i = 0; i < admin_basic->control_list_length; i++) {
-			felix_tas_gcl_set(ocelot, i, control_list);
-			control_list++;
-		}
-
-		/* Start configuration change */
-		ocelot_rmw(ocelot,
-			   QSYS_TAS_PARAM_CFG_CTRL_CONFIG_CHANGE,
-			   QSYS_TAS_PARAM_CFG_CTRL_CONFIG_CHANGE,
-			   QSYS_TAS_PARAM_CFG_CTRL);
-
-		ret = readx_poll_timeout(felix_tas_read_status, ocelot, val,
-					 !(QSYS_TAS_PARAM_CFG_CTRL_CONFIG_CHANGE
-					 & val), 10, 100000);
-		return ret;
-	}
-
-	return 0;
+	return tsn_qbv_tc_taprio_compat_set(ndev, shaper_config,
+					    !!ocelot_port->taprio);
 }
 
 static int felix_qbv_get(struct net_device *ndev, struct tsn_qbv_conf *shaper_config)
 {
 	struct tsn_qbv_basic *admin = &shaper_config->admin;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	struct tsn_qbv_entry *list;
 	u32 base_timel, base_timeh;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	int i, port = dp->index;
 	u32 val, reg;
-	int i, port;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	mutex_lock(&ocelot->fwd_domain_lock);
 
 	ocelot_rmw(ocelot,
 		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM(port),
 		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM_M,
 		   QSYS_TAS_PARAM_CFG_CTRL);
+
+	shaper_config->maxsdu = ocelot_read_rix(ocelot, QSYS_QMAXSDU_CFG_0, port);
 
 	val = ocelot_read_rix(ocelot, QSYS_TAG_CONFIG, port);
 	shaper_config->gate_enabled = (val & QSYS_TAG_CONFIG_ENABLE);
@@ -301,7 +138,7 @@ static int felix_qbv_get(struct net_device *ndev, struct tsn_qbv_conf *shaper_co
 	admin->base_time = base_timeh |
 		(((u64)QSYS_PARAM_CFG_REG_3_BASE_TIME_SEC_MSB(reg)) << 32);
 
-	admin->base_time = (admin->base_time * 1000000000) + base_timel;
+	admin->base_time = (admin->base_time * NSEC_PER_SEC) + base_timel;
 
 	admin->control_list_length =
 		QSYS_PARAM_CFG_REG_3_LIST_LENGTH_X(reg);
@@ -312,8 +149,10 @@ static int felix_qbv_get(struct net_device *ndev, struct tsn_qbv_conf *shaper_co
 
 	list = kmalloc_array(admin->control_list_length,
 			     sizeof(struct tsn_qbv_entry), GFP_KERNEL);
-	if (!list)
+	if (!list) {
+		mutex_unlock(&ocelot->fwd_domain_lock);
 		return -ENOMEM;
+	}
 
 	admin->control_list = list;
 
@@ -332,16 +171,18 @@ static int felix_qbv_get(struct net_device *ndev, struct tsn_qbv_conf *shaper_co
 		list++;
 	}
 
+	mutex_unlock(&ocelot->fwd_domain_lock);
+
 	return 0;
 }
 
 static int felix_qbv_get_gatelist(struct ocelot *ocelot,
 				  struct tsn_qbv_basic *oper)
 {
+	struct tsn_qbv_entry *glist;
 	u32 base_timel;
 	u32 base_timeh;
 	u32 val;
-	struct tsn_qbv_entry *glist;
 	int i;
 
 	base_timel = ocelot_read(ocelot, QSYS_PARAM_STATUS_REG_1);
@@ -351,7 +192,7 @@ static int felix_qbv_get_gatelist(struct ocelot *ocelot,
 	oper->base_time +=
 		((u64)QSYS_PARAM_STATUS_REG_3_BASE_TIME_SEC_MSB(val)) <<
 		32;
-	oper->base_time = (oper->base_time * 1000000000) + base_timel;
+	oper->base_time = (oper->base_time * NSEC_PER_SEC) + base_timel;
 
 	oper->control_list_length =
 		QSYS_PARAM_STATUS_REG_3_LIST_LENGTH_X(val);
@@ -391,17 +232,15 @@ static int felix_qbv_get_gatelist(struct ocelot *ocelot,
 static int felix_qbv_get_status(struct net_device *ndev,
 				struct tsn_qbv_status *qbvstatus)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
 	struct tsn_qbv_basic *oper = &qbvstatus->oper;
-	struct ocelot *ocelot;
+	struct ocelot *ocelot = dp->ds->priv;
 	struct timespec64 ts;
-	struct dsa_port *dp;
+	int port = dp->index;
 	ptptime_t cur_time;
-	int port;
 	u32 val;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	mutex_lock(&ocelot->fwd_domain_lock);
 
 	ocelot_rmw(ocelot,
 		   QSYS_TAS_PARAM_CFG_CTRL_PORT_NUM(port),
@@ -422,7 +261,7 @@ static int felix_qbv_get_status(struct net_device *ndev,
 		32;
 
 	qbvstatus->config_change_time =
-		(qbvstatus->config_change_time * 1000000000) +
+		(qbvstatus->config_change_time * NSEC_PER_SEC) +
 		ocelot_read(ocelot, QSYS_PARAM_STATUS_REG_6);
 
 	qbvstatus->config_change_error =
@@ -434,65 +273,52 @@ static int felix_qbv_get_status(struct net_device *ndev,
 	qbvstatus->current_time = cur_time;
 	felix_qbv_get_gatelist(ocelot, oper);
 
+	mutex_unlock(&ocelot->fwd_domain_lock);
+
 	return 0;
 }
 
-static int felix_qbu_set(struct net_device *ndev, u8 preemptible)
+static int felix_qbu_set(struct net_device *ndev, u8 preemptible_tcs)
 {
-	struct ocelot_port *ocelot_port;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int port;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	int port = dp->index;
+	int err;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	err = tsn_qbu_ethtool_mm_compat_set(ndev, preemptible_tcs);
+	if (err)
+		return err;
 
-	ocelot_port = ocelot->ports[port];
+	mutex_lock(&ocelot->fwd_domain_lock);
+	err = ocelot_port_change_fp(ocelot, port, preemptible_tcs);
+	mutex_unlock(&ocelot->fwd_domain_lock);
 
-	ocelot_port_rmwl(ocelot_port,
-			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
-			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
-			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
-			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
-			 DEV_MM_ENABLE_CONFIG);
-
-	ocelot_rmw_rix(ocelot,
-		       QSYS_PREEMPTION_CFG_P_QUEUES(preemptible),
-		       QSYS_PREEMPTION_CFG_P_QUEUES_M,
-		       QSYS_PREEMPTION_CFG,
-		       port);
-
-	return 0;
+	return err;
 }
 
 static int felix_qbu_get(struct net_device *ndev, struct tsn_preempt_status *c)
 {
-	struct ocelot_port *ocelot_port;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int port;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	struct ocelot_mm_state *mm;
+	int err, port = dp->index;
 	u32 val;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	err = tsn_qbu_ethtool_mm_compat_get(ndev, c);
+	if (err)
+		return err;
 
-	ocelot_port = ocelot->ports[port];
+	mm = &ocelot->mm[port];
+	c->admin_state = mm->preemptible_tcs;
 
 	val = ocelot_read_rix(ocelot, QSYS_PREEMPTION_CFG, port);
-
-	c->admin_state = QSYS_PREEMPTION_CFG_P_QUEUES(val);
 	c->hold_advance = QSYS_PREEMPTION_CFG_HOLD_ADVANCE_X(val);
-
-	val = ocelot_port_readl(ocelot_port, DEV_MM_STATUS);
-	c->preemption_active =
-		DEV_MM_STATISTICS_MM_STATUS_PRMPT_ACTIVE_STATUS & val;
 
 	return 0;
 }
 
-static int felix_stream_table_add(u32 index, u32 mact_idx, u8 handle)
+static int felix_stream_table_add(u32 index, const unsigned char mac[ETH_ALEN],
+				  int vid, u8 dst_idx, u8 handle)
 {
 	struct stream_filter *stream, *tmp;
 	struct list_head *pos, *q;
@@ -500,7 +326,9 @@ static int felix_stream_table_add(u32 index, u32 mact_idx, u8 handle)
 	list_for_each_safe(pos, q, &streamtable) {
 		tmp = list_entry(pos, struct stream_filter, list);
 		if (tmp->index == index) {
-			tmp->mact_idx = mact_idx;
+			ether_addr_copy(tmp->mac, mac);
+			tmp->vid = vid;
+			tmp->dst_idx = dst_idx;
 			tmp->handle = handle;
 			return 0;
 		}
@@ -512,7 +340,9 @@ static int felix_stream_table_add(u32 index, u32 mact_idx, u8 handle)
 		return -ENOMEM;
 
 	stream->index = index;
-	stream->mact_idx = mact_idx;
+	ether_addr_copy(stream->mac, mac);
+	stream->vid = vid;
+	stream->dst_idx = dst_idx;
 	stream->handle = handle;
 	list_add(&stream->list, pos->prev);
 
@@ -545,51 +375,34 @@ static struct stream_filter *felix_stream_table_get(u32 index)
 	return NULL;
 }
 
-static int felix_lookup_mactable(struct ocelot *ocelot, u16 vid, u64 mac)
+static int felix_streamid_force_forward_clear(struct ocelot *ocelot, u8 port)
 {
-	u32 mach, macl;
-	u32 reg1, reg2;
-	u32 index, bucket;
+	struct stream_filter *tmp;
 
-	macl = mac & 0xffffffff;
-	mach = (mac >> 32) & 0xffff;
-	ocelot_write(ocelot, macl, ANA_TABLES_MACLDATA);
-	ocelot_write(ocelot, ANA_TABLES_MACHDATA_VID(vid) |
-		     ANA_TABLES_MACHDATA_MACHDATA(mach),
-		     ANA_TABLES_MACHDATA);
+	if (port >= ocelot->num_phys_ports)
+		return 0;
 
-	ocelot_write(ocelot, ANA_TABLES_MACACCESS_VALID |
-		     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_READ),
-		     ANA_TABLES_MACACCESS);
+	list_for_each_entry(tmp, &streamtable, list)
+		if (tmp->dst_idx == port)
+			return 0;
 
-	reg1 = ocelot_read(ocelot, ANA_TABLES_MACLDATA);
-	reg2 = ocelot_read(ocelot, ANA_TABLES_MACHDATA);
-	if (reg1 != macl || reg2 != (mach | ANA_TABLES_MACHDATA_VID(vid)))
-		return -EEXIST;
+	ocelot_bridge_force_forward_port(ocelot, port, false);
 
-	ocelot_field_read(ocelot, ANA_TABLES_MACTINDX_BUCKET, &bucket);
-	ocelot_field_read(ocelot, ANA_TABLES_MACTINDX_M_INDEX, &index);
-
-	index = index * 4 + bucket;
-
-	return index;
+	return 0;
 }
 
 static int felix_cb_streamid_set(struct net_device *ndev, u32 index, bool enable,
 				 struct tsn_cb_streamid *streamid)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	int sfid, ssid, port = dp->index;
+	enum macaccess_entry_type type;
 	struct stream_filter *stream;
-	int idx, sfid, ssid, port;
-	u32 reg, m_index, bucket;
-	u32 macl, mach, dst_idx;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	unsigned char mac[ETH_ALEN];
+	u32 dst_idx;
 	u16 vid;
-	u64 mac;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	int ret;
 
 	if (index >= FELIX_STREAM_NUM) {
 		dev_err(ocelot->dev, "Invalid index %u, maximum:%u\n",
@@ -602,21 +415,10 @@ static int felix_cb_streamid_set(struct net_device *ndev, u32 index, bool enable
 		if (!stream)
 			return -EINVAL;
 
-		m_index = stream->mact_idx / 4;
-		bucket =  stream->mact_idx % 4;
-		ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_BUCKET, bucket);
-		ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_M_INDEX, m_index);
-
-		/*READ command MACACCESS.VALID(11 bit) must be 0 */
-		ocelot_write(ocelot,
-			     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_READ),
-			     ANA_TABLES_MACACCESS);
-
-		ocelot_write(ocelot,
-			     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_FORGET),
-			     ANA_TABLES_MACACCESS);
-
+		ocelot_mact_forget(ocelot, stream->mac, stream->vid);
 		felix_stream_table_del(index);
+
+		felix_streamid_force_forward_clear(ocelot, stream->dst_idx);
 
 		return 0;
 	}
@@ -637,76 +439,48 @@ static int felix_cb_streamid_set(struct net_device *ndev, u32 index, bool enable
 	ssid = (streamid->handle < FELIX_FRER_SSID_NUM ?
 		streamid->handle : (FELIX_FRER_SSID_NUM - 1));
 
-	mac = streamid->para.nid.dmac;
-	macl = mac & 0xffffffff;
-	mach = (mac >> 32) & 0xffff;
+	u64_to_ether_addr(streamid->para.nid.dmac, mac);
 	vid = streamid->para.nid.vid;
 
-	idx = felix_lookup_mactable(ocelot, vid, mac);
+	ret = ocelot_mact_lookup(ocelot, &dst_idx, mac, vid, &type);
+	if (ret && ret != -ENOENT)
+		return ret;
 
-	if (idx < 0) {
-		ocelot_write(ocelot, macl, ANA_TABLES_MACLDATA);
-		ocelot_write(ocelot, ANA_TABLES_MACHDATA_VID(vid) |
-			     ANA_TABLES_MACHDATA_MACHDATA(mach),
-			     ANA_TABLES_MACHDATA);
+	if (ret == -ENOENT) {
+		/* The MAC table doesn't contain this entry, learn it as static
+		 * and annotate it with a SSID and a SFID.
+		 */
+		ret = ocelot_mact_learn_streamdata(ocelot, port, mac, vid,
+						   ENTRYTYPE_LOCKED, sfid,
+						   ssid);
+		if (ret)
+			return ret;
 
-		ocelot_write(ocelot,
-			     ANA_TABLES_STREAMDATA_SFID_VALID |
-			     ANA_TABLES_STREAMDATA_SFID(sfid) |
-			     ANA_TABLES_STREAMDATA_SSID_VALID |
-			     ANA_TABLES_STREAMDATA_SSID(ssid),
-			     ANA_TABLES_STREAMDATA);
-
-		dst_idx = port;
-		ocelot_write(ocelot, ANA_TABLES_MACACCESS_VALID |
-			     ANA_TABLES_MACACCESS_ENTRYTYPE(1) |
-			     ANA_TABLES_MACACCESS_DEST_IDX(dst_idx) |
-			     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_LEARN),
-			     ANA_TABLES_MACACCESS);
-
-		ocelot_write(ocelot, ANA_TABLES_MACACCESS_VALID |
-			     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_READ),
-			     ANA_TABLES_MACACCESS);
-
-		ocelot_field_read(ocelot, ANA_TABLES_MACTINDX_BUCKET, &bucket);
-		ocelot_field_read(ocelot, ANA_TABLES_MACTINDX_M_INDEX, &m_index);
-
-		m_index = m_index * 4 + bucket;
-
-		return felix_stream_table_add(index, m_index, streamid->handle);
+		return felix_stream_table_add(index, mac, vid, port,
+					      streamid->handle);
 	}
 
-	ocelot_write(ocelot,
-		     ANA_TABLES_STREAMDATA_SFID_VALID |
-		     ANA_TABLES_STREAMDATA_SFID(sfid) |
-		     ANA_TABLES_STREAMDATA_SSID_VALID |
-		     ANA_TABLES_STREAMDATA_SSID(ssid),
-		     ANA_TABLES_STREAMDATA);
+	if (type == ENTRYTYPE_NORMAL)
+		type = ENTRYTYPE_LOCKED;
 
-	reg = ocelot_read(ocelot, ANA_TABLES_MACACCESS);
-	dst_idx = ANA_TABLES_MACACCESS_DEST_IDX_X(reg);
-	ocelot_write(ocelot, ANA_TABLES_MACACCESS_VALID |
-		     ANA_TABLES_MACACCESS_ENTRYTYPE(1) |
-		     ANA_TABLES_MACACCESS_DEST_IDX(dst_idx) |
-		     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_WRITE),
-		     ANA_TABLES_MACACCESS);
+	ret = ocelot_mact_learn_streamdata(ocelot, dst_idx, mac, vid, type,
+					   sfid, ssid);
+	if (ret)
+		return ret;
 
-	return felix_stream_table_add(index, idx, streamid->handle);
+	return felix_stream_table_add(index, mac, vid, dst_idx,
+				      streamid->handle);
 }
 
 static int felix_cb_streamid_get(struct net_device *ndev, u32 index,
 				 struct tsn_cb_streamid *streamid)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	enum macaccess_entry_type type;
 	struct stream_filter *stream;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	u32 m_index, bucket;
-	u32 val, dst, reg;
-	u32 ldmac, hdmac;
-	u64 dmac;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
+	u32 dst, fwdmask;
+	int ret;
 
 	if (index >= FELIX_STREAM_NUM) {
 		dev_err(ocelot->dev,
@@ -719,72 +493,19 @@ static int felix_cb_streamid_get(struct net_device *ndev, u32 index,
 	if (!stream)
 		return -EINVAL;
 
-	m_index = stream->mact_idx / 4;
-	bucket =  stream->mact_idx % 4;
-	streamid->type = 1;
-	ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_BUCKET, bucket);
-	ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_M_INDEX, m_index);
+	ret = ocelot_mact_lookup(ocelot, &dst, stream->mac, stream->vid, &type);
+	if (ret)
+		return ret;
 
-	/*READ command MACACCESS.VALID(11 bit) must be 0 */
-	ocelot_write(ocelot,
-		     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_READ),
-		     ANA_TABLES_MACACCESS);
+	streamid->type = type;
 
-	val = ocelot_read(ocelot, ANA_TABLES_MACACCESS);
-	dst = ANA_TABLES_MACACCESS_DEST_IDX_X(val);
-	reg = ocelot_read_rix(ocelot, ANA_PGID_PGID, dst);
-	streamid->ofac_oport = ANA_PGID_PGID_PGID(reg);
+	fwdmask = ocelot_read_rix(ocelot, ANA_PGID_PGID, dst);
+	streamid->ofac_oport = ANA_PGID_PGID_PGID(fwdmask);
 
-	/*Get the entry's MAC address and VLAN id*/
-	ldmac = ocelot_read(ocelot, ANA_TABLES_MACLDATA);
-	val = ocelot_read(ocelot, ANA_TABLES_MACHDATA);
-	val &= 0x1fffffff;
-	hdmac = val & 0xffff;
-	dmac = hdmac;
-	dmac = (dmac << 32) | ldmac;
-	streamid->para.nid.dmac = dmac;
+	streamid->para.nid.dmac = ether_addr_to_u64(stream->mac);
+	streamid->para.nid.vid = stream->vid;
 
-	streamid->para.nid.vid = ANA_TABLES_MACHDATA_VID_X(val);
-
-	val = ocelot_read(ocelot, ANA_TABLES_STREAMDATA);
-	if (!(val & ANA_TABLES_STREAMDATA_SFID_VALID))
-		return -EINVAL;
-
-	streamid->handle = ANA_TABLES_STREAMDATA_SFID(val);
-
-	return 0;
-}
-
-static int felix_streamid_multi_forward_set(struct ocelot *ocelot, u32 index,
-					    u8 fwdmask)
-{
-	u32 m_index, bucket;
-	u8 fwdport;
-	u32 val;
-
-	m_index = index / 4;
-	bucket =  index % 4;
-
-	ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_BUCKET, bucket);
-	ocelot_field_write(ocelot, ANA_TABLES_MACTINDX_M_INDEX, m_index);
-
-	/*READ command MACACCESS.VALID(11 bit) must be 0 */
-	ocelot_write(ocelot,
-		     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_READ),
-		     ANA_TABLES_MACACCESS);
-
-	val = ocelot_read(ocelot, ANA_TABLES_MACACCESS);
-	fwdport = ANA_TABLES_MACACCESS_DEST_IDX_X(val);
-
-	fwdmask |= (1 << fwdport);
-
-	ocelot_write(ocelot, ANA_TABLES_MACACCESS_VALID |
-		     ANA_TABLES_MACACCESS_ENTRYTYPE(1) |
-		     ANA_TABLES_MACACCESS_DEST_IDX(PGID_FRER) |
-		     ANA_TABLES_MACACCESS_MAC_TABLE_CMD(MACACCESS_CMD_WRITE),
-		     ANA_TABLES_MACACCESS);
-
-	ocelot_write_rix(ocelot, fwdmask, ANA_PGID_PGID, PGID_FRER);
+	streamid->handle = stream->handle;
 
 	return 0;
 }
@@ -802,16 +523,12 @@ static int felix_qci_sfi_set(struct net_device *ndev, u32 index, bool enable,
 	u16 sgid  = sfi->stream_gate_instance_id;
 	int fmid = sfi->stream_filter.flow_meter_instance_id;
 	u16 max_sdu_len = sfi->stream_filter.maximum_sdu_size;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	int i, port = dp->index;
 	int sfid = index;
-	int i, port;
 	u16 pol_idx;
 	u32 val;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
 
 	if (fmid == -1)
 		pol_idx = capa.psfp_fmi_max;
@@ -832,7 +549,7 @@ static int felix_qci_sfi_set(struct net_device *ndev, u32 index, bool enable,
 		val = ANA_PORT_SFID_CFG_SFID_VALID |
 			ANA_PORT_SFID_CFG_SFID(sfid);
 		if (igr_prio < 0) {
-			for (i = 0; i < FELIX_NUM_TC; i++)
+			for (i = 0; i < OCELOT_NUM_TC; i++)
 				ocelot_write_ix(ocelot, val, ANA_PORT_SFID_CFG,
 						port, i);
 		} else {
@@ -876,15 +593,12 @@ static int felix_qci_sfi_set(struct net_device *ndev, u32 index, bool enable,
 static int felix_qci_sfi_get(struct net_device *ndev, u32 index,
 			     struct tsn_qci_psfp_sfi_conf *sfi)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 val, reg, fmeter_id, max_sdu;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	int i, port = dp->index;
 	u32 sfid = index;
-	int i, port;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	int enable = 1;
 
 	if (sfid >= capa.num_psfp_sfid) {
 		dev_err(ocelot->dev, "Invalid index %u, maximum:%u\n",
@@ -902,8 +616,10 @@ static int felix_qci_sfi_get(struct net_device *ndev, u32 index,
 		     ANA_TABLES_SFIDACCESS);
 
 	val = ocelot_read(ocelot, ANA_TABLES_SFIDTIDX);
-	if (!(val & ANA_TABLES_SFIDTIDX_SGID_VALID))
-		return -EINVAL;
+	if (!(val & ANA_TABLES_SFIDTIDX_SGID_VALID)) {
+		enable = 0;
+		return enable;
+	}
 
 	sfi->stream_gate_instance_id = ANA_TABLES_SFIDTIDX_SGID_X(val);
 	fmeter_id = ANA_TABLES_SFIDTIDX_POL_IDX_X(val);
@@ -918,29 +634,26 @@ static int felix_qci_sfi_get(struct net_device *ndev, u32 index,
 	else
 		dev_err(ocelot->dev, "priority not enable\n");
 
-	for (i = 0; i < FELIX_NUM_TC; i++) {
+	for (i = 0; i < OCELOT_NUM_TC; i++) {
 		val = ocelot_read_ix(ocelot, ANA_PORT_SFID_CFG, port, i);
 		if ((val & ANA_PORT_SFID_CFG_SFID_VALID) &&
 		    sfid == ANA_PORT_SFID_CFG_SFID(val)) {
 			sfi->stream_handle_spec = -1;
-			return 0;
+			return enable;
 		}
 	}
 
 	sfi->stream_handle_spec = sfid;
-	return 0;
+	return enable;
 }
 
 static int felix_qci_sfi_counters_get(struct net_device *ndev, u32 index,
 				      struct tsn_qci_psfp_sfi_counters *sfi_cnt)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
 	u32 match, not_pass, not_pass_sdu, red;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 sfid = index;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (sfid >= capa.num_psfp_sfid) {
 		dev_err(ocelot->dev, "Invalid index %u, maximum:%u\n",
@@ -948,20 +661,24 @@ static int felix_qci_sfi_counters_get(struct net_device *ndev, u32 index,
 		return -EINVAL;
 	}
 
+	mutex_lock(&ocelot->stat_view_lock);
+
 	ocelot_rmw(ocelot,
 		   SYS_STAT_CFG_STAT_VIEW(sfid),
 		   SYS_STAT_CFG_STAT_VIEW_M,
 		   SYS_STAT_CFG);
 
-	match = ocelot_read_gix(ocelot, SYS_CNT, 0x200);
-	not_pass = ocelot_read_gix(ocelot, SYS_CNT, 0x201);
-	not_pass_sdu = ocelot_read_gix(ocelot, SYS_CNT, 0x202);
-	red = ocelot_read_gix(ocelot, SYS_CNT, 0x203);
+	match = ocelot_read(ocelot, SYS_COUNT_SF_MATCHING_FRAMES);
+	not_pass = ocelot_read(ocelot, SYS_COUNT_SF_NOT_PASSING_FRAMES);
+	not_pass_sdu = ocelot_read(ocelot, SYS_COUNT_SF_NOT_PASSING_SDU);
+	red = ocelot_read(ocelot, SYS_COUNT_SF_RED_FRAMES);
+
+	mutex_unlock(&ocelot->stat_view_lock);
 
 	sfi_cnt->matching_frames_count = match;
 	sfi_cnt->not_passing_frames_count = not_pass;
 	sfi_cnt->not_passing_sdu_count = not_pass_sdu;
-	sfi_cnt->red_frames_count  =  red;
+	sfi_cnt->red_frames_count = red;
 
 	sfi_cnt->passing_frames_count = match - not_pass;
 	sfi_cnt->passing_sdu_count = match - not_pass - not_pass_sdu;
@@ -1011,11 +728,7 @@ static int felix_sgi_set_glist(struct ocelot *ocelot,
 
 static u32 felix_sgi_read_status(struct ocelot *ocelot)
 {
-	u32 val;
-
-	val = ocelot_read(ocelot, ANA_SG_ACCESS_CTRL);
-
-	return val;
+	return ocelot_read(ocelot, ANA_SG_ACCESS_CTRL);
 }
 
 static int felix_qci_sgi_set(struct net_device *ndev, u32 index,
@@ -1025,15 +738,12 @@ static int felix_qci_sgi_set(struct net_device *ndev, u32 index,
 	u32 list_length = sgi_conf->admin.control_list_length;
 	u32 cycle_time = sgi_conf->admin.cycle_time;
 	u32 cycle_time_ex = sgi_conf->admin.cycle_time_extension;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	struct timespec64 ts_base;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
 	u32 sgid = index;
 	int ret;
 	u32 val;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (sgid >= capa.num_psfp_sgid) {
 		dev_err(ocelot->dev, "Invalid sgid %u, maximum:%u\n",
@@ -1060,13 +770,13 @@ static int felix_qci_sgi_set(struct net_device *ndev, u32 index,
 		return -EINVAL;
 	}
 
-	/*configure SGID*/
+	/* configure SGID */
 	ocelot_rmw(ocelot,
 		   ANA_SG_ACCESS_CTRL_SGID(sgid),
 		   ANA_SG_ACCESS_CTRL_SGID_M,
 		   ANA_SG_ACCESS_CTRL);
 
-	/*Disable SG*/
+	/* Disable SG */
 	if (!sgi_conf->gate_enabled) {
 		ocelot_rmw(ocelot,
 			   ANA_SG_CONFIG_REG_3_INIT_GATE_STATE,
@@ -1076,8 +786,8 @@ static int felix_qci_sgi_set(struct net_device *ndev, u32 index,
 		return 0;
 	}
 
-	felix_get_basetime(ocelot, sgi_conf->admin.base_time,
-			   sgi_conf->admin.cycle_time, &ts_base);
+	vsc9959_new_base_time(ocelot, sgi_conf->admin.base_time,
+			      sgi_conf->admin.cycle_time, &ts_base);
 
 	ocelot_write(ocelot, ts_base.tv_nsec, ANA_SG_CONFIG_REG_1);
 	ocelot_write(ocelot, lower_32_bits(ts_base.tv_sec),
@@ -1119,10 +829,10 @@ static int felix_sgi_get_glist(struct ocelot *ocelot,
 			       struct tsn_qci_psfp_gcl *gcl,
 			       uint32_t num)
 {
-	int i;
-	u16 val;
 	u32 time = 0;
 	u32 reg;
+	u16 val;
+	int i;
 
 	if (num > capa.num_sgi_gcl)
 		return -EINVAL;
@@ -1150,14 +860,10 @@ static int felix_qci_sgi_get(struct net_device *ndev, u32 index,
 			     struct tsn_qci_psfp_sgi_conf *sgi_conf)
 {
 	struct tsn_qci_sg_control *admin  = &sgi_conf->admin;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	struct tsn_qci_psfp_gcl *glist;
 	u32 val, reg, list_num;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int ret;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index >= capa.num_psfp_sgid) {
 		dev_err(ocelot->dev, "Invalid sgid %u, maximum:%u\n",
@@ -1183,7 +889,7 @@ static int felix_qci_sgi_get(struct net_device *ndev, u32 index,
 	admin->base_time +=
 		ANA_SG_CONFIG_REG_3_BASE_TIME_SEC_MSB(val) << 32;
 
-	admin->base_time = admin->base_time * 1000000000 + reg;
+	admin->base_time = admin->base_time * NSEC_PER_SEC + reg;
 
 	if (val & ANA_SG_CONFIG_REG_3_IPV_VALID)
 		admin->init_ipv = ANA_SG_CONFIG_REG_3_INIT_IPV_X(val);
@@ -1204,19 +910,15 @@ static int felix_qci_sgi_get(struct net_device *ndev, u32 index,
 
 	admin->gcl = glist;
 
-	ret = felix_sgi_get_glist(ocelot, glist, list_num);
-	return ret;
+	return felix_sgi_get_glist(ocelot, glist, list_num);
 }
 
 static int felix_qci_sgi_status_get(struct net_device *ndev, u16 index,
 				    struct tsn_psfp_sgi_status *sgi_status)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 val, reg;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index >= capa.num_psfp_sgid) {
 		dev_err(ocelot->dev, "Invalid sgid %u, maximum:%u\n",
@@ -1237,7 +939,7 @@ static int felix_qci_sgi_status_get(struct net_device *ndev, u16 index,
 	sgi_status->config_change_time +=
 		ANA_SG_STATUS_REG_3_CFG_CHG_TIME_SEC_MSB(val) << 32;
 	sgi_status->config_change_time =
-		sgi_status->config_change_time * 1000000000 + reg;
+		sgi_status->config_change_time * NSEC_PER_SEC + reg;
 
 	if (val & ANA_SG_STATUS_REG_3_CONFIG_PENDING)
 		sgi_status->config_pending  = 1;
@@ -1260,15 +962,12 @@ static int felix_qci_sgi_status_get(struct net_device *ndev, u16 index,
 static int felix_qci_fmi_set(struct net_device *ndev, u32 index,
 			     bool enable, struct tsn_qci_psfp_fmi *fmi)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
 	u32 cir = 0, cbs = 0, pir = 0, pbs = 0;
 	bool cir_discard = 0, pir_discard = 0;
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 pbs_max = 0, cbs_max = 0;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
 	u32 cir_ena = 0;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index > capa.qos_pol_max) {
 		dev_err(ocelot->dev, "Invalid pol_idx %u, maximum: %u\n",
@@ -1349,12 +1048,9 @@ static int felix_qci_fmi_get(struct net_device *ndev, u32 index,
 			     struct tsn_qci_psfp_fmi *fmi,
 			     struct tsn_qci_psfp_fmi_counters *counters)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 val, reg;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index > capa.qos_pol_max) {
 		dev_err(ocelot->dev, "Invalid pol_idx %u, maximum: %u\n",
@@ -1448,27 +1144,21 @@ static int felix_qos_shaper_conf_set(struct ocelot *ocelot, int idx,
 
 static int felix_cbs_set(struct net_device *ndev, u8 tc, u8 bw)
 {
-	struct phylink_link_state state;
-	struct phylink_pcs *pcs;
-	struct ocelot *ocelot;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	struct ocelot_port *ocelot_port;
+	int port = dp->index;
 	struct felix *felix;
-	struct dsa_port *dp;
-	int port, speed;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	int speed;
 
 	if (tc > capa.qos_cos_max) {
 		dev_err(ocelot->dev, "Invalid tc: %u\n", tc);
 		return -EINVAL;
 	}
 
+	ocelot_port = ocelot->ports[port];
 	felix = ocelot_to_felix(ocelot);
-	pcs = &felix->pcs[port]->pcs;
-	pcs->ops->pcs_get_state(pcs, &state);
-
-	speed = state.speed;
+	speed = ocelot_port->speed;
 
 	felix_qos_shaper_conf_set(ocelot, port * 8 + tc, bw, speed);
 
@@ -1483,11 +1173,11 @@ static int felix_cbs_set(struct net_device *ndev, u8 tc, u8 bw)
 	return 0;
 }
 
-void felix_cbs_reset(struct ocelot *ocelot, int port, int speed)
+void felix_cbs_reset(struct ocelot *ocelot, int port, u32 speed)
 {
 	int i, idx;
 
-	for (i = 0; i < FELIX_NUM_TC; i++) {
+	for (i = 0; i < OCELOT_NUM_TC; i++) {
 		idx = port * 8 + i;
 		if (hsch_bw[idx] > 0)
 			felix_qos_shaper_conf_set(ocelot, idx, hsch_bw[idx],
@@ -1497,13 +1187,9 @@ void felix_cbs_reset(struct ocelot *ocelot, int port, int speed)
 
 static int felix_cbs_get(struct net_device *ndev, u8 tc)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int port;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	int port = dp->index;
 
 	if (tc > capa.qos_cos_max) {
 		dev_err(ocelot->dev, "Invalid tc: %u\n", tc);
@@ -1515,20 +1201,36 @@ static int felix_cbs_get(struct net_device *ndev, u8 tc)
 
 static int felix_cut_thru_set(struct net_device *ndev, u8 cut_thru)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-	int port;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	struct ocelot_port *ocelot_port;
+	struct ocelot_mm_state *mm;
+	int port = dp->index;
+	int err = 0;
 
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
+	ocelot_port = ocelot->ports[port];
+	mm = &ocelot->mm[port];
 
-	ocelot_write_rix(ocelot, cut_thru, ANA_CUT_THRU_CFG, port);
+	mutex_lock(&ocelot->fwd_domain_lock);
 
-	return 0;
+	if (cut_thru & mm->preemptible_tcs) {
+		netdev_err(ndev,
+			   "A traffic class cannot be preemptible and cut-through at the same time.\n");
+		err = -EBUSY;
+		goto unlock;
+	}
+
+	ocelot_port->cut_thru = cut_thru;
+	ocelot_port->cut_thru_selected_by_user = cut_thru;
+	ocelot->ops->cut_through_fwd(ocelot);
+
+unlock:
+	mutex_unlock(&ocelot->fwd_domain_lock);
+
+	return err;
 }
 
-static int felix_rtag_parse_enable(struct ocelot *ocelot, u8 port)
+static void felix_rtag_parse_enable(struct ocelot *ocelot, u8 port)
 {
 	ocelot_rmw_rix(ocelot,
 		       ANA_PORT_MODE_REDTAG_PARSE_CFG,
@@ -1550,23 +1252,18 @@ static int felix_rtag_parse_enable(struct ocelot *ocelot, u8 port)
 			   DEV_MAC_TAGS_CFG_VLAN_DBL_AWR_ENA |
 			   DEV_MAC_TAGS_CFG_VLAN_LEN_AWR_ENA,
 			   DEV_MAC_TAGS_CFG);
-
-	return 0;
 }
 
 static int felix_seq_gen_set(struct net_device *ndev, u32 index,
 			     struct tsn_seq_gen_conf *sg_conf)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u8 iport_mask = sg_conf->iport_mask;
 	u8 split_mask = sg_conf->split_mask;
 	u8 seq_len = sg_conf->seq_len;
 	u32 seq_num = sg_conf->seq_num;
 	struct stream_filter *tmp;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index >= capa.num_frer_ssid) {
 		dev_err(ocelot->dev, "Invalid SSID %u, maximum:%u\n",
@@ -1584,9 +1281,9 @@ static int felix_seq_gen_set(struct net_device *ndev, u32 index,
 	}
 
 	list_for_each_entry(tmp, &streamtable, list)
-		if (tmp->handle == index)
-			felix_streamid_multi_forward_set(ocelot, tmp->mact_idx,
-							 split_mask);
+		if (tmp->handle == index &&
+		    tmp->dst_idx < ocelot->num_phys_ports)
+			ocelot_bridge_force_forward_port(ocelot, tmp->dst_idx, true);
 
 	ocelot_write(ocelot,
 		     ANA_TABLES_SEQ_MASK_SPLIT_MASK(split_mask) |
@@ -1611,14 +1308,11 @@ static int felix_seq_gen_set(struct net_device *ndev, u32 index,
 static int felix_seq_rec_set(struct net_device *ndev, u32 index,
 			     struct tsn_seq_rec_conf *sr_conf)
 {
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u8 seq_len = sr_conf->seq_len;
 	u8 hislen = sr_conf->his_len;
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
 	int i;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index >= capa.num_frer_ssid) {
 		dev_err(ocelot->dev, "Invalid SSID %u, maximum:%u\n",
@@ -1669,12 +1363,9 @@ static int felix_seq_rec_set(struct net_device *ndev, u32 index,
 static int felix_cb_get(struct net_device *ndev, u32 index,
 			struct tsn_cb_status *c)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
 	u32 val;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
 
 	if (index >= capa.num_frer_ssid) {
 		dev_err(ocelot->dev, "Invalid SSID %u, maximum:%u\n",
@@ -1711,15 +1402,11 @@ static int felix_cb_get(struct net_device *ndev, u32 index,
 static int felix_dscp_set(struct net_device *ndev, bool enable, const u8 dscp_ix,
 			  struct tsn_qos_switch_dscp_conf *c)
 {
-	struct ocelot *ocelot;
-	struct dsa_port *dp;
+	struct dsa_port *dp = dsa_port_from_netdev(ndev);
+	struct ocelot *ocelot = dp->ds->priv;
+	int port = dp->index;
 	u32 ri = dscp_ix;
 	u32 val;
-	int port;
-
-	dp = dsa_port_from_netdev(ndev);
-	ocelot = dp->ds->priv;
-	port = dp->index;
 
 	c->dscp = 0;
 	c->trust = 1;
@@ -1757,20 +1444,32 @@ static int felix_dscp_set(struct net_device *ndev, bool enable, const u8 dscp_ix
 	return 0;
 }
 
-void felix_preempt_irq_clean(struct ocelot *ocelot)
+static int felix_pcpmap_set(struct net_device *ndev,
+			    struct tsn_qos_switch_pcp_conf *c)
 {
-	struct ocelot_port *ocelot_port;
+	struct ocelot *ocelot;
+	struct dsa_port *dp;
+	int index;
 	int port;
-	u32 val;
 
-	val = DEV_MM_STATISTICS_MM_STATUS_PRMPT_ACTIVE_STICKY;
-	for (port = 0; port < ocelot->num_phys_ports; port++) {
-		ocelot_port = ocelot->ports[port];
-		ocelot_port_rmwl(ocelot_port, val, val, DEV_MM_STATUS);
-	}
+	dp = dsa_port_from_netdev(ndev);
+	ocelot = dp->ds->priv;
+	port = dp->index;
+
+	index = (c->pcp & GENMASK(2, 0)) * ((c->dei & BIT(0)) + 1);
+
+	ocelot_rmw_ix(ocelot,
+		     (ANA_PORT_PCP_DEI_MAP_DP_PCP_DEI_VAL & (c->dpl << 3)) |
+		     ANA_PORT_PCP_DEI_MAP_QOS_PCP_DEI_VAL(c->cos),
+		     ANA_PORT_PCP_DEI_MAP_DP_PCP_DEI_VAL |
+		     ANA_PORT_PCP_DEI_MAP_QOS_PCP_DEI_VAL_M,
+		     ANA_PORT_PCP_DEI_MAP,
+		     port, index);
+
+	return 0;
 }
 
-const struct tsn_ops switch_tsn_ops = {
+static const struct tsn_ops felix_tsn_ops = {
 	.get_capability                 = felix_tsn_get_cap,
 	.qbv_set			= felix_qbv_set,
 	.qbv_get			= felix_qbv_get,
@@ -1796,24 +1495,16 @@ const struct tsn_ops switch_tsn_ops = {
 	.cbrec_set			= felix_seq_rec_set,
 	.cb_get				= felix_cb_get,
 	.dscp_set			= felix_dscp_set,
+	.pcpmap_set			= felix_pcpmap_set,
 };
 
-int felix_tsn_enable(struct dsa_switch *ds)
+void felix_tsn_enable(struct dsa_switch *ds)
 {
-	struct net_device *dev;
 	struct dsa_port *dp;
-	int port;
-
-	for (port = 0; port < ds->num_ports; port++) {
-		dp = dsa_to_port(ds, port);
-		if (dp->type == DSA_PORT_TYPE_USER) {
-			dev = dp->slave;
-			tsn_port_register(dev, (struct tsn_ops *)&switch_tsn_ops,
-					  GROUP_OFFSET_SWITCH);
-		}
-	}
 
 	INIT_LIST_HEAD(&streamtable);
 
-	return 0;
+	dsa_switch_for_each_user_port(dp, ds)
+		tsn_port_register(dp->slave, (struct tsn_ops *)&felix_tsn_ops,
+				  GROUP_OFFSET_SWITCH);
 }

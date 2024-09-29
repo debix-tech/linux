@@ -78,6 +78,7 @@ struct dcss_scaler_ch {
 	u32 c_vstart;
 	u32 c_hstart;
 
+	bool use_nn_interpolation;
 	int ch_num;
 };
 
@@ -249,6 +250,17 @@ static void dcss_scaler_gaussian_filter(int fc_q, bool use_5_taps,
 	}
 }
 
+static void dcss_scaler_nearest_neighbor_filter(bool use_5_taps,
+						int coef[][PSC_NUM_TAPS])
+{
+	int i, j;
+
+	for (i = 0; i < PSC_STORED_PHASES; i++)
+		for (j = 0; j < PSC_NUM_TAPS; j++)
+			coef[i][j] = j == PSC_NUM_TAPS >> 1 ?
+						(1 << PSC_COEFF_PRECISION) : 0;
+}
+
 /**
  * dcss_scaler_filter_design() - Compute filter coefficients using
  *				 Gaussian filter.
@@ -259,7 +271,8 @@ static void dcss_scaler_gaussian_filter(int fc_q, bool use_5_taps,
  */
 static void dcss_scaler_filter_design(int src_length, int dst_length,
 				      bool use_5_taps, bool phase0_identity,
-				      int coef[][PSC_NUM_TAPS])
+				      int coef[][PSC_NUM_TAPS],
+				      bool nn_interpolation)
 {
 	int fc_q;
 
@@ -269,8 +282,11 @@ static void dcss_scaler_filter_design(int src_length, int dst_length,
 	else
 		fc_q = div_q(dst_length, src_length * PSC_NUM_PHASES);
 
-	/* compute gaussian filter coefficients */
-	dcss_scaler_gaussian_filter(fc_q, use_5_taps, phase0_identity, coef);
+	if (nn_interpolation)
+		dcss_scaler_nearest_neighbor_filter(use_5_taps, coef);
+	else
+		/* compute gaussian filter coefficients */
+		dcss_scaler_gaussian_filter(fc_q, use_5_taps, phase0_identity, coef);
 }
 
 static void dcss_scaler_write(struct dcss_scaler_ch *ch, u32 val, u32 ofs)
@@ -695,12 +711,14 @@ static void dcss_scaler_yuv_coef_set(struct dcss_scaler_ch *ch,
 
 	/* horizontal luma */
 	dcss_scaler_filter_design(src_xres, dst_xres, false,
-				  src_xres == dst_xres, coef);
+				  src_xres == dst_xres, coef,
+				  ch->use_nn_interpolation);
 	dcss_scaler_program_7_coef_set(ch, DCSS_SCALER_COEF_HLUM, coef);
 
 	/* vertical luma */
 	dcss_scaler_filter_design(src_yres, dst_yres, program_5_taps,
-				  src_yres == dst_yres, coef);
+				  src_yres == dst_yres, coef,
+				  ch->use_nn_interpolation);
 
 	if (program_5_taps)
 		dcss_scaler_program_5_coef_set(ch, DCSS_SCALER_COEF_VLUM, coef);
@@ -720,14 +738,14 @@ static void dcss_scaler_yuv_coef_set(struct dcss_scaler_ch *ch,
 	/* horizontal chroma */
 	dcss_scaler_filter_design(src_xres, dst_xres, false,
 				  (src_xres == dst_xres) && (ch->c_hstart == 0),
-				  coef);
+				  coef, ch->use_nn_interpolation);
 
 	dcss_scaler_program_7_coef_set(ch, DCSS_SCALER_COEF_HCHR, coef);
 
 	/* vertical chroma */
 	dcss_scaler_filter_design(src_yres, dst_yres, program_5_taps,
 				  (src_yres == dst_yres) && (ch->c_vstart == 0),
-				  coef);
+				  coef, ch->use_nn_interpolation);
 	if (program_5_taps)
 		dcss_scaler_program_5_coef_set(ch, DCSS_SCALER_COEF_VCHR, coef);
 	else
@@ -742,12 +760,14 @@ static void dcss_scaler_rgb_coef_set(struct dcss_scaler_ch *ch,
 
 	/* horizontal RGB */
 	dcss_scaler_filter_design(src_xres, dst_xres, false,
-				  src_xres == dst_xres, coef);
+				  src_xres == dst_xres, coef,
+				  ch->use_nn_interpolation);
 	dcss_scaler_program_7_coef_set(ch, DCSS_SCALER_COEF_HLUM, coef);
 
 	/* vertical RGB */
 	dcss_scaler_filter_design(src_yres, dst_yres, false,
-				  src_yres == dst_yres, coef);
+				  src_yres == dst_yres, coef,
+				  ch->use_nn_interpolation);
 	dcss_scaler_program_7_coef_set(ch, DCSS_SCALER_COEF_VLUM, coef);
 }
 
@@ -791,6 +811,14 @@ static void dcss_scaler_set_rgb10_order(struct dcss_scaler_ch *ch,
 	}
 
 	ch->sdata_ctrl |= a2r10g10b10_format << A2R10G10B10_FORMAT_POS;
+}
+
+void dcss_scaler_set_filter(struct dcss_scaler *scl, int ch_num,
+			    enum drm_scaling_filter scaling_filter)
+{
+	struct dcss_scaler_ch *ch = &scl->ch[ch_num];
+
+	ch->use_nn_interpolation = scaling_filter == DRM_SCALING_FILTER_NEAREST_NEIGHBOR;
 }
 
 static void dcss_scaler_setup_path(struct dcss_scaler_ch *ch,

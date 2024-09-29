@@ -83,7 +83,7 @@ static int vsi_dec_reqbufs(
 	else
 		q = &ctx->output_que;
 	ret = vb2_reqbufs(q, p);
-	v4l2_klog(LOGLVL_CONFIG, "%lx:%s:%d ask for %d buffer, got %d:%d",
+	v4l2_klog(LOGLVL_CONFIG, "%llx:%s:%d ask for %d buffer, got %d:%d",
 		ctx->ctxid, __func__, p->type, p->count, q->num_buffers, ret);
 	if (ret == 0) {
 		print_queinfo(q);
@@ -99,7 +99,7 @@ static int vsi_dec_g_fmt(struct file *file, void *priv, struct v4l2_format *f)
 {
 	struct vsi_v4l2_ctx *ctx = fh_to_ctx(file->private_data);
 
-	v4l2_klog(LOGLVL_CONFIG, "%lx:%s:%d", ctx->ctxid, __func__, f->type);
+	v4l2_klog(LOGLVL_CONFIG, "%llx:%s:%d", ctx->ctxid, __func__, f->type);
 	if (!vsi_v4l2_daemonalive())
 		return -ENODEV;
 	if (!isvalidtype(f->type, ctx->flag))
@@ -124,6 +124,18 @@ static int vsi_dec_s_fmt(struct file *file, void *priv, struct v4l2_format *f)
 	if (mutex_lock_interruptible(&ctx->ctxlock))
 		return -EBUSY;
 	ret = vsiv4l2_setfmt(ctx, f);
+
+	if (V4L2_TYPE_IS_OUTPUT(f->type) && !test_bit(CTX_FLAG_SRCCHANGED_BIT, &ctx->flag)) {
+		struct v4l2_format fc;
+
+		memset(&fc, 0, sizeof(fc));
+		fc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+		fc.fmt.pix.pixelformat = ctx->mediacfg.outfmt_fourcc;
+		fc.fmt.pix.width = f->fmt.pix.width;
+		fc.fmt.pix.height = f->fmt.pix.height;
+		ret = vsiv4l2_setfmt(ctx, &fc);
+	}
+
 	mutex_unlock(&ctx->ctxlock);
 	return ret;
 }
@@ -160,7 +172,7 @@ static int vsi_dec_qbuf(struct file *filp, void *priv, struct v4l2_buffer *buf)
 	struct vsi_v4l2_ctx *ctx = fh_to_ctx(filp->private_data);
 	struct video_device *vdev = ctx->dev->vdec;
 
-	v4l2_klog(LOGLVL_FLOW, "%lx:%s:%d:%d:%d", ctx->ctxid, __func__, buf->type, buf->index, buf->bytesused);
+	v4l2_klog(LOGLVL_FLOW, "%llx:%s:%d:%d:%d", ctx->ctxid, __func__, buf->type, buf->index, buf->bytesused);
 	if (!vsi_v4l2_daemonalive())
 		return -ENODEV;
 	if (!isvalidtype(buf->type, ctx->flag))
@@ -185,15 +197,12 @@ static int vsi_dec_qbuf(struct file *filp, void *priv, struct v4l2_buffer *buf)
 	} else {
 		ctx->inbuflen[buf->index] = buf->length;
 		ctx->inbufbytes[buf->index] = buf->bytesused;
+		if (buf->timestamp.tv_sec < 0 || buf->timestamp.tv_usec < 0)
+			set_bit(BUF_FLAG_TIMESTAMP_INVALID, &ctx->srcvbufflag[buf->index]);
 		ret = vb2_qbuf(&ctx->input_que, vdev->v4l2_dev->mdev, buf);
 	}
-	if (ret == 0 && ctx->status == VSI_STATUS_INIT &&
-		ctx->input_que.queued_count >= ctx->input_que.min_buffers_needed
-		&& vb2_is_streaming(&ctx->input_que)) {
-		v4l2_klog(LOGLVL_FLOW, "%lx:%s start streaming", ctx->ctxid, __func__);
-		ctx->status = DEC_STATUS_DECODING;
-		ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMON_OUTPUT, NULL);
-	}
+	if (ret == 0)
+		ret = vsi_dec_output_on(ctx);
 	mutex_unlock(&ctx->ctxlock);
 	return ret;
 }
@@ -210,12 +219,37 @@ static int vsi_dec_dec2drain(struct vsi_v4l2_ctx *ctx)
 	return ret;
 }
 
+int vsi_dec_output_on(struct vsi_v4l2_ctx *ctx)
+{
+	int ret = 0;
+
+	if (!ctx->need_output_on)
+		return 0;
+	if (ctx->input_que.queued_count < ctx->input_que.min_buffers_needed)
+		return 0;
+
+	v4l2_klog(LOGLVL_FLOW, "%llx:%s start streaming", ctx->ctxid, __func__);
+	ctx->status = DEC_STATUS_DECODING;
+	ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMON_OUTPUT, NULL);
+	if (ret == 0)
+		vsi_dec_dec2drain(ctx);
+
+	ctx->need_output_on = false;
+	return ret;
+}
+
 int vsi_dec_capture_on(struct vsi_v4l2_ctx *ctx)
 {
 	int ret = 0;
 
 	if (!ctx->need_capture_on || !ctx->reschange_cnt)
 		return 0;
+
+	if (ctx->reschange_notified && !vb2_is_streaming(&ctx->input_que)) {
+		v4l2_klog(LOGLVL_BRIEF, "handle seek first, then source change\n");
+		return 0;
+	}
+
 	ret = vb2_streamon(&ctx->output_que, V4L2_BUF_TYPE_VIDEO_CAPTURE);
 	if (ret)
 		return ret;
@@ -233,8 +267,32 @@ int vsi_dec_capture_on(struct vsi_v4l2_ctx *ctx)
 		vb2_buffer_done(vb, VB2_BUF_STATE_DONE);
 	}
 	ctx->need_capture_on = false;
+	ctx->reschange_notified = false;
 
 	return ret;
+}
+
+int vsi_dec_capture_off(struct vsi_v4l2_ctx *ctx)
+{
+	int ret;
+	struct vb2_queue *q = &ctx->output_que;
+
+	if (!vb2_is_streaming(q))
+		return 0;
+
+	ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMOFF_CAPTURE, NULL);
+	if (ret < 0)
+		return -EFAULT;
+
+	mutex_unlock(&ctx->ctxlock);
+	if (wait_event_interruptible(ctx->capoffdone_queue, vsi_checkctx_capoffdone(ctx) != 0))
+		v4l2_klog(LOGLVL_WARNING, "%llx wait capture streamoff done timeout\n", ctx->ctxid);
+	if (mutex_lock_interruptible(&ctx->ctxlock))
+		return -EBUSY;
+	ctx->buffed_capnum = 0;
+	ctx->buffed_cropcapnum = 0;
+	return_all_buffers(q, VB2_BUF_STATE_ERROR, 1);
+	return vb2_streamoff(q, q->type);
 }
 
 static int vsi_dec_streamon(struct file *filp, void *priv, enum v4l2_buf_type type)
@@ -249,18 +307,17 @@ static int vsi_dec_streamon(struct file *filp, void *priv, enum v4l2_buf_type ty
 
 	if (mutex_lock_interruptible(&ctx->ctxlock))
 		return -EBUSY;
-	v4l2_klog(LOGLVL_BRIEF, "%lx %s:%d in status %d", ctx->ctxid, __func__, type, ctx->status);
+	v4l2_klog(LOGLVL_BRIEF, "%llx %s:%d in status %d", ctx->ctxid, __func__, type, ctx->status);
 	if (!binputqueue(type)) {
+		vb2_clear_last_buffer_dequeued(&ctx->output_que);
 		ctx->need_capture_on = true;
 		ret = vsi_dec_capture_on(ctx);
 		printbufinfo(&ctx->output_que);
 	} else {
 		ret = vb2_streamon(&ctx->input_que, type);
-		if (ret == 0 && ctx->input_que.queued_count >= ctx->input_que.min_buffers_needed) {
-			ctx->status = DEC_STATUS_DECODING;
-			ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMON_OUTPUT, NULL);
-			if (ret == 0)
-				vsi_dec_dec2drain(ctx);
+		if (ret == 0) {
+			ctx->need_output_on = true;
+			ret = vsi_dec_output_on(ctx);
 		}
 		printbufinfo(&ctx->input_que);
 	}
@@ -277,36 +334,11 @@ static int vsi_dec_checkctx_srcbuf(struct vsi_v4l2_ctx *ctx)
 	return ret;
 }
 
-static bool vsi_dec_check_reschange(struct vsi_v4l2_ctx *ctx)
-{
-	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
-	struct vb2_queue *q = &ctx->output_que;
-
-	if (!ctx->need_capture_on && !vb2_is_streaming(q))
-		return true;
-	if (pcfg->decparams.dec_info.io_buffer.output_width != pcfg->decparams_bkup.io_buffer.output_width)
-		return true;
-	if (pcfg->decparams.dec_info.io_buffer.output_height != pcfg->decparams_bkup.io_buffer.output_height)
-		return true;
-	if (pcfg->decparams.dec_info.dec_info.visible_rect.width != pcfg->decparams_bkup.dec_info.dec_info.visible_rect.width)
-		return true;
-	if (pcfg->decparams.dec_info.dec_info.visible_rect.height != pcfg->decparams_bkup.dec_info.dec_info.visible_rect.height)
-		return true;
-	if (pcfg->sizeimagedst[0] < pcfg->sizeimagedst_bkup)
-		return true;
-	if (pcfg->decparams.dec_info.dec_info.needed_dpb_nums != pcfg->decparams_bkup.dec_info.dec_info.needed_dpb_nums)
-		return true;
-	if (q->num_buffers < pcfg->minbuf_4output_bkup)
-		return true;
-
-	return false;
-}
-
 void vsi_dec_update_reso(struct vsi_v4l2_ctx *ctx)
 {
 	struct vsi_v4l2_mediacfg *pcfg = &ctx->mediacfg;
 
-	ctx->reschanged_need_notify = vsi_dec_check_reschange(ctx);
+	ctx->reschanged_need_notify = true;
 	pcfg->decparams.dec_info.dec_info = pcfg->decparams_bkup.dec_info.dec_info;
 	pcfg->decparams.dec_info.io_buffer.srcwidth = pcfg->decparams_bkup.io_buffer.srcwidth;
 	pcfg->decparams.dec_info.io_buffer.srcheight = pcfg->decparams_bkup.io_buffer.srcheight;
@@ -318,6 +350,22 @@ void vsi_dec_update_reso(struct vsi_v4l2_ctx *ctx)
 	pcfg->src_pixeldepth = pcfg->decparams_bkup.dec_info.dec_info.bit_depth;
 	pcfg->minbuf_4output = pcfg->minbuf_4capture = pcfg->minbuf_4output_bkup;
 	pcfg->sizeimagedst[0] = pcfg->sizeimagedst_bkup;
+	pcfg->sizeimagedst[1] = 0;
+	pcfg->sizeimagedst[2] = 0;
+	pcfg->sizeimagedst[3] = 0;
+}
+
+static void vsi_dec_return_queued_buffers(struct vb2_queue *q)
+{
+	struct vb2_buffer *vb;
+
+	list_for_each_entry(vb, &q->queued_list, queued_entry) {
+		if (vb->state == VB2_BUF_STATE_QUEUED)
+			vb->state = VB2_BUF_STATE_DEQUEUED;
+	}
+	INIT_LIST_HEAD(&q->queued_list);
+	q->queued_count = 0;
+	q->waiting_for_buffers = !q->is_output;
 }
 
 static int vsi_dec_streamoff(
@@ -325,7 +373,7 @@ static int vsi_dec_streamoff(
 	void *priv,
 	enum v4l2_buf_type type)
 {
-	int ret;
+	int ret = 0;
 	struct vsi_v4l2_ctx *ctx = fh_to_ctx(priv);
 	struct vb2_queue *q;
 	enum v4l2_buf_type otype;
@@ -347,21 +395,29 @@ static int vsi_dec_streamoff(
 	if (mutex_lock_interruptible(&ctx->ctxlock))
 		return -EBUSY;
 	if (!binputqueue(type)) {
+		vb2_clear_last_buffer_dequeued(q);
+		if (ctx->need_capture_on && vb2_is_streaming(q)) {
+			return_all_buffers(q, VB2_BUF_STATE_ERROR, 1);
+			vb2_streamoff(q, type);
+		}
 		ctx->need_capture_on = false;
 		if (!vb2_is_streaming(q)) {
+			vsi_dec_return_queued_buffers(q);
 			mutex_unlock(&ctx->ctxlock);
 			return 0;
 		}
 	}
-	v4l2_klog(LOGLVL_BRIEF, "%lx %s:%d:%d:%d\n", ctx->ctxid, __func__, type, ctx->status, ctx->queued_srcnum);
+	v4l2_klog(LOGLVL_BRIEF, "%llx %s:%d:%d:%d\n", ctx->ctxid, __func__, type, ctx->status, ctx->queued_srcnum);
 	if (!vb2_is_streaming(q) && ctx->status == VSI_STATUS_INIT) {
 		mutex_unlock(&ctx->ctxlock);
 		return 0;
 	}
 
 	if (binputqueue(type)) {
-		ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMOFF_OUTPUT, NULL);
+		if (!ctx->need_output_on)
+			ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMOFF_OUTPUT, NULL);
 		ctx->status = DEC_STATUS_SEEK;
+		ctx->need_output_on = false;
 	} else {
 		ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_STREAMOFF_CAPTURE, NULL);
 		if (ctx->status != DEC_STATUS_SEEK && ctx->status != DEC_STATUS_ENDSTREAM)
@@ -377,7 +433,7 @@ static int vsi_dec_streamoff(
 			mutex_unlock(&ctx->ctxlock);
 			if (wait_event_interruptible(ctx->retbuf_queue,
 				vsi_dec_checkctx_srcbuf(ctx) != 0))
-				v4l2_klog(LOGLVL_WARNING, "%lx wait output buffer return timeout\n", ctx->ctxid);
+				v4l2_klog(LOGLVL_WARNING, "%llx wait output buffer return timeout\n", ctx->ctxid);
 			if (mutex_lock_interruptible(&ctx->ctxlock))
 				return -EBUSY;
 		}
@@ -387,13 +443,13 @@ static int vsi_dec_streamoff(
 		if (test_and_clear_bit(CTX_FLAG_DELAY_SRCCHANGED_BIT, &ctx->flag)) {
 			vsi_dec_update_reso(ctx);
 			vsi_v4l2_send_reschange(ctx);
-			v4l2_klog(LOGLVL_BRIEF, "%lx send delayed src change in streamoff", ctx->ctxid);
+			v4l2_klog(LOGLVL_BRIEF, "%llx send delayed src change in streamoff", ctx->ctxid);
 		}
 	} else {
 		mutex_unlock(&ctx->ctxlock);
 		if (wait_event_interruptible(ctx->capoffdone_queue,
 			vsi_checkctx_capoffdone(ctx) != 0))
-			v4l2_klog(LOGLVL_WARNING, "%lx wait capture streamoff done timeout\n", ctx->ctxid);
+			v4l2_klog(LOGLVL_WARNING, "%llx wait capture streamoff done timeout\n", ctx->ctxid);
 		if (mutex_lock_interruptible(&ctx->ctxlock))
 			return -EBUSY;
 		ctx->buffed_capnum = 0;
@@ -433,18 +489,12 @@ static int vsi_dec_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 		vb = q->bufs[p->index];
 		vsibuf = vb_to_vsibuf(vb);
 		list_del(&vsibuf->list);
-		if (!binputqueue(p->type)) {
+		if (!binputqueue(p->type) && !(p->flags & V4L2_BUF_FLAG_LAST)) {
 			clear_bit(BUF_FLAG_DONE, &ctx->vbufflag[p->index]);
 			ctx->buffed_capnum--;
 			ctx->buffed_cropcapnum--;
 		} else
 			clear_bit(BUF_FLAG_DONE, &ctx->srcvbufflag[p->index]);
-		if (ctx->status != DEC_STATUS_ENDSTREAM &&
-			!(test_bit(CTX_FLAG_ENDOFSTRM_BIT, &ctx->flag)) &&
-			p->bytesused == 0) {
-			mutex_unlock(&ctx->ctxlock);
-			return -EAGAIN;
-		}
 	}
 	if (!binputqueue(p->type)) {
 		p->reserved = ctx->rfc_luma_offset[p->index];
@@ -452,7 +502,6 @@ static int vsi_dec_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 		v4l2_klog(LOGLVL_FLOW, "rfc offest update=%x:%x", p->reserved, p->reserved2);
 
 		if (p->bytesused == 0 && (ctx->status == DEC_STATUS_ENDSTREAM || test_bit(CTX_FLAG_ENDOFSTRM_BIT, &ctx->flag))) {
-			p->flags |= V4L2_BUF_FLAG_LAST;
 			ctx->status = DEC_STATUS_ENDSTREAM;
 			clear_bit(CTX_FLAG_ENDOFSTRM_BIT, &ctx->flag);
 			v4l2_klog(LOGLVL_BRIEF, "send eos flag");
@@ -460,7 +509,7 @@ static int vsi_dec_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 			vsi_dec_update_reso(ctx);
 			vsi_v4l2_send_reschange(ctx);
 			clear_bit(CTX_FLAG_DELAY_SRCCHANGED_BIT, &ctx->flag);
-			v4l2_klog(LOGLVL_BRIEF, "%lx send delayed src change", ctx->ctxid);
+			v4l2_klog(LOGLVL_BRIEF, "%llx send delayed src change", ctx->ctxid);
 		} else if (test_and_clear_bit(BUF_FLAG_CROPCHANGE, &ctx->vbufflag[p->index])) {
 			struct v4l2_event event;
 
@@ -473,7 +522,7 @@ static int vsi_dec_dqbuf(struct file *file, void *priv, struct v4l2_buffer *p)
 		}
 		p->field = V4L2_FIELD_NONE;
 	}
-	v4l2_klog(LOGLVL_FLOW, "%lx:%s:%d:%d:%x:%d", ctx->ctxid, __func__, p->type, p->index, p->flags, p->bytesused);
+	v4l2_klog(LOGLVL_FLOW, "%llx:%s:%d:%d:%x:%d", ctx->ctxid, __func__, p->type, p->index, p->flags, p->bytesused);
 	mutex_unlock(&ctx->ctxlock);
 	return ret;
 }
@@ -528,7 +577,7 @@ static int vsi_dec_try_fmt(struct file *file, void *prv, struct v4l2_format *f)
 	if (!vsi_v4l2_daemonalive())
 		return -ENODEV;
 
-	vsiv4l2_verifyfmt(ctx, f);
+	vsiv4l2_verifyfmt(ctx, f, 1);
 	vsi_dec_getvui(ctx, f);
 	return 0;
 }
@@ -584,7 +633,7 @@ static int vsi_dec_get_selection(struct file *file, void *prv, struct v4l2_selec
 	default:
 		return -EINVAL;
 	}
-	v4l2_klog(LOGLVL_CONFIG, "%lx:%s:%d,%d,%d,%d",
+	v4l2_klog(LOGLVL_CONFIG, "%llx:%s:%d,%d,%d,%d",
 		ctx->ctxid, __func__, s->r.left, s->r.top, s->r.width, s->r.height);
 
 	return 0;
@@ -627,6 +676,34 @@ static int vsi_dec_handlestop_unspec(struct vsi_v4l2_ctx *ctx)
 	return 0;
 }
 
+static int vsi_dec_start_cmd(struct vsi_v4l2_ctx *ctx)
+{
+	int ret = 0;
+
+	if (ctx->status == DEC_STATUS_STOPPED) {
+		ctx->status = DEC_STATUS_DECODING;
+		ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_CMD_START, NULL);
+		if (ret < 0)
+			return ret;
+	}
+	if (ctx->reschange_notified) {
+		if (vb2_is_streaming(&ctx->output_que)) {
+			ret = vsi_dec_capture_off(ctx);
+			if (ret < 0) {
+				v4l2_klog(LOGLVL_ERROR,
+					  "ctx[%lld] capture off in start cmd fail\n",
+					  ctx->ctxid & 0xffff);
+				return ret;
+			}
+			ctx->need_capture_on = true;
+		}
+		if (ctx->need_capture_on)
+			ret = vsi_dec_capture_on(ctx);
+	}
+
+	return ret;
+}
+
 static int vsi_dec_try_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cmd)
 {
 	switch (cmd->cmd) {
@@ -655,7 +732,7 @@ int vsi_dec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cm
 	struct vsi_v4l2_ctx *ctx = fh_to_ctx(file->private_data);
 	int ret = 0;
 
-	v4l2_klog(LOGLVL_BRIEF, "%lx:%s:%d in state %d:%d", ctx->ctxid, __func__,
+	v4l2_klog(LOGLVL_BRIEF, "%llx:%s:%d in state %d:%d", ctx->ctxid, __func__,
 		cmd->cmd, ctx->status, vb2_is_streaming(&ctx->output_que));
 	if (!vsi_v4l2_daemonalive())
 		return -ENODEV;
@@ -671,10 +748,7 @@ int vsi_dec_decoder_cmd(struct file *file, void *fh, struct v4l2_decoder_cmd *cm
 			ret = vsi_dec_handlestop_unspec(ctx);
 		break;
 	case V4L2_DEC_CMD_START:
-		if (ctx->status == DEC_STATUS_STOPPED) {
-			ctx->status = DEC_STATUS_DECODING;
-			ret = vsiv4l2_execcmd(ctx, V4L2_DAEMON_VIDIOC_CMD_START, cmd);
-		}
+		ret = vsi_dec_start_cmd(ctx);
 		break;
 	case V4L2_DEC_CMD_RESET:
 		ret = vsi_v4l2_reset_ctx(ctx);
@@ -741,7 +815,7 @@ static int vsi_dec_queue_setup(
 	int i;
 
 	vsiv4l2_buffer_config(ctx, vq, nbuffers, nplanes, sizes);
-	v4l2_klog(LOGLVL_CONFIG, "%lx:%s:%d,%d,%d", ctx->ctxid, __func__, *nbuffers, *nplanes, sizes[0]);
+	v4l2_klog(LOGLVL_CONFIG, "%llx:%s:%d,%d,%d", ctx->ctxid, __func__, *nbuffers, *nplanes, sizes[0]);
 
 	for (i = 0; i < *nplanes; i++)
 		alloc_devs[i] = ctx->dev->dev;
@@ -780,6 +854,13 @@ static int vsi_dec_buf_prepare(struct vb2_buffer *vb)
 
 static int vsi_dec_start_streaming(struct vb2_queue *q, unsigned int count)
 {
+	struct vsi_v4l2_ctx *ctx = fh_to_ctx(q->drv_priv);
+
+	if (V4L2_TYPE_IS_OUTPUT(q->type))
+		ctx->out_sequence = 0;
+	else
+		ctx->cap_sequence = 0;
+
 	return 0;
 }
 static void vsi_dec_stop_streaming(struct vb2_queue *vq)
@@ -874,7 +955,7 @@ static int vsi_v4l2_dec_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 	return 0;
 }
 /********* for ext ctrl *************/
-static bool vsi_dec_ctrl_equal(const struct v4l2_ctrl *ctrl, u32 idx,
+static bool vsi_dec_ctrl_equal(const struct v4l2_ctrl *ctrl,
 		      union v4l2_ctrl_ptr ptr1,
 		      union v4l2_ctrl_ptr ptr2)
 {
@@ -882,12 +963,12 @@ static bool vsi_dec_ctrl_equal(const struct v4l2_ctrl *ctrl, u32 idx,
 	return 0;
 }
 
-static void vsi_dec_ctrl_init(const struct v4l2_ctrl *ctrl, u32 idx,
-		     union v4l2_ctrl_ptr ptr)
+static void vsi_dec_ctrl_init(const struct v4l2_ctrl *ctrl, u32 from_idx,
+			      union v4l2_ctrl_ptr ptr)
 {
-	void *p = ptr.p + idx * ctrl->elem_size;
+	void *p = ptr.p + from_idx * ctrl->elem_size;
 
-	memset(p, 0, ctrl->elem_size);
+	memset(p, 0, (ctrl->elems - from_idx) * ctrl->elem_size);
 }
 
 static void vsi_dec_ctrl_log(const struct v4l2_ctrl *ctrl)
@@ -895,7 +976,7 @@ static void vsi_dec_ctrl_log(const struct v4l2_ctrl *ctrl)
 	//do nothing now
 }
 
-static int vsi_dec_ctrl_validate(const struct v4l2_ctrl *ctrl, u32 idx,
+static int vsi_dec_ctrl_validate(const struct v4l2_ctrl *ctrl,
 			union v4l2_ctrl_ptr ptr)
 {
 	//always true
@@ -1106,6 +1187,7 @@ static int v4l2_dec_open(struct file *filp)
 		vb2_queue_release(&ctx->input_que);
 		goto err_enc_dec_exit;
 	}
+	q->quirk_poll_must_check_waiting_for_buffers = false;
 	vsiv4l2_initcfg(ctx);
 	vsi_dec_setup_ctrls(&ctx->ctrlhdl);
 	vfh = (struct v4l2_fh *)filp->private_data;
@@ -1148,18 +1230,52 @@ static int v4l2_dec_mmap(struct file *filp, struct vm_area_struct *vma)
 
 static __poll_t vsi_dec_poll(struct file *file, poll_table *wait)
 {
+	__poll_t req_events = poll_requested_events(wait);
 	__poll_t ret = 0;
+	struct v4l2_fh *fh = file->private_data;
 	struct vsi_v4l2_ctx *ctx = fh_to_ctx(file->private_data);
 	int dstn = atomic_read(&ctx->dstframen);
 	int srcn = atomic_read(&ctx->srcframen);
+	struct vb2_queue *src_q, *dst_q;
+
+	src_q = &ctx->input_que;
+	dst_q = &ctx->output_que;
+
+	/*
+	 * poll_wait() MUST be called on the first invocation on all the
+	 * potential queues of interest, even if we are not interested in their
+	 * events during this first call. Failure to do so will result in
+	 * queue's events to be ignored because the poll_table won't be capable
+	 * of adding new wait queues thereafter.
+	 */
+	poll_wait(file, &ctx->input_que.done_wq, wait);
+	poll_wait(file, &ctx->output_que.done_wq, wait);
+	poll_wait(file, &fh->wait, wait);
 
 	if (!vsi_v4l2_daemonalive())
-		ret |= POLLERR;
+		ret |= EPOLLERR;
 
 	if (v4l2_event_pending(&ctx->fh)) {
 		v4l2_klog(LOGLVL_BRIEF, "%s event", __func__);
-		ret |= POLLPRI;
+		ret |= EPOLLPRI;
 	}
+	if (req_events & (EPOLLOUT | EPOLLWRNORM | EPOLLIN | EPOLLRDNORM)) {
+		/*
+		 * There has to be at least one buffer queued on each queued_list, which
+		 * means either in driver already or waiting for driver to claim it
+		 * and start processing.
+		 */
+		if ((!vb2_is_streaming(src_q) || src_q->error || list_empty(&src_q->queued_list)) &&
+		    !ctx->reschange_notified &&
+		    (!vb2_is_streaming(dst_q) || dst_q->error ||
+		     (list_empty(&dst_q->queued_list) && !dst_q->last_buffer_dequeued))) {
+			ret |= EPOLLERR;
+			return ret;
+		}
+	}
+
+	if (ctx->output_que.last_buffer_dequeued)
+		ret |= (EPOLLIN | EPOLLRDNORM);
 	if (vb2_is_streaming(&ctx->output_que))
 		ret |= vb2_poll(&ctx->output_que, file, wait);
 	ret |= vb2_poll(&ctx->input_que, file, wait);
@@ -1172,7 +1288,7 @@ static __poll_t vsi_dec_poll(struct file *file, poll_table *wait)
 			ret |= vb2_poll(&ctx->input_que, file, wait);
 	}
 	if (ctx->error < 0)
-		ret |= POLLERR;
+		ret |= EPOLLERR;
 	v4l2_klog(LOGLVL_VERBOSE, "%s:%x", __func__, ret);
 	return ret;
 }

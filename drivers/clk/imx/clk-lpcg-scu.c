@@ -140,7 +140,8 @@ struct clk_hw *__imx_clk_lpcg_scu(struct device *dev, const char *name,
 	ret = clk_hw_register(dev, hw);
 	if (ret) {
 		kfree(clk);
-		return ERR_PTR(ret);
+		hw = ERR_PTR(ret);
+		return hw;
 	}
 
 	if (dev)
@@ -149,7 +150,15 @@ struct clk_hw *__imx_clk_lpcg_scu(struct device *dev, const char *name,
 	return hw;
 }
 
-int __maybe_unused imx_clk_lpcg_scu_suspend(struct device *dev)
+void imx_clk_lpcg_scu_unregister(struct clk_hw *hw)
+{
+	struct clk_lpcg_scu *clk = to_clk_lpcg_scu(hw);
+
+	clk_hw_unregister(&clk->hw);
+	kfree(clk);
+}
+
+static int __maybe_unused imx_clk_lpcg_scu_suspend(struct device *dev)
 {
 	struct clk_lpcg_scu *clk = dev_get_drvdata(dev);
 
@@ -162,14 +171,18 @@ int __maybe_unused imx_clk_lpcg_scu_suspend(struct device *dev)
 	return 0;
 }
 
-int __maybe_unused imx_clk_lpcg_scu_resume(struct device *dev)
+static int __maybe_unused imx_clk_lpcg_scu_resume(struct device *dev)
 {
 	struct clk_lpcg_scu *clk = dev_get_drvdata(dev);
 
 	if (!strncmp("hdmi_lpcg", clk_hw_get_name(&clk->hw), strlen("hdmi_lpcg")))
 		return 0;
 
-	/* FIXME: double write in case a failure */
+	/*
+	 * FIXME: Sometimes writes don't work unless the CPU issues
+	 * them twice
+	 */
+
 	writel(clk->state, clk->reg);
 	do_lpcg_workaround(0, clk->reg, clk->state);
 	dev_dbg(dev, "restore lpcg state 0x%x\n", clk->state);

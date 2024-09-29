@@ -33,6 +33,7 @@
 #define PWM_IMX_TPM_CnV(n)	(0x24 + (n) * 0x8)
 
 #define PWM_IMX_TPM_PARAM_CHAN			GENMASK(7, 0)
+#define PWM_IMX_TPM_GLOBAL_RST			BIT(1)
 
 #define PWM_IMX_TPM_SC_PS			GENMASK(2, 0)
 #define PWM_IMX_TPM_SC_CMOD			GENMASK(4, 3)
@@ -132,9 +133,9 @@ static int pwm_imx_tpm_round_state(struct pwm_chip *chip,
 	return 0;
 }
 
-static void pwm_imx_tpm_get_state(struct pwm_chip *chip,
-				  struct pwm_device *pwm,
-				  struct pwm_state *state)
+static int pwm_imx_tpm_get_state(struct pwm_chip *chip,
+				 struct pwm_device *pwm,
+				 struct pwm_state *state)
 {
 	struct imx_tpm_pwm_chip *tpm = to_imx_tpm_pwm_chip(chip);
 	u32 rate, val, prescale;
@@ -164,6 +165,8 @@ static void pwm_imx_tpm_get_state(struct pwm_chip *chip,
 
 	/* get channel status */
 	state->enabled = FIELD_GET(PWM_IMX_TPM_CnSC_ELS, val) ? true : false;
+
+	return 0;
 }
 
 /* this function is supposed to be called with mutex hold */
@@ -335,6 +338,7 @@ static const struct pwm_ops imx_tpm_pwm_ops = {
 
 static int pwm_imx_tpm_probe(struct platform_device *pdev)
 {
+	struct device_node *np = pdev->dev.of_node;
 	struct imx_tpm_pwm_chip *tpm;
 	int ret;
 	u32 val;
@@ -350,13 +354,9 @@ static int pwm_imx_tpm_probe(struct platform_device *pdev)
 		return PTR_ERR(tpm->base);
 
 	tpm->clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(tpm->clk)) {
-		ret = PTR_ERR(tpm->clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev,
-				"failed to get PWM clock: %d\n", ret);
-		return ret;
-	}
+	if (IS_ERR(tpm->clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(tpm->clk),
+				     "failed to get PWM clock\n");
 
 	ret = clk_prepare_enable(tpm->clk);
 	if (ret) {
@@ -367,13 +367,16 @@ static int pwm_imx_tpm_probe(struct platform_device *pdev)
 
 	tpm->chip.dev = &pdev->dev;
 	tpm->chip.ops = &imx_tpm_pwm_ops;
-	tpm->chip.base = -1;
-	tpm->chip.of_xlate = of_pwm_xlate_with_flags;
-	tpm->chip.of_pwm_n_cells = 3;
 
 	/* get number of channels */
 	val = readl(tpm->base + PWM_IMX_TPM_PARAM);
 	tpm->chip.npwm = FIELD_GET(PWM_IMX_TPM_PARAM_CHAN, val);
+
+	if (of_property_read_bool(np, "pwm-rst")) {
+		/* Resets all internal logic and registers */
+		writel(PWM_IMX_TPM_GLOBAL_RST, tpm->base + PWM_IMX_TPM_GLOBAL);
+		writel(0, tpm->base + PWM_IMX_TPM_GLOBAL);
+	}
 
 	mutex_init(&tpm->lock);
 
@@ -386,14 +389,13 @@ static int pwm_imx_tpm_probe(struct platform_device *pdev)
 	return ret;
 }
 
-static int pwm_imx_tpm_remove(struct platform_device *pdev)
+static void pwm_imx_tpm_remove(struct platform_device *pdev)
 {
 	struct imx_tpm_pwm_chip *tpm = platform_get_drvdata(pdev);
-	int ret = pwmchip_remove(&tpm->chip);
+
+	pwmchip_remove(&tpm->chip);
 
 	clk_disable_unprepare(tpm->clk);
-
-	return ret;
 }
 
 static int __maybe_unused pwm_imx_tpm_suspend(struct device *dev)
@@ -403,11 +405,10 @@ static int __maybe_unused pwm_imx_tpm_suspend(struct device *dev)
 	if (tpm->enable_count > 0)
 		return -EBUSY;
 
-	/* force 'real_period' to be zero to force
-	 * period update code can be executed after
-	 * system resume back, since suspend causes
-	 * the period related registers to become
-	 * their reset values.
+	/*
+	 * Force 'real_period' to be zero to force period update code
+	 * can be executed after system resume back, since suspend causes
+	 * the period related registers to become their reset values.
 	 */
 	tpm->real_period = 0;
 
@@ -423,9 +424,7 @@ static int __maybe_unused pwm_imx_tpm_resume(struct device *dev)
 
 	ret = clk_prepare_enable(tpm->clk);
 	if (ret)
-		dev_err(dev,
-			"failed to prepare or enable clock: %d\n",
-			ret);
+		dev_err(dev, "failed to prepare or enable clock: %d\n", ret);
 
 	return ret;
 }
@@ -446,7 +445,7 @@ static struct platform_driver imx_tpm_pwm_driver = {
 		.pm = &imx_tpm_pwm_pm,
 	},
 	.probe	= pwm_imx_tpm_probe,
-	.remove = pwm_imx_tpm_remove,
+	.remove_new = pwm_imx_tpm_remove,
 };
 module_platform_driver(imx_tpm_pwm_driver);
 

@@ -71,7 +71,6 @@
 #define BRCMF_C_SCB_DEAUTHENTICATE_FOR_REASON	201
 #define BRCMF_C_SET_ASSOC_PREFER		205
 #define BRCMF_C_GET_VALID_CHANNELS		217
-#define BRCMF_C_GET_FAKEFRAG                    218
 #define BRCMF_C_SET_FAKEFRAG			219
 #define BRCMF_C_GET_KEY_PRIMARY			235
 #define BRCMF_C_SET_KEY_PRIMARY			236
@@ -80,26 +79,31 @@
 #define BRCMF_C_SET_VAR				263
 #define BRCMF_C_SET_WSEC_PMK			268
 
-#define BRCMF_FW_BADARG				2
-#define BRCMF_FW_UNSUPPORTED			23
-
 s32 brcmf_fil_cmd_data_set(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
 s32 brcmf_fil_cmd_data_get(struct brcmf_if *ifp, u32 cmd, void *data, u32 len);
 s32 brcmf_fil_cmd_int_set(struct brcmf_if *ifp, u32 cmd, u32 data);
 s32 brcmf_fil_cmd_int_get(struct brcmf_if *ifp, u32 cmd, u32 *data);
 
-s32 brcmf_fil_iovar_data_set(struct brcmf_if *ifp, char *name, const void *data,
+s32 brcmf_fil_iovar_data_set(struct brcmf_if *ifp, const char *name, const void *data,
 			     u32 len);
-s32 brcmf_fil_iovar_data_get(struct brcmf_if *ifp, char *name, void *data,
+s32 brcmf_fil_iovar_data_get(struct brcmf_if *ifp, const char *name, void *data,
 			     u32 len);
-s32 brcmf_fil_iovar_int_set(struct brcmf_if *ifp, char *name, u32 data);
-s32 brcmf_fil_iovar_int_get(struct brcmf_if *ifp, char *name, u32 *data);
+s32 brcmf_fil_iovar_int_set(struct brcmf_if *ifp, const char *name, u32 data);
+s32 brcmf_fil_iovar_int_get(struct brcmf_if *ifp, const char *name, u32 *data);
 
-s32 brcmf_fil_bsscfg_data_set(struct brcmf_if *ifp, char *name, void *data,
+s32 brcmf_fil_bsscfg_data_set(struct brcmf_if *ifp, const char *name, void *data,
 			      u32 len);
-s32 brcmf_fil_bsscfg_data_get(struct brcmf_if *ifp, char *name, void *data,
+s32 brcmf_fil_bsscfg_data_get(struct brcmf_if *ifp, const char *name, void *data,
 			      u32 len);
-s32 brcmf_fil_bsscfg_int_set(struct brcmf_if *ifp, char *name, u32 data);
-s32 brcmf_fil_bsscfg_int_get(struct brcmf_if *ifp, char *name, u32 *data);
+s32 brcmf_fil_bsscfg_int_set(struct brcmf_if *ifp, const char *name, u32 data);
+s32 brcmf_fil_bsscfg_int_get(struct brcmf_if *ifp, const char *name, u32 *data);
+s32 brcmf_fil_xtlv_data_set(struct brcmf_if *ifp, const char *name, u16 id,
+			    void *data, u32 len);
+s32 brcmf_fil_xtlv_data_get(struct brcmf_if *ifp, const char *name, u16 id,
+			    void *data, u32 len);
+s32 brcmf_fil_xtlv_int_set(struct brcmf_if *ifp, const char *name, u16 id, u32 data);
+s32 brcmf_fil_xtlv_int_get(struct brcmf_if *ifp, const char *name, u16 id, u32 *data);
+s32 brcmf_fil_xtlv_int8_get(struct brcmf_if *ifp, const char *name, u16 id, u8 *data);
+s32 brcmf_fil_xtlv_int16_get(struct brcmf_if *ifp, const char *name, u16 id, u16 *data);
 
 #endif /* _fwil_h_ */

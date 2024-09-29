@@ -8,22 +8,22 @@
  */
 
 #include <linux/delay.h>
+#include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/kernel.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
-#include <linux/of_gpio.h>
 #include <linux/usb/typec_mux.h>
 
 struct gpio_typec_switch {
-	struct typec_switch *sw;
+	struct typec_switch_dev *sw;
 	struct mutex lock;
 	struct gpio_desc *ss_sel;
 	struct gpio_desc *ss_reset;
 };
 
-static int switch_gpio_set(struct typec_switch *sw,
+static int switch_gpio_set(struct typec_switch_dev *sw,
 			   enum typec_orientation orientation)
 {
 	struct gpio_typec_switch *gpio_sw = typec_switch_get_drvdata(sw);

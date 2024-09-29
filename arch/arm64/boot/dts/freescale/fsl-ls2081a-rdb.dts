@@ -26,25 +26,36 @@
 	};
 };
 
+&dspi {
+	status = "okay";
+
+	n25q512a: flash@0 {
+		compatible = "jedec,spi-nor";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		spi-max-frequency = <3000000>;
+		reg = <0>;
+	};
+};
+
 &esdhc {
 	status = "okay";
 };
 
-&ifc {
-	status = "disabled";
-};
-
 &i2c0 {
 	status = "okay";
-	pca9547@75 {
+
+	pca9547: mux@75 {
 		compatible = "nxp,pca9547";
 		reg = <0x75>;
 		#address-cells = <1>;
 		#size-cells = <0>;
+
 		i2c@1 {
 			#address-cells = <1>;
 			#size-cells = <0>;
-			reg = <0x01>;
+			reg = <0x1>;
+
 			rtc@51 {
 				compatible = "nxp,pcf2129";
 				reg = <0x51>;
@@ -54,7 +65,7 @@
 		i2c@2 {
 			#address-cells = <1>;
 			#size-cells = <0>;
-			reg = <0x02>;
+			reg = <0x2>;
 
 			ina220@40 {
 				compatible = "ti,ina220";
@@ -76,35 +87,29 @@
 	};
 };
 
-&dspi {
-	status = "okay";
-	dflash0: n25q512a@0 {
-		#address-cells = <1>;
-		#size-cells = <1>;
-		compatible = "st,m25p80";
-		spi-max-frequency = <3000000>;
-		reg = <0>;
-	};
+&ifc {
+	status = "disabled";
 };
 
 &qspi {
 	status = "okay";
-	fsl,qspi-has-second-chip;
-	flash0: s25fs512s@0 {
+
+	s25fs512s0: flash@0 {
+		compatible = "jedec,spi-nor";
 		#address-cells = <1>;
 		#size-cells = <1>;
-		compatible = "spansion,m25p80";
 		spi-rx-bus-width = <4>;
 		spi-tx-bus-width = <4>;
 		spi-max-frequency = <20000000>;
 		reg = <0>;
 	};
-	flash1: s25fs512s@1 {
+
+	s25fs512s1: flash@1 {
+		compatible = "jedec,spi-nor";
 		#address-cells = <1>;
 		#size-cells = <1>;
 		spi-rx-bus-width = <4>;
 		spi-tx-bus-width = <4>;
-		compatible = "spansion,m25p80";
 		spi-max-frequency = <20000000>;
 		reg = <1>;
 	};

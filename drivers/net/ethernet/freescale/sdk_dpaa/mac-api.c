@@ -437,9 +437,10 @@ static int dtsec_init_phy(struct net_device *net_dev,
 	struct phy_device	*phy_dev;
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
 
+	/* Pass a void link state handler for fixed links */
 	if (of_phy_is_fixed_link(mac_dev->phy_node))
-		phy_dev = of_phy_attach(net_dev, mac_dev->phy_node,
-					0, mac_dev->phy_if);
+		phy_dev = of_phy_connect(net_dev, mac_dev->phy_node,
+					 &adjust_link_void, 0, mac_dev->phy_if);
 	else
 		phy_dev = of_phy_connect(net_dev, mac_dev->phy_node,
 					 &adjust_link, 0, mac_dev->phy_if);
@@ -470,12 +471,17 @@ static int xgmac_init_phy(struct net_device *net_dev,
 	struct phy_device *phy_dev;
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
 
-	if (of_phy_is_fixed_link(mac_dev->phy_node))
-		phy_dev = of_phy_attach(net_dev, mac_dev->phy_node,
-					0, mac_dev->phy_if);
-	else
-		phy_dev = of_phy_connect(net_dev, mac_dev->phy_node,
-					 &adjust_link_void, 0, mac_dev->phy_if);
+	/* The internal connection to the serdes is XGMII, but this isn't
+	 * really correct for the phy mode (which is the external connection).
+	 * However, this is how all older device trees say that they want
+	 * XAUI, so just convert it for them.
+	 */
+	if (mac_dev->phy_if == PHY_INTERFACE_MODE_XGMII)
+		mac_dev->phy_if = PHY_INTERFACE_MODE_XAUI;
+
+	/* Pass a void link state handler for both fixed and dynamic links */
+	phy_dev = of_phy_connect(net_dev, mac_dev->phy_node,
+				 &adjust_link_void, 0, mac_dev->phy_if);
 	if (unlikely(phy_dev == NULL) || IS_ERR(phy_dev)) {
 		netdev_err(net_dev, "Could not attach to PHY %s\n",
 				mac_dev->phy_node ?
@@ -504,6 +510,14 @@ static int memac_init_phy(struct net_device *net_dev,
 	struct phy_device       *phy_dev;
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(mask) = { 0, };
 	void (*adjust_link_handler)(struct net_device *);
+
+	/* The internal connection to the serdes is XGMII, but this isn't
+	 * really correct for the phy mode (which is the external connection).
+	 * However, this is how all older device trees say that they want
+	 * 10GBASE-R (aka XFI), so just convert it for them.
+	 */
+	if (mac_dev->phy_if == PHY_INTERFACE_MODE_XGMII)
+		mac_dev->phy_if = PHY_INTERFACE_MODE_10GBASER;
 
 	if ((macdev2enetinterface(mac_dev) == e_ENET_MODE_XGMII_10000) ||
 	    (macdev2enetinterface(mac_dev) == e_ENET_MODE_SGMII_2500)) {
@@ -548,7 +562,7 @@ static int memac_init_phy(struct net_device *net_dev,
 	}
 
 	/* Unless the PHY is capable of rate adaptation */
-	if (mac_dev->phy_if != PHY_INTERFACE_MODE_XGMII ||
+	if (mac_dev->phy_if != PHY_INTERFACE_MODE_10GBASER ||
 	    ((phy_dev->drv->phy_id & GENMASK(31, 10)) != PHY_VEND_AQUANTIA)) {
 		/* Remove any features not supported by the controller */
 		ethtool_convert_legacy_u32_to_link_mode(mask,

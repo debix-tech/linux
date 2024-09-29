@@ -41,7 +41,7 @@
 #include <linux/fsl_devices.h>
 #include <linux/bitops.h>
 #include <linux/pinctrl/consumer.h>
-#include <linux/platform_data/dma-imx.h>
+#include <linux/dma/imx-dma.h>
 #include <asm/cacheflush.h>
 
 #include "epdc_v2_regs.h"
@@ -124,7 +124,8 @@ struct mxc_epdc_fb_data {
 	struct fb_var_screeninfo epdc_fb_var; /* Internal copy of screeninfo
 						so we can sync changes to it */
 	u32 pseudo_palette[16];
-	char fw_str[24];
+#define FW_STR_LEN	32
+	char fw_str[FW_STR_LEN];
 	struct list_head list;
 	struct imx_epdc_fb_mode *cur_mode;
 	struct imx_epdc_fb_platform_data *pdata;
@@ -1017,7 +1018,7 @@ static inline bool epdc_any_luts_active(int rev)
 static inline bool epdc_any_luts_real_available(void)
 {
 	if ((__raw_readl(EPDC_STATUS_LUTS) != 0xfffffffe) ||
-		(__raw_readl(EPDC_STATUS_LUTS2) != ~0UL))
+		(__raw_readl(EPDC_STATUS_LUTS2) != ~0xffffffff))
 		return true;
 	else
 		return false;
@@ -4767,13 +4768,13 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 	struct mxcfb_waveform_data_file *wv_file;
 	int wv_data_offs;
 	int i;
-	struct mxcfb_update_data update;
+	struct mxcfb_update_data update = { 0 };
 	struct mxcfb_update_marker_data upd_marker_data;
 	struct fb_var_screeninfo *screeninfo = &fb_data->epdc_fb_var;
 	u32 xres, yres;
 	struct clk *epdc_parent;
-	unsigned long rounded_parent_rate, epdc_pix_rate,
-			rounded_pix_clk, target_pix_clk;
+	unsigned long target_pix_clk, epdc_pix_rate;
+	long rounded_pix_clk, rounded_parent_rate;
 
 	if (fw == NULL) {
 		/* If default FW file load failed, we give up */
@@ -4784,7 +4785,7 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 		dev_dbg(fb_data->dev,
 			"Can't find firmware. Trying fallback fw\n");
 		fb_data->fw_default_load = true;
-		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+		ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
 			"imx/epdc/epdc.fw", fb_data->dev, GFP_KERNEL, fb_data,
 			mxc_epdc_fb_fw_handler);
 		if (ret)
@@ -4848,12 +4849,23 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 	target_pix_clk = fb_data->cur_mode->vmode->pixclock;
 
 	rounded_pix_clk = clk_round_rate(fb_data->epdc_clk_pix, target_pix_clk);
+	if (rounded_pix_clk < 0) {
+		dev_err(fb_data->dev,
+			"Failed to round clock rate: %ld\n", rounded_pix_clk);
+		return;
+	}
 
 	if (((rounded_pix_clk >= target_pix_clk + target_pix_clk/100) ||
 		(rounded_pix_clk <= target_pix_clk - target_pix_clk/100))) {
 		/* Can't get close enough without changing parent clk */
 		epdc_parent = clk_get_parent(fb_data->epdc_clk_pix);
 		rounded_parent_rate = clk_round_rate(epdc_parent, target_pix_clk);
+		if (rounded_parent_rate < 0) {
+			dev_err(fb_data->dev,
+				"Failed to round parent clock rate: %ld\n",
+				rounded_parent_rate);
+			return;
+		}
 
 		epdc_pix_rate = target_pix_clk;
 		while (epdc_pix_rate < rounded_parent_rate)
@@ -4861,6 +4873,12 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 		clk_set_rate(epdc_parent, epdc_pix_rate);
 
 		rounded_pix_clk = clk_round_rate(fb_data->epdc_clk_pix, target_pix_clk);
+		if (rounded_pix_clk < 0) {
+			dev_err(fb_data->dev,
+				"Failed to round clock rate: %ld\n",
+				rounded_pix_clk);
+			return;
+		}
 		if (((rounded_pix_clk >= target_pix_clk + target_pix_clk/100) ||
 			(rounded_pix_clk <= target_pix_clk - target_pix_clk/100)))
 			/* Still can't get a good clock, provide warning */
@@ -4904,6 +4922,7 @@ static void mxc_epdc_fb_fw_handler(const struct firmware *fw,
 	update.temp = TEMP_USE_AMBIENT;
 	update.flags = 0;
 	update.dither_mode = 0;
+	update.quant_bit = 0;
 
 	upd_marker_data.update_marker = update.update_marker;
 
@@ -4929,13 +4948,15 @@ static int mxc_epdc_fb_init_hw(struct fb_info *info)
 	 */
 	if (fb_data->cur_mode) {
 		strcpy(fb_data->fw_str, "imx/epdc/epdc_");
-		strcat(fb_data->fw_str, fb_data->cur_mode->vmode->name);
-		strcat(fb_data->fw_str, ".fw");
+		strncat(fb_data->fw_str, fb_data->cur_mode->vmode->name,
+			FW_STR_LEN - strlen(fb_data->fw_str) - 1);
+		strncat(fb_data->fw_str, ".fw",
+			FW_STR_LEN - strlen(fb_data->fw_str) - 1);
 	}
 
 	fb_data->fw_default_load = false;
 
-	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_HOTPLUG,
+	ret = request_firmware_nowait(THIS_MODULE, FW_ACTION_UEVENT,
 				fb_data->fw_str, fb_data->dev, GFP_KERNEL,
 				fb_data, mxc_epdc_fb_fw_handler);
 	if (ret)
@@ -4949,7 +4970,7 @@ static ssize_t store_update(struct device *device,
 			     struct device_attribute *attr,
 			     const char *buf, size_t count)
 {
-	struct mxcfb_update_data update;
+	struct mxcfb_update_data update = { 0 };
 	struct fb_info *info = dev_get_drvdata(device);
 	struct mxc_epdc_fb_data *fb_data = (struct mxc_epdc_fb_data *)info;
 
@@ -4959,6 +4980,8 @@ static ssize_t store_update(struct device *device,
 		update.waveform_mode = fb_data->wv_modes.mode_gc16;
 	else if (strncmp(buf, "gc4", 3) == 0)
 		update.waveform_mode = fb_data->wv_modes.mode_gc4;
+	else
+		update.waveform_mode = fb_data->wv_modes.mode_du;
 
 	/* Now, request full screen update */
 	update.update_region.left = 0;
@@ -4976,7 +4999,7 @@ static ssize_t store_update(struct device *device,
 }
 
 static struct device_attribute fb_attrs[] = {
-	__ATTR(update, S_IRUGO|S_IWUSR, NULL, store_update),
+	__ATTR(update, S_IWUSR, NULL, store_update),
 };
 
 static const struct of_device_id imx_epdc_dt_ids[] = {
@@ -5014,7 +5037,6 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 	phandle phandle;
 	u32 out_val[3];
 	int enable_gpio;
-	enum of_gpio_flags flag;
 	unsigned short *wk_p;
 
 	if (!np)
@@ -5054,7 +5076,7 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 	}
 
 	if (of_find_property(np, "en-gpios", NULL)) {
-		enable_gpio = of_get_named_gpio_flags(np, "en-gpios", 0, &flag);
+		enable_gpio = of_get_named_gpio(np, "en-gpios", 0);
 		if (enable_gpio == -EPROBE_DEFER) {
 			dev_info(&pdev->dev, "GPIO requested is not"
 				"here yet, deferring the probe\n");
@@ -5066,8 +5088,6 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 
 			ret = devm_gpio_request_one(&pdev->dev,
 						    enable_gpio,
-						    (flag & OF_GPIO_ACTIVE_LOW)
-						    ? GPIOF_OUT_INIT_LOW :
 						    GPIOF_OUT_INIT_HIGH,
 						    "en_pins");
 			if (ret) {
@@ -5289,7 +5309,6 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 	info->var.activate = FB_ACTIVATE_NOW;
 	info->pseudo_palette = fb_data->pseudo_palette;
 	info->screen_size = info->fix.smem_len;
-	info->flags = FBINFO_FLAG_DEFAULT;
 
 	mxc_epdc_fb_set_fix(info);
 
@@ -5583,9 +5602,6 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 		fb_data->vneg_regulator = NULL;
 	}
 
-	if (device_create_file(info->dev, &fb_attrs[0]))
-		dev_err(&pdev->dev, "Unable to create file from fb_attrs\n");
-
 	fb_data->cur_update = NULL;
 
 	mutex_init(&fb_data->queue_mutex);
@@ -5703,6 +5719,9 @@ static int mxc_epdc_fb_probe(struct platform_device *pdev)
 			"register_framebuffer failed with error %d\n", ret);
 		goto out_lutmap;
 	}
+
+	if (device_create_file(info->dev, &fb_attrs[0]))
+		dev_err(&pdev->dev, "Unable to create file from fb_attrs\n");
 
 	g_fb_data = fb_data;
 
@@ -6030,7 +6049,7 @@ static int pxp_wfe_a_process_clear_workingbuffer(struct mxc_epdc_fb_data *fb_dat
 	dma_chan = &fb_data->pxp_chan->dma_chan;
 
 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg, 2 + 4,
-						     DMA_TO_DEVICE,
+						     DMA_MEM_TO_DEV,
 						     DMA_PREP_INTERRUPT,
 						     NULL);
 	if (!txd) {
@@ -6211,7 +6230,7 @@ static int pxp_legacy_process(struct mxc_epdc_fb_data *fb_data,
 	dma_chan = &fb_data->pxp_chan->dma_chan;
 
 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg, 2,
-						     DMA_TO_DEVICE,
+						     DMA_MEM_TO_DEV,
 						     DMA_PREP_INTERRUPT,
 						     NULL);
 	if (!txd) {
@@ -6348,7 +6367,7 @@ static int pxp_process_dithering(struct mxc_epdc_fb_data *fb_data,
 	dma_chan = &fb_data->pxp_chan->dma_chan;
 
 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg, 2 + 4,
-						     DMA_TO_DEVICE,
+						     DMA_MEM_TO_DEV,
 						     DMA_PREP_INTERRUPT,
 						     NULL);
 	if (!txd) {
@@ -6496,7 +6515,7 @@ static int pxp_wfe_a_process(struct mxc_epdc_fb_data *fb_data,
 	dma_chan = &fb_data->pxp_chan->dma_chan;
 
 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg, 2 + 4,
-						     DMA_TO_DEVICE,
+						     DMA_MEM_TO_DEV,
 						     DMA_PREP_INTERRUPT,
 						     NULL);
 	if (!txd) {
@@ -6693,7 +6712,7 @@ static int pxp_wfe_b_process_update(struct mxc_epdc_fb_data *fb_data,
 	dma_chan = &fb_data->pxp_chan->dma_chan;
 
 	txd = dma_chan->device->device_prep_slave_sg(dma_chan, sg, 2 + 4,
-						     DMA_TO_DEVICE,
+						     DMA_MEM_TO_DEV,
 						     DMA_PREP_INTERRUPT,
 						     NULL);
 	if (!txd) {
@@ -6977,4 +6996,3 @@ module_exit(mxc_epdc_fb_exit);
 MODULE_AUTHOR("Freescale Semiconductor, Inc.");
 MODULE_DESCRIPTION("MXC EPDC V2 framebuffer driver");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("fb");

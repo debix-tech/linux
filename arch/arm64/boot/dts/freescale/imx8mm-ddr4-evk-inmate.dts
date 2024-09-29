@@ -21,7 +21,7 @@
 		clock-frequency = <8333333>;
 	};
 
-	clk_dummy: clock@7 {
+	clk_dummy: clock-7 {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <0>;
@@ -29,19 +29,19 @@
 	};
 
 	/* The clocks are configured by 1st OS */
-	clk_266m: clock@9 {
+	clk_266m: clock-9 {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <266000000>;
 		clock-output-names = "266m";
 	};
-	clk_80m: clock@10 {
+	clk_80m: clock-10 {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <80000000>;
 		clock-output-names = "80m";
 	};
-	clk_100m: clock@11 {
+	clk_100m: clock-11 {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <100000000>;
@@ -70,47 +70,7 @@
 /delete-node/ &{/busfreq};
 /delete-node/ &{/soc@0/ddr-pmu@3d800000};
 
-&hsiomix_pd {
-	status = "disabled";
-};
-
-&pcie_pd {
-	status = "disabled";
-};
-
-&usb_otg1_pd {
-	status = "disabled";
-};
-
-&usb_otg2_pd {
-	status = "disabled";
-};
-
-&gpumix_pd {
-	status = "disabled";
-};
-
-&vpumix_pd {
-	status = "disabled";
-};
-
-&vpu_g1_pd {
-	status = "disabled";
-};
-
-&vpu_g2_pd {
-	status = "disabled";
-};
-
-&vpu_h1_pd {
-	status = "disabled";
-};
-
-&dispmix_pd {
-	status = "disabled";
-};
-
-&mipi_pd {
+&gpc {
 	status = "disabled";
 };
 
@@ -158,10 +118,6 @@
 	status = "disabled";
 };
 
-&dispmix_gpr {
-	/delete-property/ compatible;
-};
-
 &sdma1 {
 	status = "disabled";
 };
@@ -204,4 +160,5 @@
 		<&clk_266m>;
 	status = "okay";
 	nand-on-flash-bbt;
+	fsl,use-minimum-ecc;
 };

@@ -15,12 +15,27 @@
 / {
 	model = "LS1088A RDB Board";
 	compatible = "fsl,ls1088a-rdb", "fsl,ls1088a";
+
+	sfp_cage: sfp {
+		compatible = "sff,sfp";
+		i2c-bus = <&sfp_i2c_bus>;
+	};
+};
+
+&dpmac1 {
+	sfp = <&sfp_cage>;
+	managed = "in-band-status";
+	phys = <&serdes1 2>, <&ti_retimer 0>, <&ti_retimer 1>;
+	phy-names = "serdes", "retimer_tx", "retimer_rx";
+	pcs-handle = <&pcs1>;
 };
 
 &dpmac2 {
 	phy-handle = <&mdio2_aquantia_phy>;
 	phy-connection-type = "10gbase-r";
 	pcs-handle = <&pcs2>;
+	phys = <&serdes1 3>;
+	phy-names = "serdes";
 };
 
 &dpmac3 {
@@ -28,6 +43,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs3_0>;
+	phys = <&serdes1 0>;
+	phy-names = "serdes";
 };
 
 &dpmac4 {
@@ -35,6 +52,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs3_1>;
+	phys = <&serdes1 0>;
+	phy-names = "serdes";
 };
 
 &dpmac5 {
@@ -42,6 +61,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs3_2>;
+	phys = <&serdes1 0>;
+	phy-names = "serdes";
 };
 
 &dpmac6 {
@@ -49,6 +70,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs3_3>;
+	phys = <&serdes1 0>;
+	phy-names = "serdes";
 };
 
 &dpmac7 {
@@ -56,6 +79,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs7_0>;
+	phys = <&serdes1 1>;
+	phy-names = "serdes";
 };
 
 &dpmac8 {
@@ -63,6 +88,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs7_1>;
+	phys = <&serdes1 1>;
+	phy-names = "serdes";
 };
 
 &dpmac9 {
@@ -70,6 +97,8 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs7_2>;
+	phys = <&serdes1 1>;
+	phy-names = "serdes";
 };
 
 &dpmac10 {
@@ -77,40 +106,50 @@
 	phy-connection-type = "qsgmii";
 	managed = "in-band-status";
 	pcs-handle = <&pcs7_3>;
+	phys = <&serdes1 1>;
+	phy-names = "serdes";
 };
 
 &emdio1 {
 	status = "okay";
 
 	mdio1_phy5: ethernet-phy@c {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0xc>;
 	};
 
 	mdio1_phy6: ethernet-phy@d {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0xd>;
 	};
 
 	mdio1_phy7: ethernet-phy@e {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0xe>;
 	};
 
 	mdio1_phy8: ethernet-phy@f {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0xf>;
 	};
 
 	mdio1_phy1: ethernet-phy@1c {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x1c>;
 	};
 
 	mdio1_phy2: ethernet-phy@1d {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x1d>;
 	};
 
 	mdio1_phy3: ethernet-phy@1e {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x1e>;
 	};
 
 	mdio1_phy4: ethernet-phy@1f {
+		interrupts-extended = <&extirq 1 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x1f>;
 	};
 };
@@ -120,6 +159,7 @@
 
 	mdio2_aquantia_phy: ethernet-phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c45";
+		interrupts-extended = <&extirq 2 IRQ_TYPE_LEVEL_LOW>;
 		reg = <0x0>;
 	};
 };
@@ -127,7 +167,7 @@
 &i2c0 {
 	status = "okay";
 
-	i2c-switch@77 {
+	i2c-mux@77 {
 		compatible = "nxp,pca9547";
 		reg = <0x77>;
 		#address-cells = <1>;
@@ -162,6 +202,24 @@
 				interrupts-extended = <&extirq 0 IRQ_TYPE_LEVEL_LOW>;
 			};
 		};
+
+		i2c@5 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x5>;
+
+			ti_retimer: retimer@18 {
+				compatible = "ti,ds125df111";
+				reg = <0x18>;
+				#phy-cells = <1>;
+			};
+		};
+
+		sfp_i2c_bus: i2c@6 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <6>;
+		};
 	};
 };
 
@@ -181,31 +239,6 @@
 	};
 };
 
-&qspi {
-	status = "okay";
-
-	s25fs512s0: flash@0 {
-		compatible = "jedec,spi-nor";
-		#address-cells = <1>;
-		#size-cells = <1>;
-		spi-max-frequency = <20000000>;
-		reg = <0>;
-		spi-rx-bus-width = <1>;
-		spi-tx-bus-width = <1>;
-	};
-
-	s25fs512s1: flash@1 {
-		compatible = "jedec,spi-nor";
-		#address-cells = <1>;
-		#size-cells = <1>;
-		spi-max-frequency = <20000000>;
-		reg = <1>;
-		spi-rx-bus-width = <1>;
-		spi-tx-bus-width = <1>;
-	};
-
-};
-
 &duart0 {
 	status = "okay";
 };
@@ -216,6 +249,10 @@
 
 &esdhc {
 	mmc-hs200-1_8v;
+	status = "okay";
+};
+
+&pcs_mdio1 {
 	status = "okay";
 };
 
@@ -239,7 +276,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		spi-max-frequency = <50000000>;
-		spi-rx-bus-width = <4>;
+		spi-rx-bus-width = <1>;
 		spi-tx-bus-width = <1>;
 		reg = <0>;
 	};
@@ -249,7 +286,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 		spi-max-frequency = <50000000>;
-		spi-rx-bus-width = <4>;
+		spi-rx-bus-width = <1>;
 		spi-tx-bus-width = <1>;
 		reg = <1>;
 	};
@@ -267,4 +304,3 @@
 	dr_mode = "otg";
 	status = "okay";
 };
-

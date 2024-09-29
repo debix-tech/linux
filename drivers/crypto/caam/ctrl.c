@@ -3,13 +3,14 @@
  * Controller-level driver, kernel property detection, initialization
  *
  * Copyright 2008-2012 Freescale Semiconductor, Inc.
- * Copyright 2018-2019 NXP
+ * Copyright 2018-2019, 2023 NXP
  */
 
 #include <linux/device.h>
 #include <linux/dma-map-ops.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
+#include <linux/platform_device.h>
 #include <linux/sys_soc.h>
 #include <linux/fsl/mc.h>
 
@@ -86,6 +87,7 @@ static const struct of_device_id imx8m_machine_match[] = {
 	{ .compatible = "fsl,imx8mn", },
 	{ .compatible = "fsl,imx8mp", },
 	{ .compatible = "fsl,imx8mq", },
+	{ .compatible = "fsl,imx8ulp", },
 	{ }
 };
 
@@ -206,7 +208,7 @@ static int deinstantiate_rng(struct device *ctrldev, int state_handle_mask)
 	u32 *desc, status;
 	int sh_idx, ret = 0;
 
-	desc = kmalloc(CAAM_CMD_SZ * 3, GFP_KERNEL | GFP_DMA);
+	desc = kmalloc(CAAM_CMD_SZ * 3, GFP_KERNEL);
 	if (!desc)
 		return -ENOMEM;
 
@@ -283,7 +285,7 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
 	int ret = 0, sh_idx;
 
 	ctrl = (struct caam_ctrl __iomem *)ctrlpriv->ctrl;
-	desc = kmalloc(CAAM_CMD_SZ * 7, GFP_KERNEL | GFP_DMA);
+	desc = kmalloc(CAAM_CMD_SZ * 7, GFP_KERNEL);
 	if (!desc)
 		return -ENOMEM;
 
@@ -291,6 +293,10 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
 		const u32 rdsta_if = RDSTA_IF0 << sh_idx;
 		const u32 rdsta_pr = RDSTA_PR0 << sh_idx;
 		const u32 rdsta_mask = rdsta_if | rdsta_pr;
+
+		/* Clear the contents before using the descriptor */
+		memset(desc, 0x00, CAAM_CMD_SZ * 7);
+
 		/*
 		 * If the corresponding bit is set, this state handle
 		 * was initialized by somebody else, so it's left alone.
@@ -334,8 +340,6 @@ static int instantiate_rng(struct device *ctrldev, int state_handle_mask,
 		}
 
 		dev_info(ctrldev, "Instantiated RNG4 SH%d\n", sh_idx);
-		/* Clear the contents before recreating the descriptor */
-		memset(desc, 0x00, CAAM_CMD_SZ * 7);
 	}
 
 	kfree(desc);
@@ -381,8 +385,8 @@ static void kick_trng(struct device *dev, int ent_delay)
 		val = ent_delay;
 		/* min. freq. count, equal to 1/4 of the entropy sample length */
 		wr_reg32(&r4tst->rtfrqmin, val >> 2);
-		/* max. freq. count, equal to 16 times the entropy sample length */
-		wr_reg32(&r4tst->rtfrqmax, val << 4);
+		/* disable maximum frequency count */
+		wr_reg32(&r4tst->rtfrqmax, RTFRQMAX_DISABLE);
 	}
 
 	wr_reg32(&r4tst->rtsdctl, (val << RTSDCTL_ENT_DLY_SHIFT) |
@@ -462,7 +466,7 @@ static int caam_get_era_from_hw(struct caam_perfmon __iomem *perfmon)
  * In case this property is not passed an attempt to retrieve the CAAM
  * era via register reads will be made.
  *
- * @ctrl:	controller region
+ * @perfmon:	Performance Monitor Registers
  */
 static int caam_get_era(struct caam_perfmon __iomem *perfmon)
 {
@@ -612,19 +616,47 @@ static void caam_dma_dev_unregister(void *data)
 	platform_device_unregister(data);
 }
 
+#ifdef CONFIG_FSL_MC_BUS
+static bool check_version(struct fsl_mc_version *mc_version, u32 major,
+			  u32 minor, u32 revision)
+{
+	if (mc_version->major > major)
+		return true;
+
+	if (mc_version->major == major) {
+		if (mc_version->minor > minor)
+			return true;
+
+		if (mc_version->minor == minor &&
+		    mc_version->revision > revision)
+			return true;
+	}
+
+	return false;
+}
+#endif
+
+static bool needs_entropy_delay_adjustment(void)
+{
+	if (of_machine_is_compatible("fsl,imx6sx"))
+		return true;
+	return false;
+}
+
 static int caam_ctrl_rng_init(struct device *dev)
 {
 	struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
 	struct caam_ctrl __iomem *ctrl = ctrlpriv->ctrl;
-	int ret, gen_sk, ent_delay = RTSDCTL_ENT_DLY_MIN;
+	int ret, gen_sk;
+	u32 ent_delay = RTSDCTL_ENT_DLY_MIN;
 	u8 rng_vid;
 
 	if (ctrlpriv->era < 10) {
 		struct caam_perfmon __iomem *perfmon;
 
 		perfmon = ctrlpriv->total_jobrs ?
-			  (struct caam_perfmon *)&ctrlpriv->jr[0]->perfmon :
-			  (struct caam_perfmon *)&ctrl->perfmon;
+			  (struct caam_perfmon __iomem *)&ctrlpriv->jr[0]->perfmon :
+			  (struct caam_perfmon __iomem *)&ctrl->perfmon;
 
 		rng_vid = (rd_reg32(&perfmon->cha_id_ls) &
 			   CHA_ID_LS_RNG_MASK) >> CHA_ID_LS_RNG_SHIFT;
@@ -632,11 +664,21 @@ static int caam_ctrl_rng_init(struct device *dev)
 		struct version_regs __iomem *vreg;
 
 		vreg = ctrlpriv->total_jobrs ?
-			(struct version_regs *)&ctrlpriv->jr[0]->vreg :
-			(struct version_regs *)&ctrl->vreg;
+			(struct version_regs __iomem *)&ctrlpriv->jr[0]->vreg :
+			(struct version_regs __iomem *)&ctrl->vreg;
 
 		rng_vid = (rd_reg32(&vreg->rng) & CHA_VER_VID_MASK) >>
 			  CHA_VER_VID_SHIFT;
+	}
+
+	/*
+	 * Read entropy-delay property from device tree. If property is not
+	 * available or missing, update the entropy delay value only for imx6sx.
+	 */
+	if (device_property_read_u32(dev, "entropy-delay", &ent_delay)) {
+		dev_dbg(dev, "entropy-delay property missing in DT\n");
+		if (needs_entropy_delay_adjustment())
+			ent_delay = 12000;
 	}
 
 	/*
@@ -682,6 +724,15 @@ static int caam_ctrl_rng_init(struct device *dev)
 			 */
 			ret = instantiate_rng(dev, inst_handles,
 					      gen_sk);
+			/*
+			 * Entropy delay is determined via TRNG characterization.
+			 * TRNG characterization is run across different voltages
+			 * and temperatures.
+			 * If worst case value for ent_dly is identified,
+			 * the loop can be skipped for that platform.
+			 */
+			if (needs_entropy_delay_adjustment())
+				break;
 			if (ret == -EAGAIN)
 				/*
 				 * if here, the loop will rerun,
@@ -705,8 +756,6 @@ static int caam_ctrl_rng_init(struct device *dev)
 
 	return 0;
 }
-
-#ifdef CONFIG_PM_SLEEP
 
 /* Indicate if the internal state of the CAAM is lost during PM */
 static int caam_off_during_pm(void)
@@ -770,7 +819,7 @@ static void caam_state_restore(const struct device *dev)
 
 	jr_inst = (rd_reg32(&ctrl->perfmon.cha_num_ms) &
 		   CHA_ID_MS_JR_MASK) >> CHA_ID_MS_JR_SHIFT;
-	for (i = 0; i < ctrlpriv->total_jobrs; i++) {
+	for (i = 0; i < jr_inst; i++) {
 		wr_reg32(&ctrl->jr_mid[i].liodn_ms,
 			 state->jr_mid[i].liodn_ms);
 		wr_reg32(&ctrl->jr_mid[i].liodn_ls,
@@ -787,8 +836,8 @@ static int caam_ctrl_suspend(struct device *dev)
 {
 	const struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
 
-	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->scu_en &&
-	    !ctrlpriv->optee_en)
+	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->optee_en &&
+	    !ctrlpriv->scu_en)
 		caam_state_save(dev);
 
 	return 0;
@@ -799,8 +848,8 @@ static int caam_ctrl_resume(struct device *dev)
 	struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
 	int ret = 0;
 
-	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->scu_en &&
-	    !ctrlpriv->optee_en) {
+	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->optee_en &&
+	    !ctrlpriv->scu_en) {
 		caam_state_restore(dev);
 
 		/* HW and rng will be reset so deinstantiation can be removed */
@@ -811,29 +860,7 @@ static int caam_ctrl_resume(struct device *dev)
 	return ret;
 }
 
-SIMPLE_DEV_PM_OPS(caam_ctrl_pm_ops, caam_ctrl_suspend, caam_ctrl_resume);
-
-#endif /* CONFIG_PM_SLEEP */
-
-#ifdef CONFIG_FSL_MC_BUS
-static bool check_version(struct fsl_mc_version *mc_version, u32 major,
-			  u32 minor, u32 revision)
-{
-	if (mc_version->major > major)
-		return true;
-
-	if (mc_version->major == major) {
-		if (mc_version->minor > minor)
-			return true;
-
-		if (mc_version->minor == minor &&
-		    mc_version->revision > revision)
-			return true;
-	}
-
-	return false;
-}
-#endif
+static DEFINE_SIMPLE_DEV_PM_OPS(caam_ctrl_pm_ops, caam_ctrl_suspend, caam_ctrl_resume);
 
 /* Probe routine for CAAM top (controller) level */
 static int caam_probe(struct platform_device *pdev)
@@ -872,15 +899,13 @@ static int caam_probe(struct platform_device *pdev)
 
 	caam_imx = (bool)imx_soc_match;
 
-#ifdef CONFIG_PM_SLEEP
 	ctrlpriv->caam_off_during_pm = caam_imx && caam_off_during_pm();
-#endif
 
 	if (imx_soc_match) {
 		np = of_find_compatible_node(NULL, NULL, "fsl,imx-scu");
 
 		if (!np)
-			np = of_find_compatible_node(NULL, NULL, "fsl,imx-sentinel");
+			np = of_find_compatible_node(NULL, NULL, "fsl,imx8ulp-se-fw");
 
 		ctrlpriv->scu_en = !!np;
 		of_node_put(np);
@@ -949,8 +974,8 @@ iomap_ctrl:
 	 * use the alias registers in the first (cf. DT nodes order)
 	 * job ring's page.
 	 */
-	perfmon = ring ? (struct caam_perfmon *)&ctrlpriv->jr[0]->perfmon :
-			 (struct caam_perfmon *)&ctrl->perfmon;
+	perfmon = ring ? (struct caam_perfmon __iomem *)&ctrlpriv->jr[0]->perfmon :
+			 (struct caam_perfmon __iomem *)&ctrl->perfmon;
 
 	caam_little_end = !(bool)(rd_reg32(&perfmon->status) &
 				  (CSTA_PLEND | CSTA_ALT_PLEND));
@@ -1147,6 +1172,28 @@ set_dma_mask:
 			return ret;
 	}
 
+	comp_params = rd_reg32(&perfmon->comp_parms_ls);
+	ctrlpriv->blob_present = !!(comp_params & CTPR_LS_BLOB);
+
+	/*
+	 * Some SoCs like the LS1028A (non-E) indicate CTPR_LS_BLOB support,
+	 * but fail when actually using it due to missing AES support, so
+	 * check both here.
+	 */
+	if (ctrlpriv->era < 10) {
+		ctrlpriv->blob_present = ctrlpriv->blob_present &&
+			(rd_reg32(&perfmon->cha_num_ls) & CHA_ID_LS_AES_MASK);
+	} else {
+		struct version_regs __iomem *vreg;
+
+		vreg =  ctrlpriv->total_jobrs ?
+			(struct version_regs __iomem *)&ctrlpriv->jr[0]->vreg :
+			(struct version_regs __iomem *)&ctrl->vreg;
+
+		ctrlpriv->blob_present = ctrlpriv->blob_present &&
+			(rd_reg32(&vreg->aesa) & CHA_VER_MISC_AES_NUM_MASK);
+	}
+
 	if (reg_access) {
 		ret = caam_ctrl_rng_init(dev);
 		if (ret)
@@ -1173,9 +1220,7 @@ static struct platform_driver caam_driver = {
 	.driver = {
 		.name = "caam",
 		.of_match_table = caam_match,
-#ifdef CONFIG_PM_SLEEP
-		.pm = &caam_ctrl_pm_ops,
-#endif
+		.pm = pm_ptr(&caam_ctrl_pm_ops),
 	},
 	.probe       = caam_probe,
 };

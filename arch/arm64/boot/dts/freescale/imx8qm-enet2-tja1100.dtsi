@@ -27,17 +27,22 @@
 
 		ethphy2: ethernet-phy@2 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			reg = <2>;
-			tja110x,refclk_in;
-			/delete-property/ at803x,eee-disabled;
-			/delete-property/ at803x,vddio-1p8v;
+			reg = <5>;
+			nxp,rmii-refclk-in;
+			/delete-property/ qca,disable-smarteee;
+			/delete-property/ vddio-supply;
 		};
 
 		ethphy3: ethernet-phy@3 {
 			compatible = "ethernet-phy-ieee802.3-c22";
 			reg = <3>;
-			at803x,eee-disabled;
-			at803x,vddio-1p8v;
+			qca,disable-smarteee;
+			vddio-supply = <&vddio3>;
+
+			vddio3: vddio-regulator {
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
 		};
 	};
 };
@@ -46,12 +51,14 @@
 	pinctrl-0 = <&pinctrl_fec2_rmii>;
 	clocks = <&enet1_lpcg 4>,
 		 <&enet1_lpcg 2>,
-		 <&clk IMX_SC_R_ENET_0 IMX_SC_C_DISABLE_50>,
+		 <&clk IMX_SC_R_ENET_1 IMX_SC_C_DISABLE_50>,
 		 <&enet1_lpcg 0>,
 		 <&enet1_lpcg 1>;
 	phy-mode = "rmii";
 	phy-handle = <&ethphy2>;
 	/delete-property/ phy-supply;
+	/delete-property/ rx-internal-delay-ps;
+	/delete-property/ tx-internal-delay-ps;
 };
 
 &iomuxc {

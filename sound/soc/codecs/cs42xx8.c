@@ -13,7 +13,6 @@
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/module.h>
-#include <linux/of_device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/pm_runtime.h>
 #include <linux/regulator/consumer.h>
@@ -132,6 +131,7 @@ static const struct snd_soc_dapm_widget cs42xx8_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("AIN2L"),
 	SND_SOC_DAPM_INPUT("AIN2R"),
 
+	SND_SOC_DAPM_SUPPLY("PWR", CS42XX8_PWRCTL, 0, 1, NULL, 0),
 };
 
 static const struct snd_soc_dapm_widget cs42xx8_adc3_dapm_widgets[] = {
@@ -145,28 +145,35 @@ static const struct snd_soc_dapm_route cs42xx8_dapm_routes[] = {
 	/* Playback */
 	{ "AOUT1L", NULL, "DAC1" },
 	{ "AOUT1R", NULL, "DAC1" },
+	{ "DAC1", NULL, "PWR" },
 
 	{ "AOUT2L", NULL, "DAC2" },
 	{ "AOUT2R", NULL, "DAC2" },
+	{ "DAC2", NULL, "PWR" },
 
 	{ "AOUT3L", NULL, "DAC3" },
 	{ "AOUT3R", NULL, "DAC3" },
+	{ "DAC3", NULL, "PWR" },
 
 	{ "AOUT4L", NULL, "DAC4" },
 	{ "AOUT4R", NULL, "DAC4" },
+	{ "DAC4", NULL, "PWR" },
 
 	/* Capture */
 	{ "ADC1", NULL, "AIN1L" },
 	{ "ADC1", NULL, "AIN1R" },
+	{ "ADC1", NULL, "PWR" },
 
 	{ "ADC2", NULL, "AIN2L" },
 	{ "ADC2", NULL, "AIN2R" },
+	{ "ADC2", NULL, "PWR" },
 };
 
 static const struct snd_soc_dapm_route cs42xx8_adc3_dapm_routes[] = {
 	/* Capture */
 	{ "ADC3", NULL, "AIN3L" },
 	{ "ADC3", NULL, "AIN3R" },
+	{ "ADC3", NULL, "PWR" },
 };
 
 struct cs42xx8_ratios {
@@ -346,6 +353,11 @@ static int cs42xx8_hw_params(struct snd_pcm_substream *substream,
 		return -EINVAL;
 	}
 
+	if (cs42xx8->is_tdm && !tx && cs42xx8->rate[tx] > 100000) {
+		dev_err(component->dev, "ADC does not support Quad-Speed Mode in the TDM format\n");
+		return -EINVAL;
+	}
+
 	mask = CS42XX8_FUNCMOD_MFREQ_MASK;
 	val = cs42xx8_ratios[i].mfreq;
 
@@ -469,7 +481,7 @@ const struct regmap_config cs42xx8_regmap_config = {
 	.num_reg_defaults = ARRAY_SIZE(cs42xx8_reg),
 	.volatile_reg = cs42xx8_volatile_register,
 	.writeable_reg = cs42xx8_writeable_register,
-	.cache_type = REGCACHE_RBTREE,
+	.cache_type = REGCACHE_MAPLE,
 	.use_single_read = true,
 	.use_single_write = true,
 };
@@ -495,8 +507,7 @@ static int cs42xx8_component_probe(struct snd_soc_component *component)
 
 	/* Mute all DAC channels */
 	regmap_write(cs42xx8->regmap, CS42XX8_DACMUTE, CS42XX8_DACMUTE_ALL);
-	regmap_update_bits(cs42xx8->regmap, CS42XX8_PWRCTL,
-			CS42XX8_PWRCTL_PDN_MASK, 0);
+
 	return 0;
 }
 
@@ -510,7 +521,6 @@ static const struct snd_soc_component_driver cs42xx8_driver = {
 	.num_dapm_routes	= ARRAY_SIZE(cs42xx8_dapm_routes),
 	.use_pmdown_time	= 1,
 	.endianness		= 1,
-	.non_legacy_dai_naming	= 1,
 };
 
 const struct cs42xx8_driver_data cs42448_data = {
@@ -525,17 +535,8 @@ const struct cs42xx8_driver_data cs42888_data = {
 };
 EXPORT_SYMBOL_GPL(cs42888_data);
 
-const struct of_device_id cs42xx8_of_match[] = {
-	{ .compatible = "cirrus,cs42448", .data = &cs42448_data, },
-	{ .compatible = "cirrus,cs42888", .data = &cs42888_data, },
-	{ /* sentinel */ }
-};
-MODULE_DEVICE_TABLE(of, cs42xx8_of_match);
-EXPORT_SYMBOL_GPL(cs42xx8_of_match);
-
-int cs42xx8_probe(struct device *dev, struct regmap *regmap)
+int cs42xx8_probe(struct device *dev, struct regmap *regmap, struct cs42xx8_driver_data *drvdata)
 {
-	const struct of_device_id *of_id;
 	struct cs42xx8_priv *cs42xx8;
 	int ret, val, i;
 
@@ -549,17 +550,11 @@ int cs42xx8_probe(struct device *dev, struct regmap *regmap)
 	if (cs42xx8 == NULL)
 		return -ENOMEM;
 
-	cs42xx8->regmap = regmap;
 	dev_set_drvdata(dev, cs42xx8);
 
-	of_id = of_match_device(cs42xx8_of_match, dev);
-	if (of_id)
-		cs42xx8->drvdata = of_id->data;
+	cs42xx8->regmap = regmap;
 
-	if (!cs42xx8->drvdata) {
-		dev_err(dev, "failed to find driver data\n");
-		return -EINVAL;
-	}
+	cs42xx8->drvdata = drvdata;
 
 	cs42xx8->gpiod_reset = devm_gpiod_get_optional(dev, "reset",
 							GPIOD_OUT_HIGH);

@@ -2,6 +2,8 @@
 #ifndef __PHY_FIXED_H
 #define __PHY_FIXED_H
 
+#include <linux/types.h>
+
 struct fixed_phy_status {
 	int link;
 	int speed;
@@ -12,6 +14,7 @@ struct fixed_phy_status {
 
 struct device_node;
 struct gpio_desc;
+struct net_device;
 
 #if IS_ENABLED(CONFIG_FIXED_PHY)
 extern int fixed_phy_change_carrier(struct net_device *dev, bool new_carrier);
@@ -30,7 +33,17 @@ extern void fixed_phy_unregister(struct phy_device *phydev);
 extern int fixed_phy_set_link_update(struct phy_device *phydev,
 			int (*link_update)(struct net_device *,
 					   struct fixed_phy_status *));
+
+struct phy_device *fwnode_fixed_phy_register(struct fwnode_handle *fwnode_np,
+					     struct fixed_phy_status *status);
+
 #else
+struct phy_device *fwnode_fixed_phy_register(struct fwnode_handle *fwnode_np,
+					     struct fixed_phy_status *status)
+{
+	return ERR_PTR(-ENODEV);
+}
+
 static inline int fixed_phy_add(unsigned int irq, int phy_id,
 				struct fixed_phy_status *status)
 {

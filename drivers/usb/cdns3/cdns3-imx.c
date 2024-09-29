@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/**
+/*
  * cdns3-imx.c - NXP i.MX specific Glue layer for Cadence USB Controller
  *
  * Copyright (C) 2019 NXP
@@ -105,11 +105,11 @@ static inline void cdns_imx_writel(struct cdns_imx *data, u32 offset, u32 value)
 }
 
 static const struct clk_bulk_data imx_cdns3_core_clks[] = {
-	{ .id = "usb3_lpm_clk" },
-	{ .id = "usb3_bus_clk" },
-	{ .id = "usb3_aclk" },
-	{ .id = "usb3_ipg_clk" },
-	{ .id = "usb3_core_pclk" },
+	{ .id = "lpm" },
+	{ .id = "bus" },
+	{ .id = "aclk" },
+	{ .id = "ipg" },
+	{ .id = "core" },
 };
 
 static int cdns_imx_noncore_init(struct cdns_imx *data)
@@ -218,14 +218,17 @@ err:
 	return ret;
 }
 
-static int cdns_imx_remove(struct platform_device *pdev)
+static void cdns_imx_remove(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
+	struct cdns_imx *data = dev_get_drvdata(dev);
 
+	pm_runtime_get_sync(dev);
 	of_platform_depopulate(dev);
+	clk_bulk_disable_unprepare(data->num_clks, data->clks);
+	pm_runtime_disable(dev);
+	pm_runtime_put_noidle(dev);
 	platform_set_drvdata(pdev, NULL);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -245,7 +248,7 @@ static void cdns3_set_wakeup(struct cdns_imx *data, bool enable)
 static int cdns_imx_platform_suspend(struct device *dev,
 		bool suspend, bool wakeup)
 {
-	struct cdns3 *cdns = dev_get_drvdata(dev);
+	struct cdns *cdns = dev_get_drvdata(dev);
 	struct device *parent = dev->parent;
 	struct cdns_imx *data = dev_get_drvdata(parent);
 	void __iomem *otg_regs = (void __iomem *)(cdns->otg_regs);
@@ -369,12 +372,16 @@ static inline bool cdns_imx_is_power_lost(struct cdns_imx *data)
 		return false;
 }
 
-static int cdns_imx_system_resume(struct device *dev)
+static int __maybe_unused cdns_imx_system_resume(struct device *dev)
 {
 	struct cdns_imx *data = dev_get_drvdata(dev);
 	int ret;
 
-	ret = cdns_imx_resume(dev);
+	ret = pm_runtime_force_resume(dev);
+	if (ret)
+		return ret;
+
+	ret = pm_runtime_resume_and_get(dev);
 	if (ret)
 		return ret;
 
@@ -385,8 +392,10 @@ static int cdns_imx_system_resume(struct device *dev)
 			cdns_imx_suspend(dev);
 	}
 
+	pm_runtime_put_autosuspend(dev);
 	return ret;
 }
+
 #else
 static int cdns_imx_platform_suspend(struct device *dev,
 	bool suspend, bool wakeup)
@@ -398,7 +407,7 @@ static int cdns_imx_platform_suspend(struct device *dev,
 
 static const struct dev_pm_ops cdns_imx_pm_ops = {
 	SET_RUNTIME_PM_OPS(cdns_imx_suspend, cdns_imx_resume, NULL)
-	SET_SYSTEM_SLEEP_PM_OPS(cdns_imx_suspend, cdns_imx_system_resume)
+	SET_SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, cdns_imx_system_resume)
 };
 
 static const struct of_device_id cdns_imx_of_match[] = {
@@ -409,7 +418,7 @@ MODULE_DEVICE_TABLE(of, cdns_imx_of_match);
 
 static struct platform_driver cdns_imx_driver = {
 	.probe		= cdns_imx_probe,
-	.remove		= cdns_imx_remove,
+	.remove_new	= cdns_imx_remove,
 	.driver		= {
 		.name	= "cdns3-imx",
 		.of_match_table	= cdns_imx_of_match,

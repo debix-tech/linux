@@ -6,10 +6,11 @@ config IMX_GPCV2_PM_DOMAINS
 	depends on ARCH_MXC || (COMPILE_TEST && OF)
 	depends on PM
 	select PM_GENERIC_DOMAINS
+	select REGMAP_MMIO
 	default y if SOC_IMX7D
 
 config SOC_IMX8M
-	bool "i.MX8M SoC family support"
+	tristate "i.MX8M SoC family support"
 	depends on ARCH_MXC || COMPILE_TEST
 	default ARCH_MXC && ARM64
 	select SOC_BUS
@@ -24,6 +25,32 @@ config IMX8M_BUSFREQ
 	depends on SOC_IMX8M
 	default ARCH_MXC
 
+config IMX8M_PM_DOMAINS
+	tristate "i.MX8M PM domains"
+	default ARCH_MXC
+	depends on ARCH_MXC || (COMPILE_TEST && OF)
+	depends on PM
+	select PM_GENERIC_DOMAINS
+
+config SOC_IMX9
+	tristate "i.MX9 SoC family support"
+	depends on ARCH_MXC || COMPILE_TEST
+	default ARCH_MXC && ARM64
+	select SOC_BUS
+	help
+	  If you say yes here, you get support for the NXP i.MX9 family
+
+config IMX8M_BLK_CTRL
+	bool
+	default SOC_IMX8M && IMX_GPCV2_PM_DOMAINS
+	depends on PM_GENERIC_DOMAINS
+	depends on COMMON_CLK
+
+config IMX9_BLK_CTRL
+	bool
+	default SOC_IMX9 && IMX_GPCV2_PM_DOMAINS
+	depends on PM_GENERIC_DOMAINS
+
 config SECVIO_SC
 	tristate "NXP SC secvio support"
 	depends on IMX_SCU
@@ -35,13 +62,6 @@ config SECVIO_SC
 	   possibility to register user callbacks when a security violation
 	   occurs.
 
-config IMX8M_PM_DOMAINS
-	tristate "i.MX8M PM domains"
-	default ARCH_MXC
-	depends on ARCH_MXC || (COMPILE_TEST && OF)
-	depends on PM
-	select PM_GENERIC_DOMAINS
-
 config RPMSG_LIFE_CYCLE
 	tristate "i.MX8ULP Rpmsg Life Cycle Support"
 	depends on ARCH_MXC || COMPILE_TEST
@@ -52,4 +72,13 @@ config RPMSG_LIFE_CYCLE
 	  i.MX8ULP for low power mode state coordination between A core & M core to
 	  make sure A core can be put into Low power mode without risk by sending
 	  notify to M core.
+
+config IMX8ULP_LPM_CTRL
+	tristate "i.MX8ULP DDR Low Power Control support"
+	depends on ARCH_MXC || COMPILE_TEST
+	default ARCH_MXC && ARM64
+	help
+	  If you say yes here you get supoort for DDR frequency scaling support on
+	  i.MX8ULP for scaling the DDR frequency based on user case. The DDR frequency
+	  need to be switched manually by user.
 endmenu

@@ -15,7 +15,7 @@
 #include <linux/pxp_device.h>
 #include <linux/atomic.h>
 #include <linux/dma-buf.h>
-#include <linux/platform_data/dma-imx.h>
+#include <linux/dma/imx-dma.h>
 
 #define BUFFER_HASH_ORDER 4
 
@@ -355,7 +355,7 @@ static int pxp_ioc_config_chan(struct pxp_file *priv, unsigned long arg)
 
 	txd = chan->device->device_prep_slave_sg(chan,
 						 sg, sg_len,
-						 DMA_TO_DEVICE,
+						 DMA_MEM_TO_DEV,
 						 DMA_PREP_INTERRUPT,
 						 NULL);
 	if (!txd) {
@@ -663,15 +663,11 @@ static struct sg_table *pxp_dmabuf_ops_map(
 	struct dma_buf_attachment *db_attach, enum dma_data_direction dma_dir)
 {
 	struct pxp_attachment *attach = db_attach->priv;
-	struct mutex *lock = &db_attach->dmabuf->lock;
 	struct sg_table *sgt;
-
-	mutex_lock(lock);
 
 	sgt = &attach->sgt;
 	/* return previously mapped sg table */
 	if (attach->dma_dir == dma_dir) {
-		mutex_unlock(lock);
 		return sgt;
 	}
 
@@ -689,13 +685,10 @@ static struct sg_table *pxp_dmabuf_ops_map(
 	if (dma_map_sgtable(db_attach->dev, sgt, dma_dir,
 			    DMA_ATTR_SKIP_CPU_SYNC)) {
 		pr_err("failed to map scatterlist\n");
-		mutex_unlock(lock);
 		return ERR_PTR(-EIO);
 	}
 
 	attach->dma_dir = dma_dir;
-
-	mutex_unlock(lock);
 
 	return sgt;
 }
@@ -726,11 +719,13 @@ pxp_dmabuf_ops_end_cpu_access(struct dma_buf *dbuf,
 	return 0;
 }
 
-static void *pxp_dmabuf_ops_vmap(struct dma_buf *dbuf)
+static int pxp_dmabuf_ops_vmap(struct dma_buf *dbuf, struct iosys_map *map)
 {
 	struct pxp_buf_obj *obj = dbuf->priv;
 
-	return obj->virtual;
+	iosys_map_set_vaddr(map, obj->virtual);
+
+	return 0;
 }
 
 static int pxp_dmabuf_ops_mmap(struct dma_buf *dbuf,
@@ -944,28 +939,70 @@ static long pxp_device_ioctl(struct file *filp,
 			if (ret)
 				return -EACCES;
 
-			obj = pxp_buffer_object_lookup(file_priv, flush.handle);
-			if (!obj)
-				return -EINVAL;
+			if (flush.handle) {
+				obj = pxp_buffer_object_lookup(file_priv, flush.handle);
+				if (!obj)
+					return -EINVAL;
 
-			switch (flush.type) {
-			case CACHE_CLEAN:
-				dma_sync_single_for_device(pxp_dev, obj->offset,
-						obj->size, DMA_TO_DEVICE);
-				break;
-			case CACHE_INVALIDATE:
-				dma_sync_single_for_device(pxp_dev, obj->offset,
-						obj->size, DMA_FROM_DEVICE);
-				break;
-			case CACHE_FLUSH:
-				dma_sync_single_for_device(pxp_dev, obj->offset,
-						obj->size, DMA_TO_DEVICE);
-				dma_sync_single_for_device(pxp_dev, obj->offset,
-						obj->size, DMA_FROM_DEVICE);
-				break;
-			default:
-				pr_err("%s: invalid cache flush type\n", __func__);
-				return -EINVAL;
+				switch (flush.type) {
+				case CACHE_CLEAN:
+					dma_sync_single_for_device(pxp_dev, obj->offset,
+								   obj->size, DMA_TO_DEVICE);
+					break;
+				case CACHE_INVALIDATE:
+					dma_sync_single_for_device(pxp_dev, obj->offset,
+								   obj->size, DMA_FROM_DEVICE);
+					break;
+				case CACHE_FLUSH:
+					dma_sync_single_for_device(pxp_dev, obj->offset,
+								   obj->size, DMA_TO_DEVICE);
+					dma_sync_single_for_device(pxp_dev, obj->offset,
+								   obj->size, DMA_FROM_DEVICE);
+					break;
+				default:
+					pr_err("%s: invalid cache flush type\n", __func__);
+					return -EINVAL;
+				}
+			} else {
+				struct dma_buf *dmabuf;
+				struct dma_buf_attachment *attachment;
+				struct sg_table *sgt;
+				int direction;
+
+				if (flush.type == CACHE_CLEAN)
+					direction = DMA_TO_DEVICE;
+				else if (flush.type == CACHE_INVALIDATE)
+					direction = DMA_FROM_DEVICE;
+				else if (flush.type == CACHE_FLUSH)
+					direction = DMA_BIDIRECTIONAL;
+				else
+					direction = DMA_NONE;
+
+				ret = 0;
+				dmabuf = dma_buf_get(flush.dmabuf_fd);
+				if (IS_ERR(dmabuf)) {
+					dev_err(pxp_dev, "failed to get dmabuf\n");
+					return PTR_ERR(dmabuf);
+				}
+				attachment = dma_buf_attach(dmabuf, pxp_dev);
+				if (IS_ERR(attachment)) {
+					ret = PTR_ERR(attachment);
+					dev_err(pxp_dev, "failed to attach dmabuf\n");
+					goto err_put;
+				}
+				sgt = dma_buf_map_attachment(attachment, direction);
+				if (IS_ERR(sgt)) {
+					ret = PTR_ERR(sgt);
+					dev_err(pxp_dev, "failed to get dmabuf sg_table\n");
+					goto err_detach;
+				}
+				dma_buf_unmap_attachment(attachment, sgt, direction);
+err_detach:
+				dma_buf_detach(dmabuf, attachment);
+err_put:
+				dma_buf_put(dmabuf);
+				if (ret)
+					return ret;
 			}
 
 			break;
@@ -1071,7 +1108,7 @@ int register_pxp_device(void)
 			goto register_cdev_fail;
 		}
 
-		pxp_class = class_create(THIS_MODULE, "pxp_device");
+		pxp_class = class_create("pxp_device");
 		if (IS_ERR(pxp_class)) {
 			ret = PTR_ERR(pxp_class);
 			goto pxp_class_fail;
@@ -1107,6 +1144,7 @@ pxp_class_fail:
 register_cdev_fail:
 	return ret;
 }
+EXPORT_SYMBOL_GPL(register_pxp_device);
 
 void unregister_pxp_device(void)
 {
@@ -1118,3 +1156,5 @@ void unregister_pxp_device(void)
 		major = 0;
 	}
 }
+EXPORT_SYMBOL_GPL(unregister_pxp_device);
+MODULE_LICENSE("GPL");

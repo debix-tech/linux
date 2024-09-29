@@ -18,75 +18,6 @@
 };
 
 &soc {
-	chosen {
-		name = "chosen";
-		dpaa-extended-args {
-			fman0-extd-args {
-
-				cell-index = <0>;
-				compatible = "fsl,fman-extended-args";
-				dma-aid-mode = "port";
-
-				fman0_rx2-extd-args {
-					cell-index = <2>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rx3-extd-args {
-					cell-index = <3>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rx4-extd-args {
-					cell-index = <4>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rx5-extd-args {
-					cell-index = <5>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rx6-extd-args {
-					cell-index = <6>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rx7-extd-args {
-					cell-index = <7>;
-					compatible = "fsl,fman-port-1g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rxt0-extd-args {
-					cell-index = <0>;
-					compatible = "fsl,fman-port-10g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-				fman0_rxt1-extd-args {
-					cell-index = <1>;
-					compatible = "fsl,fman-port-10g-rx-extended-args";
-					/* Define Virtual storage profile */
-					/* <number of profiles, default profile id> */
-					vsp-window = <2 0>;
-				};
-			};
-		};
-	};
-
 	bp7: buffer-pool@7 {
 		compatible = "fsl,ls1046a-bpool", "fsl,bpool";
 		fsl,bpid = <7>;
@@ -161,6 +92,75 @@
 	};
 };
 / {
+	chosen {
+		name = "chosen";
+		dpaa-extended-args {
+			fman0-extd-args {
+
+				cell-index = <0>;
+				compatible = "fsl,fman-extended-args";
+				dma-aid-mode = "port";
+
+				fman0_rx2-extd-args {
+					cell-index = <2>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rx3-extd-args {
+					cell-index = <3>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rx4-extd-args {
+					cell-index = <4>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rx5-extd-args {
+					cell-index = <5>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rx6-extd-args {
+					cell-index = <6>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rx7-extd-args {
+					cell-index = <7>;
+					compatible = "fsl,fman-port-1g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rxt0-extd-args {
+					cell-index = <0>;
+					compatible = "fsl,fman-port-10g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+				fman0_rxt1-extd-args {
+					cell-index = <1>;
+					compatible = "fsl,fman-port-10g-rx-extended-args";
+					/* Define Virtual storage profile */
+					/* <number of profiles, default profile id> */
+					vsp-window = <2 0>;
+				};
+			};
+		};
+	};
+
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;

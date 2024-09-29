@@ -17,9 +17,6 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/msi.h>
-#include <linux/of_address.h>
-#include <linux/of_irq.h>
-#include <linux/of_platform.h>
 #include <linux/of_pci.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
@@ -29,12 +26,6 @@
 
 static bool mobiveil_pcie_valid_device(struct pci_bus *bus, unsigned int devfn)
 {
-	struct mobiveil_pcie *pcie = bus->sysdata;
-
-	/* If there is no link, then there is no device */
-	if (!pci_is_root_bus(bus) && !mobiveil_pcie_link_up(pcie))
-		return false;
-
 	/* Only one device down on each root port */
 	if (pci_is_root_bus(bus) && (devfn > 0))
 		return false;
@@ -67,12 +58,6 @@ static void __iomem *mobiveil_pcie_map_bus(struct pci_bus *bus,
 	if (pci_is_root_bus(bus))
 		return pcie->csr_axi_slave_base + where;
 
-	/* Make sure the Master Enable bit not cleared */
-	value = mobiveil_csr_readl(pcie, PCI_COMMAND);
-	if (!(value & PCI_COMMAND_MASTER))
-		mobiveil_csr_writel(pcie, value | PCI_COMMAND_MASTER,
-				    PCI_COMMAND);
-
 	/*
 	 * EP config access (in Config/APIO space)
 	 * Program PEX Address base (31..16 bits) with appropriate value
@@ -88,20 +73,9 @@ static void __iomem *mobiveil_pcie_map_bus(struct pci_bus *bus,
 	return rp->config_axi_slave_base + where;
 }
 
-static int mobiveil_pcie_config_read(struct pci_bus *bus, unsigned int devfn,
-				     int where, int size, u32 *val)
-{
-	struct mobiveil_pcie *pcie = bus->sysdata;
-	struct mobiveil_root_port *rp = &pcie->rp;
-
-	if (!pci_is_root_bus(bus) && rp->ops->read_other_conf)
-		return rp->ops->read_other_conf(bus, devfn, where, size, val);
-
-	return pci_generic_config_read(bus, devfn, where, size, val);
-}
 static struct pci_ops mobiveil_pcie_ops = {
 	.map_bus = mobiveil_pcie_map_bus,
-	.read = mobiveil_pcie_config_read,
+	.read = pci_generic_config_read,
 	.write = pci_generic_config_write,
 };
 
@@ -115,7 +89,7 @@ static void mobiveil_pcie_isr(struct irq_desc *desc)
 	u32 msi_data, msi_addr_lo, msi_addr_hi;
 	u32 intr_status, msi_status;
 	unsigned long shifted_status;
-	u32 bit, virq, val, mask;
+	u32 bit, val, mask;
 
 	/*
 	 * The core provides a single interrupt for both INTx/MSI messages.
@@ -137,11 +111,10 @@ static void mobiveil_pcie_isr(struct irq_desc *desc)
 		shifted_status >>= PAB_INTX_START;
 		do {
 			for_each_set_bit(bit, &shifted_status, PCI_NUM_INTX) {
-				virq = irq_find_mapping(rp->intx_domain,
-							bit + 1);
-				if (virq)
-					generic_handle_irq(virq);
-				else
+				int ret;
+				ret = generic_handle_domain_irq(rp->intx_domain,
+								bit + 1);
+				if (ret)
 					dev_err_ratelimited(dev, "unexpected IRQ, INT%d\n",
 							    bit);
 
@@ -178,9 +151,7 @@ static void mobiveil_pcie_isr(struct irq_desc *desc)
 		dev_dbg(dev, "MSI registers, data: %08x, addr: %08x:%08x\n",
 			msi_data, msi_addr_hi, msi_addr_lo);
 
-		virq = irq_find_mapping(msi->dev_domain, msi_data);
-		if (virq)
-			generic_handle_irq(virq);
+		generic_handle_domain_irq(msi->dev_domain, msi_data);
 
 		msi_status = readl_relaxed(pcie->apb_csr_base +
 					   MSI_STATUS_OFFSET);
@@ -321,25 +292,19 @@ int mobiveil_host_init(struct mobiveil_pcie *pcie, bool reinit)
 	/* fixup for PCIe class register */
 	value = mobiveil_csr_readl(pcie, PAB_INTP_AXI_PIO_CLASS);
 	value &= 0xff;
-	value |= (PCI_CLASS_BRIDGE_PCI << 16);
+	value |= PCI_CLASS_BRIDGE_PCI_NORMAL << 8;
 	mobiveil_csr_writel(pcie, value, PAB_INTP_AXI_PIO_CLASS);
-
-	/* Platform specific host init */
-	if (pcie->ops->host_init)
-		return pcie->ops->host_init(pcie);
 
 	return 0;
 }
 
 static void mobiveil_mask_intx_irq(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct mobiveil_pcie *pcie;
+	struct mobiveil_pcie *pcie = irq_data_get_irq_chip_data(data);
 	struct mobiveil_root_port *rp;
 	unsigned long flags;
 	u32 mask, shifted_val;
 
-	pcie = irq_desc_get_chip_data(desc);
 	rp = &pcie->rp;
 	mask = 1 << ((data->hwirq + PAB_INTX_START) - 1);
 	raw_spin_lock_irqsave(&rp->intx_mask_lock, flags);
@@ -351,13 +316,11 @@ static void mobiveil_mask_intx_irq(struct irq_data *data)
 
 static void mobiveil_unmask_intx_irq(struct irq_data *data)
 {
-	struct irq_desc *desc = irq_to_desc(data->irq);
-	struct mobiveil_pcie *pcie;
+	struct mobiveil_pcie *pcie = irq_data_get_irq_chip_data(data);
 	struct mobiveil_root_port *rp;
 	unsigned long flags;
 	u32 shifted_val, mask;
 
-	pcie = irq_desc_get_chip_data(desc);
 	rp = &pcie->rp;
 	mask = 1 << ((data->hwirq + PAB_INTX_START) - 1);
 	raw_spin_lock_irqsave(&rp->intx_mask_lock, flags);
@@ -618,8 +581,10 @@ int mobiveil_pcie_host_probe(struct mobiveil_pcie *pcie)
 	bridge->ops = &mobiveil_pcie_ops;
 
 	ret = mobiveil_bringup_link(pcie);
-	if (ret)
+	if (ret) {
 		dev_info(dev, "link bring-up failed\n");
+		return ret;
+	}
 
 	return pci_host_probe(bridge);
 }

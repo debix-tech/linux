@@ -6,6 +6,7 @@
  *         Anton Vorontsov <avorontsov@ru.mvista.com>
  *
  * Copyright (c) 2006-2007 MontaVista Software, Inc.
+ * Copyright (c) 2020 Puresoftware Ltd.
  */
 
 #include <linux/kernel.h>
@@ -161,8 +162,8 @@ static int fixed_phy_add_gpiod(unsigned int irq, int phy_addr,
 }
 
 int fixed_phy_add(unsigned int irq, int phy_addr,
-		  struct fixed_phy_status *status) {
-
+		  struct fixed_phy_status *status)
+{
 	return fixed_phy_add_gpiod(irq, phy_addr, status, NULL);
 }
 EXPORT_SYMBOL_GPL(fixed_phy_add);
@@ -180,7 +181,7 @@ static void fixed_phy_del(int phy_addr)
 			if (fp->link_gpiod)
 				gpiod_put(fp->link_gpiod);
 			kfree(fp);
-			ida_simple_remove(&phy_fixed_ida, phy_addr);
+			ida_free(&phy_fixed_ida, phy_addr);
 			return;
 		}
 	}
@@ -223,6 +224,78 @@ static struct gpio_desc *fixed_phy_get_gpiod(struct device_node *np)
 }
 #endif
 
+struct phy_device *fwnode_fixed_phy_register(struct fwnode_handle *fwnode_np,
+					     struct fixed_phy_status *status)
+{
+	struct fixed_mdio_bus *fmb = &platform_fmb;
+	struct phy_device *phy;
+	int phy_addr;
+	int ret;
+
+	if (!fmb->mii_bus || fmb->mii_bus->state != MDIOBUS_REGISTERED)
+		return ERR_PTR(-EPROBE_DEFER);
+
+	phy_addr = ida_simple_get(&phy_fixed_ida, 0, PHY_MAX_ADDR, GFP_KERNEL);
+	if (phy_addr < 0)
+		return ERR_PTR(phy_addr);
+
+	ret = fixed_phy_add_gpiod(PHY_POLL, phy_addr, status, NULL);
+	if (ret < 0) {
+		ida_simple_remove(&phy_fixed_ida, phy_addr);
+		return ERR_PTR(ret);
+	}
+
+	phy = get_phy_device(fmb->mii_bus, phy_addr, false);
+	if (IS_ERR(phy)) {
+		fixed_phy_del(phy_addr);
+		return ERR_PTR(-EINVAL);
+	}
+
+	phy->link = status->link;
+	if (status->link) {
+		phy->speed = status->speed;
+		phy->duplex = status->duplex;
+		phy->pause = status->pause;
+		phy->asym_pause = status->asym_pause;
+	}
+
+	phy->mdio.dev.fwnode = fwnode_np;
+	phy->is_pseudo_fixed_link = true;
+
+	switch (status->speed) {
+	case SPEED_1000:
+		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Half_BIT,
+				 phy->supported);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+				 phy->supported);
+		fallthrough;
+	case SPEED_100:
+		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Half_BIT,
+				 phy->supported);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+				 phy->supported);
+		fallthrough;
+	case SPEED_10:
+	default:
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Half_BIT,
+				 phy->supported);
+		linkmode_set_bit(ETHTOOL_LINK_MODE_10baseT_Full_BIT,
+				 phy->supported);
+	}
+
+	phy_advertise_supported(phy);
+
+	ret = phy_device_register(phy);
+	if (ret) {
+		phy_device_free(phy);
+		fixed_phy_del(phy_addr);
+		return ERR_PTR(ret);
+	}
+
+	return phy;
+}
+EXPORT_SYMBOL_GPL(fwnode_fixed_phy_register);
+
 static struct phy_device *__fixed_phy_register(unsigned int irq,
 					       struct fixed_phy_status *status,
 					       struct device_node *np,
@@ -244,13 +317,13 @@ static struct phy_device *__fixed_phy_register(unsigned int irq,
 	}
 
 	/* Get the next available PHY address, up to PHY_MAX_ADDR */
-	phy_addr = ida_simple_get(&phy_fixed_ida, 0, PHY_MAX_ADDR, GFP_KERNEL);
+	phy_addr = ida_alloc_max(&phy_fixed_ida, PHY_MAX_ADDR - 1, GFP_KERNEL);
 	if (phy_addr < 0)
 		return ERR_PTR(phy_addr);
 
 	ret = fixed_phy_add_gpiod(irq, phy_addr, status, gpiod);
 	if (ret < 0) {
-		ida_simple_remove(&phy_fixed_ida, phy_addr);
+		ida_free(&phy_fixed_ida, phy_addr);
 		return ERR_PTR(ret);
 	}
 
@@ -353,6 +426,7 @@ static int __init fixed_mdio_bus_init(void)
 	fmb->mii_bus->parent = &pdev->dev;
 	fmb->mii_bus->read = &fixed_mdio_read;
 	fmb->mii_bus->write = &fixed_mdio_write;
+	fmb->mii_bus->phy_mask = ~0;
 
 	ret = mdiobus_register(fmb->mii_bus);
 	if (ret)

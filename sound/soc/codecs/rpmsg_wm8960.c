@@ -790,7 +790,7 @@ static int wm8960_hw_params(struct snd_pcm_substream *substream,
 			iface |= 0x000c;
 			break;
 		}
-		/* fall through */
+		fallthrough;
 	default:
 		dev_err(component->dev, "unsupported width %d\n",
 			params_width(params));
@@ -1293,7 +1293,7 @@ struct snd_soc_dai_driver rpmsg_wm8960_codec_dai = {
 		.formats = RPMSG_FORMATS,
 	},
 	.ops = &rpmsg_wm8960_dai_ops,
-	.symmetric_rates = 1,
+	.symmetric_rate = 1,
 };
 EXPORT_SYMBOL(rpmsg_wm8960_codec_dai);
 
@@ -1316,6 +1316,7 @@ static int rpmsg_wm8960_probe(struct snd_soc_component *component)
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "Playback");
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "Capture");
 	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "MICB");
+	snd_soc_dapm_ignore_suspend(snd_soc_component_get_dapm(component), "LINPUT1");
 
 	return 0;
 }
@@ -1361,6 +1362,7 @@ const struct snd_soc_component_driver rpmsg_wm8960_component = {
 	.probe = rpmsg_wm8960_probe,
 	.set_bias_level = wm8960_set_bias_level,
 	.suspend_bias_off = 1,
+	.legacy_dai_naming = 1,
 };
 EXPORT_SYMBOL(rpmsg_wm8960_component);
 

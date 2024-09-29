@@ -94,6 +94,10 @@ static irqreturn_t imx_snvs_pwrkey_interrupt(int irq, void *dev_id)
 	if (pdata->clk)
 		clk_enable(pdata->clk);
 
+	/*
+	 * Directly report press event in interrupt handler after suspend
+	 * to ensure no press event miss.
+	 */
 	if (pdata->suspended) {
 		pdata->keystate = 1;
 		input_event(input, EV_KEY, pdata->keycode, 1);
@@ -128,6 +132,11 @@ static irqreturn_t imx_snvs_pwrkey_interrupt(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
+static void imx_snvs_pwrkey_disable_clk(void *data)
+{
+	clk_disable_unprepare(data);
+}
+
 static void imx_snvs_pwrkey_act(void *pdata)
 {
 	struct pwrkey_drv_data *pd = pdata;
@@ -140,6 +149,7 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 	struct pwrkey_drv_data *pdata;
 	struct input_dev *input;
 	struct device_node *np;
+	struct clk *clk;
 	int error;
 
 	/* Get SNVS register Page */
@@ -162,6 +172,28 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 		dev_warn(&pdev->dev, "KEY_POWER without setting in dts\n");
 	}
 
+	clk = devm_clk_get_optional(&pdev->dev, NULL);
+	if (IS_ERR(clk)) {
+		dev_err(&pdev->dev, "Failed to get snvs clock (%pe)\n", clk);
+		return PTR_ERR(clk);
+	}
+
+	error = clk_prepare_enable(clk);
+	if (error) {
+		dev_err(&pdev->dev, "Failed to enable snvs clock (%pe)\n",
+			ERR_PTR(error));
+		return error;
+	}
+
+	error = devm_add_action_or_reset(&pdev->dev,
+					 imx_snvs_pwrkey_disable_clk, clk);
+	if (error) {
+		dev_err(&pdev->dev,
+			"Failed to register clock cleanup handler (%pe)\n",
+			ERR_PTR(error));
+		return error;
+	}
+
 	pdata->wakeup = of_property_read_bool(np, "wakeup-source");
 
 	pdata->irq = platform_get_irq(pdev, 0);
@@ -170,7 +202,7 @@ static int imx_snvs_pwrkey_probe(struct platform_device *pdev)
 
 	pdata->emulate_press = of_property_read_bool(np, "emulate-press");
 
-	pdata->clk = devm_clk_get(&pdev->dev, NULL);
+	pdata->clk = devm_clk_get(&pdev->dev, "snvs");
 	if (IS_ERR(pdata->clk)) {
 		pdata->clk = NULL;
 	} else {

@@ -201,7 +201,7 @@ int cdns_mhdp_mailbox_validate_receive(struct cdns_mhdp_device *mhdp,
 
 	if (opcode != header[0] || module_id != header[1] ||
 	    req_size != mbox_size) {
-		DRM_DEV_ERROR(mhdp->dev,
+		DRM_DEV_INFO(mhdp->dev,
 			      "Hmmm spurious mailbox data maybe, cleaning out...%d:%d:%d vs %d:%d:%d\n",
 			      module_id, opcode, req_size, header[1],
 			      header[0], mbox_size);
@@ -309,7 +309,6 @@ err_reg_read:
 	mutex_unlock(&mhdp->api_lock);
 	DRM_DEV_ERROR(mhdp->dev, "Failed to read register.\n");
 
-mutex_unlock(&mhdp->api_lock);
 	return ret;
 }
 EXPORT_SYMBOL(cdns_mhdp_reg_read);
@@ -636,6 +635,29 @@ int cdns_mhdp_set_video_status(struct cdns_mhdp_device *mhdp, int active)
 	return ret;
 }
 EXPORT_SYMBOL(cdns_mhdp_set_video_status);
+
+int cdns_mhdp_set_maximum_defer_retry(struct cdns_mhdp_device *mhdp,
+				      int number_of_retry)
+{
+	u8 msg;
+	int ret;
+
+	mutex_lock(&mhdp->api_lock);
+
+	msg = (u8)number_of_retry;
+
+	ret = cdns_mhdp_mailbox_send(mhdp, MB_MODULE_ID_DP_TX,
+				     DPTX_SET_AUX_MAX_DEFER_TRIES,
+				     sizeof(msg), &msg);
+	if (ret)
+		DRM_DEV_ERROR(mhdp->dev,
+			      "set aux maximum defer retries failed.\n");
+
+	mutex_unlock(&mhdp->api_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(cdns_mhdp_set_maximum_defer_retry);
 
 static int mhdp_get_msa_misc(struct video_info *video,
 				  struct drm_display_mode *mode)

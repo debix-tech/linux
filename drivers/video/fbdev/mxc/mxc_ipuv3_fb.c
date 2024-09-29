@@ -2,7 +2,7 @@
  * Copyright 2004-2016 Freescale Semiconductor, Inc. All Rights Reserved.
  */
 
-/* Copyright 2019 NXP */
+/* Copyright 2019,2021,2022 NXP */
 
 /*
  * The code contained herein is licensed under the GNU General Public
@@ -214,6 +214,32 @@ enum {
 	TGT_ON,
 	BOTH_OFF
 };
+
+#define mxc_copy_from_user(to, from, n)			\
+({												\
+	unsigned long res = 0;						\
+	typeof(to) _to = (to);						\
+	typeof(from) _from = (from);				\
+	typeof(n) _n = (n);							\
+	if (!access_ok(_from, _n))					\
+		memcpy(_to, _from, _n);					\
+	else										\
+		res = copy_from_user(_to, _from, _n);	\
+	res;										\
+})
+
+#define mxc_copy_to_user(to, from, n)		\
+({											\
+	unsigned long res = 0;					\
+	typeof(to) _to = (to);					\
+	typeof(from) _from = (from);			\
+	typeof(n) _n = (n);						\
+	if (!access_ok(_to, _n))				\
+		memcpy(_to, _from, _n);				\
+	else									\
+		res = copy_to_user(_to, _from, _n);	\
+	res;									\
+})
 
 static bool g_dp_in_use[2];
 LIST_HEAD(fb_alloc_list);
@@ -597,6 +623,7 @@ static int _setup_disp_channel2(struct fb_info *fbi)
 				}
 			}
 		} else {
+			pre.field_inverse = 0;
 			pre.interlaced = 0;
 			pre.interlace_offset = 0;
 		}
@@ -717,7 +744,12 @@ static int _setup_disp_channel2(struct fb_info *fbi)
 		if (mxc_fbi->resolve)
 			pre.sec_buf_off = mxc_fbi->gpu_sec_buf_off;
 
-		ipu_pre_config(mxc_fbi->pre_num, &pre);
+		retval = ipu_pre_config(mxc_fbi->pre_num, &pre);
+		if (retval < 0) {
+			dev_err(fbi->device, "failed to configure PRE %d\n",
+				retval);
+			return retval;
+		}
 		ipu_stride = pre.store_pitch;
 		ipu_base = pre.store_addr;
 		mxc_fbi->store_addr = ipu_base;
@@ -1081,7 +1113,7 @@ static void mxcfb_check_resolve(struct fb_info *fbi)
 	case IPU_PIX_FMT_GPU16_ST:
 	case IPU_PIX_FMT_GPU16_SRT:
 		mxc_fbi->gpu_sec_buf_off = 0;
-		/* fall-through */
+		fallthrough;
 	case IPU_PIX_FMT_GPU32_SB_ST:
 	case IPU_PIX_FMT_GPU32_SB_SRT:
 	case IPU_PIX_FMT_GPU16_SB_ST:
@@ -2202,7 +2234,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 				break;
 			}
 
-			if (copy_from_user(&pos, (void *)arg, sizeof(pos))) {
+			if (mxc_copy_from_user(&pos, (void *)arg, sizeof(pos))) {
 				retval = -EFAULT;
 				break;
 			}
@@ -2237,7 +2269,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
 			retval = ipu_disp_set_window_pos(mxc_fbi->ipu, mxc_fbi->ipu_ch,
 							 pos.x, pos.y);
 
-			if (copy_to_user((void *)arg, &pos, sizeof(pos))) {
+			if (mxc_copy_to_user((void *)arg, &pos, sizeof(pos))) {
 				retval = -EFAULT;
 				break;
 			}
@@ -2664,7 +2696,7 @@ static int mxcfb_mmap(struct fb_info *fbi, struct vm_area_struct *vma)
 	/* make buffers bufferable */
 	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
 
-	vma->vm_flags |= VM_IO;
+	vm_flags_set(vma, VM_IO);
 
 	if (remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			    vma->vm_end - vma->vm_start, vma->vm_page_prot)) {
@@ -2898,7 +2930,6 @@ static struct fb_info *mxcfb_init_fbinfo(struct device *dev, struct fb_ops *ops)
 	bpp_to_var(plat_data->default_bpp, &fbi->var);
 
 	fbi->fbops = ops;
-	fbi->flags = FBINFO_FLAG_DEFAULT;
 	fbi->pseudo_palette = mxcfbi->pseudo_palette;
 
 	/*
@@ -3291,7 +3322,7 @@ static int mxcfb_setup_overlay(struct platform_device *pdev,
 
 	mxcfbi_fg->ipu = ipu_get_soc(mxcfbi_bg->ipu_id);
 	if (IS_ERR(mxcfbi_fg->ipu)) {
-		ret = -ENODEV;
+		ret = -EPROBE_DEFER;
 		goto get_ipu_failed;
 	}
 	mxcfbi_fg->ipu_id = mxcfbi_bg->ipu_id;
@@ -3342,8 +3373,7 @@ static void mxcfb_unsetup_overlay(struct fb_info *fbi_bg)
 
 	mxcfb_unregister(ovfbi);
 
-	if (&ovfbi->cmap)
-		fb_dealloc_cmap(&ovfbi->cmap);
+	fb_dealloc_cmap(&ovfbi->cmap);
 	framebuffer_release(ovfbi);
 }
 
@@ -3519,7 +3549,7 @@ static int mxcfb_probe(struct platform_device *pdev)
 
 	mxcfbi->ipu = ipu_get_soc(mxcfbi->ipu_id);
 	if (IS_ERR(mxcfbi->ipu)) {
-		ret = -ENODEV;
+		ret = -EPROBE_DEFER;
 		goto get_ipu_failed;
 	}
 
@@ -3597,6 +3627,7 @@ mxcfb_register_failed:
 get_ipu_failed:
 	ipu_clear_usage(mxcfbi->ipu_id, mxcfbi->ipu_di);
 ipu_in_busy:
+	mxc_dispdrv_puthandle(mxcfbi->dispdrv);
 init_dispdrv_failed:
 	fb_dealloc_cmap(&fbi->cmap);
 	framebuffer_release(fbi);
@@ -3627,8 +3658,7 @@ static int mxcfb_remove(struct platform_device *pdev)
 	}
 
 	ipu_clear_usage(mxc_fbi->ipu_id, mxc_fbi->ipu_di);
-	if (&fbi->cmap)
-		fb_dealloc_cmap(&fbi->cmap);
+	fb_dealloc_cmap(&fbi->cmap);
 	framebuffer_release(fbi);
 	return 0;
 }
@@ -3675,4 +3705,3 @@ module_exit(mxcfb_exit);
 MODULE_AUTHOR("Freescale Semiconductor, Inc.");
 MODULE_DESCRIPTION("MXC framebuffer driver");
 MODULE_LICENSE("GPL");
-MODULE_SUPPORTED_DEVICE("fb");

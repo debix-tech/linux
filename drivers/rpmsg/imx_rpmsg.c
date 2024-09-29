@@ -23,6 +23,8 @@
 #include <linux/imx_rpmsg.h>
 #include "rpmsg_internal.h"
 
+#define IMX_SC_IRQ_GROUP_REBOOTED       5
+
 enum imx_rpmsg_variants {
 	IMX8QM,
 	IMX8QXP,
@@ -61,8 +63,6 @@ struct imx_rpmsg_vproc {
 	struct notifier_block proc_nb;
 	struct platform_device *pdev;
 };
-
-#define SC_IRQ_GROUP_REBOOTED   5U      /* Partition reboot complete */
 
 /*
  * The time consumption by remote ready is less than 1ms in the
@@ -135,7 +135,7 @@ static bool imx_rpmsg_notify(struct virtqueue *vq)
 		if (ret < 0)
 			return false;
 	} else {
-		rpdev->cl.tx_tout = 0;
+		rpdev->cl.tx_tout = 1000;
 		ret = mbox_send_message(rpdev->tx_ch, &rpvq->mmsg);
 		if (ret < 0)
 			return false;
@@ -419,7 +419,7 @@ static int imx_rpmsg_partition_notify(struct notifier_block *nb,
 
 	/* Ignore other irqs */
 	if (!((event & BIT(rpdev->mub_partition)) &&
-		(*(u8 *)group == SC_IRQ_GROUP_REBOOTED)))
+		(*(u8 *)group == IMX_SC_IRQ_GROUP_REBOOTED)))
 		return 0;
 
 	imx_rpmsg_restore(rpdev);
@@ -621,7 +621,7 @@ static int imx_rpmsg_probe(struct platform_device *pdev)
 					&rpdev->mub_partition))
 			rpdev->mub_partition = 3; /* default partition 3 */
 
-		ret = imx_scu_irq_group_enable(SC_IRQ_GROUP_REBOOTED,
+		ret = imx_scu_irq_group_enable(IMX_SC_IRQ_GROUP_REBOOTED,
 					      BIT(rpdev->mub_partition),
 					      true);
 		if (ret) {
@@ -631,7 +631,7 @@ static int imx_rpmsg_probe(struct platform_device *pdev)
 
 		ret = imx_scu_irq_register_notifier(&rpdev->proc_nb);
 		if (ret) {
-			imx_scu_irq_group_enable(SC_IRQ_GROUP_REBOOTED,
+			imx_scu_irq_group_enable(IMX_SC_IRQ_GROUP_REBOOTED,
 						BIT(rpdev->mub_partition),
 						false);
 			dev_warn(&pdev->dev, "reqister scu notifier failed.\n");

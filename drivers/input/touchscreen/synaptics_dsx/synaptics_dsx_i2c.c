@@ -3172,8 +3172,7 @@ static struct attribute_group attr_group = {
   * and creates a work queue for detection of other expansion Function
   * modules.
   */
-static int synaptics_rmi4_probe(struct i2c_client *client,
-		const struct i2c_device_id *dev_id)
+static int synaptics_rmi4_probe(struct i2c_client *client)
 {
 	int retval, ret;
 	signed char attr_count;
@@ -3352,7 +3351,7 @@ err_set_input_dev:
   * frees the interrupt, unregisters the driver from the input subsystem,
   * turns off the power to the sensor, and frees other allocated resources.
   */
-static int synaptics_rmi4_remove(struct i2c_client *client)
+static void synaptics_rmi4_remove(struct i2c_client *client)
 {
 	unsigned char attr_count;
 	struct synaptics_rmi4_data *rmi4_data = i2c_get_clientdata(client);
@@ -3378,8 +3377,6 @@ static int synaptics_rmi4_remove(struct i2c_client *client)
 #endif
 
 	kfree(rmi4_data);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM

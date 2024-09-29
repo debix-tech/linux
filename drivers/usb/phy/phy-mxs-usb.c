@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2012-2016 Freescale Semiconductor, Inc.
- * Copyright 2017 NXP
+ * Copyright 2012-2015 Freescale Semiconductor, Inc.
  * Copyright (C) 2012 Marek Vasut <marex@denx.de>
  * on behalf of DENX Software Engineering GmbH
  */
@@ -15,7 +14,7 @@
 #include <linux/delay.h>
 #include <linux/err.h>
 #include <linux/io.h>
-#include <linux/of_device.h>
+#include <linux/of.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
 #include <linux/iopoll.h>
@@ -193,8 +192,8 @@
 #define MXS_PHY_NEED_IP_FIX			BIT(3)
 
 /* Minimum and maximum values for device tree entries */
-#define MXS_PHY_TX_CAL45_MIN			30
-#define MXS_PHY_TX_CAL45_MAX			55
+#define MXS_PHY_TX_CAL45_MIN			35
+#define MXS_PHY_TX_CAL45_MAX			54
 #define MXS_PHY_TX_D_CAL_MIN			79
 #define MXS_PHY_TX_D_CAL_MAX			119
 
@@ -251,6 +250,10 @@ static const struct mxs_phy_data imx7ulp_phy_data = {
 	.flags = MXS_PHY_HAS_DCD,
 };
 
+static const struct mxs_phy_data imx8ulp_phy_data = {
+	.flags = MXS_PHY_HAS_DCD,
+};
+
 static const struct of_device_id mxs_phy_dt_ids[] = {
 	{ .compatible = "fsl,imx6sx-usbphy", .data = &imx6sx_phy_data, },
 	{ .compatible = "fsl,imx6sl-usbphy", .data = &imx6sl_phy_data, },
@@ -259,6 +262,7 @@ static const struct of_device_id mxs_phy_dt_ids[] = {
 	{ .compatible = "fsl,vf610-usbphy", .data = &vf610_phy_data, },
 	{ .compatible = "fsl,imx6ul-usbphy", .data = &imx6ul_phy_data, },
 	{ .compatible = "fsl,imx7ulp-usbphy", .data = &imx7ulp_phy_data, },
+	{ .compatible = "fsl,imx8ulp-usbphy", .data = &imx8ulp_phy_data, },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, mxs_phy_dt_ids);
@@ -274,7 +278,6 @@ struct mxs_phy {
 	u32 tx_reg_mask;
 	struct regulator *phy_3p0;
 	bool hardware_control_phy2_clk;
-	enum usb_current_mode mode;
 	unsigned long clk_rate;
 };
 
@@ -291,6 +294,11 @@ static inline bool is_imx6sl_phy(struct mxs_phy *mxs_phy)
 static inline bool is_imx7ulp_phy(struct mxs_phy *mxs_phy)
 {
 	return mxs_phy->data == &imx7ulp_phy_data;
+}
+
+static inline bool is_imx8ulp_phy(struct mxs_phy *mxs_phy)
+{
+	return mxs_phy->data == &imx8ulp_phy_data;
 }
 
 static inline bool is_imx6ul_phy(struct mxs_phy *mxs_phy)
@@ -350,12 +358,29 @@ static int mxs_phy_pll_enable(void __iomem *base, bool enable)
 	return ret;
 }
 
+/*
+ * The imx8ulp phy registers are not properly reset after a warm
+ * reset (ERR051269). Using the following steps to reset DEBUG and
+ * PLL_SIC regs. CTRL and PWD regs are reset by "SFT" bit in
+ * stmp_reset_block().
+ */
+static void mxs_phy_regs_reset(void __iomem *base)
+{
+	writel(0x7f180000, base + HW_USBPHY_DEBUG_SET);
+	writel(~0x7f180000, base + HW_USBPHY_DEBUG_CLR);
+	writel(0x00d12000, base + HW_USBPHY_PLL_SIC_SET);
+	writel(~0x00d12000, base + HW_USBPHY_PLL_SIC_CLR);
+}
+
 static int mxs_phy_hw_init(struct mxs_phy *mxs_phy)
 {
 	int ret;
 	void __iomem *base = mxs_phy->phy.io_priv;
 
-	if (is_imx7ulp_phy(mxs_phy)) {
+	if (is_imx8ulp_phy(mxs_phy))
+		mxs_phy_regs_reset(base);
+
+	if (is_imx7ulp_phy(mxs_phy) || is_imx8ulp_phy(mxs_phy)) {
 		ret = mxs_phy_pll_enable(base, true);
 		if (ret)
 			return ret;
@@ -413,7 +438,7 @@ static int mxs_phy_hw_init(struct mxs_phy *mxs_phy)
 	return 0;
 
 disable_pll:
-	if (is_imx7ulp_phy(mxs_phy))
+	if (is_imx7ulp_phy(mxs_phy) || is_imx8ulp_phy(mxs_phy))
 		mxs_phy_pll_enable(base, false);
 	return ret;
 }
@@ -473,6 +498,11 @@ static void __mxs_phy_disconnect_line(struct mxs_phy *mxs_phy, bool disconnect)
 		usleep_range(500, 1000);
 }
 
+static bool mxs_phy_is_otg_host(struct mxs_phy *mxs_phy)
+{
+	return mxs_phy->phy.last_event == USB_EVENT_ID;
+}
+
 static void mxs_phy_disconnect_line(struct mxs_phy *mxs_phy, bool on)
 {
 	bool vbus_is_on = false;
@@ -488,8 +518,8 @@ static void mxs_phy_disconnect_line(struct mxs_phy *mxs_phy, bool on)
 
 	vbus_is_on = mxs_phy_get_vbus_status(mxs_phy);
 
-	if (on && ((!vbus_is_on && mxs_phy->mode != CUR_USB_MODE_HOST) ||
-			(last_event == USB_EVENT_VBUS)))
+	if (on && ((!vbus_is_on && !mxs_phy_is_otg_host(mxs_phy))
+		|| (last_event == USB_EVENT_VBUS)))
 		__mxs_phy_disconnect_line(mxs_phy, true);
 	else
 		__mxs_phy_disconnect_line(mxs_phy, false);
@@ -527,7 +557,7 @@ static void mxs_phy_shutdown(struct usb_phy *phy)
 	writel(BM_USBPHY_CTRL_CLKGATE,
 	       phy->io_priv + HW_USBPHY_CTRL_SET);
 
-	if (is_imx7ulp_phy(mxs_phy))
+	if (is_imx7ulp_phy(mxs_phy) || is_imx8ulp_phy(mxs_phy))
 		mxs_phy_pll_enable(phy->io_priv, false);
 
 	if (mxs_phy->phy_3p0)
@@ -867,19 +897,6 @@ static int mxs_phy_on_resume(struct usb_phy *phy,
 	return 0;
 }
 
-/*
- * Set the usb current role for phy.
- */
-static int mxs_phy_set_mode(struct usb_phy *phy,
-		enum usb_current_mode mode)
-{
-	struct mxs_phy *mxs_phy = to_mxs_phy(phy);
-
-	mxs_phy->mode = mode;
-
-	return 0;
-}
-
 static int mxs_phy_dcd_start(struct mxs_phy *mxs_phy)
 {
 	void __iomem *base = mxs_phy->phy.io_priv;
@@ -999,24 +1016,17 @@ static int mxs_phy_probe(struct platform_device *pdev)
 	struct clk *clk;
 	struct mxs_phy *mxs_phy;
 	int ret;
-	const struct of_device_id *of_id;
 	struct device_node *np = pdev->dev.of_node;
 	u32 val;
-
-	of_id = of_match_device(mxs_phy_dt_ids, &pdev->dev);
-	if (!of_id)
-		return -ENODEV;
 
 	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
 	clk = devm_clk_get(&pdev->dev, NULL);
-	if (IS_ERR(clk)) {
-		dev_err(&pdev->dev,
-			"can't get the clock, err=%ld", PTR_ERR(clk));
-		return PTR_ERR(clk);
-	}
+	if (IS_ERR(clk))
+		return dev_err_probe(&pdev->dev, PTR_ERR(clk),
+				     "failed to get clock\n");
 
 	mxs_phy = devm_kzalloc(&pdev->dev, sizeof(*mxs_phy), GFP_KERNEL);
 	if (!mxs_phy)
@@ -1024,7 +1034,7 @@ static int mxs_phy_probe(struct platform_device *pdev)
 
 	mxs_phy->clk_rate = clk_get_rate(clk);
 	/* Some SoCs don't have anatop registers */
-	if (of_get_property(np, "fsl,anatop", NULL)) {
+	if (of_property_present(np, "fsl,anatop")) {
 		mxs_phy->regmap_anatop = syscon_regmap_lookup_by_phandle
 			(np, "fsl,anatop");
 		if (IS_ERR(mxs_phy->regmap_anatop)) {
@@ -1079,8 +1089,6 @@ static int mxs_phy_probe(struct platform_device *pdev)
 	ret = of_alias_get_id(np, "usbphy");
 	if (ret < 0)
 		dev_dbg(&pdev->dev, "failed to get alias id, errno %d\n", ret);
-	mxs_phy->clk = clk;
-	mxs_phy->data = of_id->data;
 	mxs_phy->port_id = ret;
 
 	mxs_phy->phy.io_priv		= base;
@@ -1093,28 +1101,27 @@ static int mxs_phy_probe(struct platform_device *pdev)
 	mxs_phy->phy.notify_disconnect	= mxs_phy_on_disconnect;
 	mxs_phy->phy.type		= USB_PHY_TYPE_USB2;
 	mxs_phy->phy.set_wakeup		= mxs_phy_set_wakeup;
+	mxs_phy->clk = clk;
+	mxs_phy->data = of_device_get_match_data(&pdev->dev);
+
 	if (mxs_phy->data->flags & MXS_PHY_HAS_DCD)
 		mxs_phy->phy.charger_detect	= mxs_phy_dcd_flow;
 	else
 		mxs_phy->phy.charger_detect	= mxs_phy_charger_detect;
 
-	mxs_phy->phy.set_mode		= mxs_phy_set_mode;
 	if (mxs_phy->data->flags & MXS_PHY_SENDING_SOF_TOO_FAST) {
 		mxs_phy->phy.notify_suspend = mxs_phy_on_suspend;
 		mxs_phy->phy.notify_resume = mxs_phy_on_resume;
 	}
 
 	mxs_phy->phy_3p0 = devm_regulator_get(&pdev->dev, "phy-3p0");
-	if (PTR_ERR(mxs_phy->phy_3p0) == -EPROBE_DEFER) {
-		return -EPROBE_DEFER;
-	} else if (PTR_ERR(mxs_phy->phy_3p0) == -ENODEV) {
+	if (PTR_ERR(mxs_phy->phy_3p0) == -ENODEV)
 		/* not exist */
 		mxs_phy->phy_3p0 = NULL;
-	} else if (IS_ERR(mxs_phy->phy_3p0)) {
-		dev_err(&pdev->dev, "Getting regulator error: %ld\n",
-			PTR_ERR(mxs_phy->phy_3p0));
-		return PTR_ERR(mxs_phy->phy_3p0);
-	}
+	else if (IS_ERR(mxs_phy->phy_3p0))
+		return dev_err_probe(&pdev->dev, PTR_ERR(mxs_phy->phy_3p0),
+				     "Getting regulator error\n");
+
 	if (mxs_phy->phy_3p0)
 		regulator_set_voltage(mxs_phy->phy_3p0, 3200000, 3200000);
 
@@ -1132,7 +1139,7 @@ static int mxs_phy_probe(struct platform_device *pdev)
 	return usb_add_phy_dev(&mxs_phy->phy);
 }
 
-static int mxs_phy_remove(struct platform_device *pdev)
+static void mxs_phy_remove(struct platform_device *pdev)
 {
 	struct mxs_phy *mxs_phy = platform_get_drvdata(pdev);
 
@@ -1140,8 +1147,6 @@ static int mxs_phy_remove(struct platform_device *pdev)
 	pm_runtime_get_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	pm_runtime_put_noidle(&pdev->dev);
-
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -1238,7 +1243,7 @@ static const struct dev_pm_ops mxs_phy_pm_ops = {
 
 static struct platform_driver mxs_phy_driver = {
 	.probe = mxs_phy_probe,
-	.remove = mxs_phy_remove,
+	.remove_new = mxs_phy_remove,
 	.driver = {
 		.name = DRIVER_NAME,
 		.of_match_table = mxs_phy_dt_ids,

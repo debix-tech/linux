@@ -121,13 +121,12 @@ struct dw_hdmi_phy_ops {
 	void (*update_hpd)(struct dw_hdmi *hdmi, void *data,
 			   bool force, bool disabled, bool rxsense);
 	void (*setup_hpd)(struct dw_hdmi *hdmi, void *data);
-	void (*enable_audio)(struct dw_hdmi *hdmi, void *data, int channel,
-			     int width, int rate, int non_pcm);
-	void (*disable_audio)(struct dw_hdmi *hdmi, void *data);
 };
 
 struct dw_hdmi_plat_data {
 	struct regmap *regm;
+
+	unsigned int output_port;
 
 	unsigned long input_bus_encoding;
 	bool use_drm_infoframe;
@@ -144,6 +143,11 @@ struct dw_hdmi_plat_data {
 					   const struct drm_display_info *info,
 					   const struct drm_display_mode *mode);
 
+	/* Platform-specific audio enable/disable (optional) */
+	void (*enable_audio)(struct dw_hdmi *hdmi, int channel,
+			     int width, int rate, int non_pcm);
+	void (*disable_audio)(struct dw_hdmi *hdmi);
+
 	/* Vendor PHY support */
 	const struct dw_hdmi_phy_ops *phy_ops;
 	const char *phy_name;
@@ -156,6 +160,8 @@ struct dw_hdmi_plat_data {
 	const struct dw_hdmi_phy_config *phy_config;
 	int (*configure_phy)(struct dw_hdmi *hdmi, void *data,
 			     unsigned long mpixelclock);
+
+	unsigned int disable_cec : 1;
 };
 
 struct dw_hdmi *dw_hdmi_probe(struct platform_device *pdev,
@@ -188,7 +194,7 @@ void dw_hdmi_phy_i2c_set_addr(struct dw_hdmi *hdmi, u8 address);
 void dw_hdmi_phy_i2c_write(struct dw_hdmi *hdmi, unsigned short data,
 			   unsigned char addr);
 
-void dw_hdmi_phy_reset(struct dw_hdmi *hdmi);
+void dw_hdmi_phy_gen1_reset(struct dw_hdmi *hdmi);
 
 void dw_hdmi_phy_gen2_pddq(struct dw_hdmi *hdmi, u8 enable);
 void dw_hdmi_phy_gen2_txpwron(struct dw_hdmi *hdmi, u8 enable);
@@ -199,5 +205,7 @@ enum drm_connector_status dw_hdmi_phy_read_hpd(struct dw_hdmi *hdmi,
 void dw_hdmi_phy_update_hpd(struct dw_hdmi *hdmi, void *data,
 			    bool force, bool disabled, bool rxsense);
 void dw_hdmi_phy_setup_hpd(struct dw_hdmi *hdmi, void *data);
+
+bool dw_hdmi_bus_fmt_is_420(struct dw_hdmi *hdmi);
 
 #endif /* __IMX_HDMI_H__ */

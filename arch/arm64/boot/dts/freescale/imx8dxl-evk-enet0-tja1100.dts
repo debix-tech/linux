@@ -18,6 +18,7 @@
 		 <&enet0_lpcg 1>;
 	phy-mode = "rmii";
 	phy-handle = <&ethphy2>;
+	phy-supply = <&mii_select>;
 	status = "okay";
 
 	mdio {
@@ -26,8 +27,8 @@
 
 		ethphy2: ethernet-phy@2 {
 			compatible = "ethernet-phy-ieee802.3-c22";
-			reg = <2>;
-			tja110x,refclk_in;
+			reg = <5>;
+			nxp,rmii-refclk-in;
 		};
 	};
 };
@@ -49,6 +50,10 @@
 			IMX8DXL_ENET0_RGMII_RXD2_CONN_ENET0_RMII_RX_ER		0x00000060
 		>;
 	};
+};
+
+&enet0_reset {
+	status = "disabled";
 };
 
 &max7322 {
