@@ -130,6 +130,11 @@ struct imx6_pcie_drvdata {
 struct imx6_pcie {
 	struct dw_pcie		*pci;
 	int			reset_gpio;
+	/*Debix add for 4G AIO*/
+	int			vdd2v5_en;
+	int			vdd1v1_en;
+	int			vdd3v3_en;
+	/*end Debix add for 4G AIO*/
 	int			host_wake_irq;
 	bool			gpio_active_high;
 	bool			link_is_up;
@@ -1906,7 +1911,33 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 	} else if (imx6_pcie->reset_gpio == -EPROBE_DEFER) {
 		return imx6_pcie->reset_gpio;
 	}
+/*Debix add for 4G AIO*/
+	imx6_pcie->vdd2v5_en = of_get_named_gpio(node, "vdd2v5_en", 0);
+	if (gpio_is_valid(imx6_pcie->vdd2v5_en)) {
+		//printk("Debix_4g vdd2v5\n");
+		ret = devm_gpio_request_one(dev, imx6_pcie->vdd2v5_en,
+					GPIOF_OUT_INIT_HIGH ,
+				"PCIe vdd2v5");
 
+		gpio_set_value_cansleep(imx6_pcie->vdd2v5_en,1);
+	}
+	imx6_pcie->vdd1v1_en = of_get_named_gpio(node, "vdd1v1_en", 0);
+	if (gpio_is_valid(imx6_pcie->vdd1v1_en)) {
+		//printk("Debix_4g vdd1v1\n");
+		ret = devm_gpio_request_one(dev, imx6_pcie->vdd1v1_en,
+					GPIOF_OUT_INIT_HIGH ,
+				"PCIe vdd1v1");
+		gpio_set_value_cansleep(imx6_pcie->vdd1v1_en,1);
+	}
+	imx6_pcie->vdd3v3_en = of_get_named_gpio(node, "vdd3v3_en", 0);
+	if (gpio_is_valid(imx6_pcie->vdd3v3_en)) {
+		//printk("Debix_4g vdd3v3\n");
+		ret = devm_gpio_request_one(dev, imx6_pcie->vdd3v3_en,
+					GPIOF_OUT_INIT_HIGH ,
+				"PCIe vdd3v3");
+		gpio_set_value_cansleep(imx6_pcie->vdd3v3_en,1);
+	}
+/*end Debix add for 4G AIO*/
 	/* Fetch clocks */
 	imx6_pcie->pcie_bus = devm_clk_get(dev, "pcie_bus");
 	if (IS_ERR(imx6_pcie->pcie_bus))

@@ -11,9 +11,10 @@
 #include <linux/delay.h>
 #include <linux/device.h>
 #include <linux/gpio/consumer.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
-#include <linux/mod_devicetable.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/regulator/consumer.h>
@@ -442,8 +443,11 @@ struct ov5640_dev {
 	u32 xclk_freq;
 
 	struct regulator_bulk_data supplies[OV5640_NUM_SUPPLIES];
-	struct gpio_desc *reset_gpio;
-	struct gpio_desc *pwdn_gpio;
+	//struct gpio_desc *reset_gpio;
+	//struct gpio_desc *pwdn_gpio;
+
+	int reset_gpio;
+	int pwdn_gpio;
 	bool   upside_down;
 
 	/* lock to protect all members below */
@@ -523,7 +527,7 @@ static u32 ov5640_code_to_bpp(struct ov5640_dev *sensor, u32 code)
  */
 /* YUV422 UYVY VGA@30fps */
 
-static const struct v4l2_mbus_framefmt ov5640_csi2_default_fmt = {
+static const struct v4l2_mbus_framefmt ov5640_mipi_default_fmt = {
 	.code = MEDIA_BUS_FMT_UYVY8_1X16,
 	.width = 640,
 	.height = 480,
@@ -570,7 +574,9 @@ static const struct reg_value ov5640_init_setting[] = {
 	{0x4001, 0x02, 0, 0}, {0x4004, 0x02, 0, 0}, {0x3000, 0x00, 0, 0},
 	{0x3002, 0x1c, 0, 0}, {0x3004, 0xff, 0, 0}, {0x3006, 0xc3, 0, 0},
 	{0x302e, 0x08, 0, 0}, {0x4300, 0x3f, 0, 0},
-	{0x501f, 0x00, 0, 0}, {0x440e, 0x00, 0, 0}, {0x4837, 0x0a, 0, 0},
+	{0x501f, 0x00, 0, 0}, {0x4407, 0x04, 0, 0},
+	{0x440e, 0x00, 0, 0}, {0x460b, 0x35, 0, 0}, {0x460c, 0x22, 0, 0},
+	{0x4837, 0x0a, 0, 0}, {0x3824, 0x02, 0, 0},
 	{0x5000, 0xa7, 0, 0}, {0x5001, 0xa3, 0, 0}, {0x5180, 0xff, 0, 0},
 	{0x5181, 0xf2, 0, 0}, {0x5182, 0x00, 0, 0}, {0x5183, 0x14, 0, 0},
 	{0x5184, 0x25, 0, 0}, {0x5185, 0x24, 0, 0}, {0x5186, 0x09, 0, 0},
@@ -682,6 +688,104 @@ static const struct reg_value ov5640_setting_1080P_1920_1080[] = {
 	{0x4005, 0x1a, 0, 0}, {0x3008, 0x02, 0, 15},
 };
 
+//John_gao add new ov5640  
+static struct reg_value ov5640_setting_new[] = {
+	{0x5180 ,0xff ,0 ,0},
+	{0x5181 ,0xf2 ,0 ,0},
+	{0x5182 ,0x0  ,0 ,0},
+	{0x5183 ,0x14 ,0 ,0},
+	{0x5184 ,0x25 ,0 ,0},
+	{0x5185 ,0x24 ,0 ,0},
+	{0x5186 ,0x10 ,0 ,0},
+	{0x5187 ,0x10 ,0 ,0},
+	{0x5188 ,0x10 ,0 ,0},
+	{0x5189 ,0x6d ,0 ,0},
+	{0x518a ,0x53 ,0 ,0},
+	{0x518b ,0x90 ,0 ,0},
+	{0x518c ,0x8c ,0 ,0},
+	{0x518d ,0x3b ,0 ,0},
+	{0x518e ,0x2c ,0 ,0},
+	{0x518f ,0x59 ,0 ,0},
+	{0x5190 ,0x42 ,0 ,0},
+	{0x5191 ,0xf8 ,0 ,0},
+	{0x5192 ,0x4  ,0 ,0},
+	{0x5193 ,0x70 ,0 ,0},
+	{0x5194 ,0xf0 ,0 ,0},
+	{0x5195 ,0xf0 ,0 ,0},
+	{0x5196 ,0x3  ,0 ,0},
+	{0x5197 ,0x1  ,0 ,0},
+	{0x5198 ,0x4  ,0 ,0},
+	{0x5199 ,0x0  ,0 ,0},
+	{0x519a ,0x4  ,0 ,0},
+	{0x519b ,0x13 ,0 ,0},
+	{0x519c ,0x6  ,0 ,0},
+	{0x519d ,0x9e ,0 ,0},
+	{0x519e ,0x38 ,0 ,0},
+	{0x5800 ,0x2a ,0 ,0},
+	{0x5801 ,0x1a ,0 ,0},
+	{0x5802 ,0x13 ,0 ,0},
+	{0x5803 ,0x13 ,0 ,0},
+	{0x5804 ,0x1b ,0 ,0},
+	{0x5805 ,0x2b ,0 ,0},
+	{0x5806 ,0x10 ,0 ,0},
+	{0x5807 ,0x9  ,0 ,0},
+	{0x5808 ,0x7  ,0 ,0},
+	{0x5809 ,0x7  ,0 ,0},
+	{0x580a ,0xa  ,0 ,0},
+	{0x580b ,0x10 ,0 ,0},
+	{0x580c ,0x8  ,0 ,0},
+	{0x580d ,0x3  ,0 ,0},
+	{0x580e ,0x0  ,0 ,0},
+	{0x580f ,0x0  ,0 ,0},
+	{0x5810 ,0x4  ,0 ,0},
+	{0x5811 ,0x9  ,0 ,0},
+	{0x5812 ,0x9  ,0 ,0},
+	{0x5813 ,0x3  ,0 ,0},
+	{0x5814 ,0x0  ,0 ,0},
+	{0x5815 ,0x0  ,0 ,0},
+	{0x5816 ,0x4  ,0 ,0},
+	{0x5817 ,0x9  ,0 ,0},
+	{0x5818 ,0xd  ,0 ,0},
+	{0x5819 ,0x6  ,0 ,0},
+	{0x581a ,0x3  ,0 ,0},
+	{0x581b ,0x4  ,0 ,0},
+	{0x581c ,0x6  ,0 ,0},
+	{0x581d ,0xd  ,0 ,0},
+	{0x581e ,0x21 ,0 ,0},
+	{0x581f ,0x11 ,0 ,0},
+	{0x5820 ,0xa  ,0 ,0},
+	{0x5821 ,0xa  ,0 ,0},
+	{0x5822 ,0x13 ,0 ,0},
+	{0x5823 ,0x23 ,0 ,0},
+	{0x5824 ,0x13 ,0 ,0},
+	{0x5825 ,0x24 ,0 ,0},
+	{0x5826 ,0x24 ,0 ,0},
+	{0x5827 ,0x22 ,0 ,0},
+	{0x5828 ,0x4  ,0 ,0},
+	{0x5829 ,0x10 ,0 ,0},
+	{0x582a ,0x22 ,0 ,0},
+	{0x582b ,0x22 ,0 ,0},
+	{0x582c ,0x22 ,0 ,0},
+	{0x582d ,0x22 ,0 ,0},
+	{0x582e ,0x10 ,0 ,0},
+	{0x582f ,0x22 ,0 ,0},
+	{0x5830 ,0x42 ,0 ,0},
+	{0x5831 ,0x22 ,0 ,0},
+	{0x5832 ,0x22 ,0 ,0},
+	{0x5833 ,0x10 ,0 ,0},
+	{0x5834 ,0x22 ,0 ,0},
+	{0x5835 ,0x22 ,0 ,0},
+	{0x5836 ,0x22 ,0 ,0},
+	{0x5837 ,0x0  ,0 ,0},
+	{0x5838 ,0x12 ,0 ,0},
+	{0x5839 ,0x12 ,0 ,0},
+	{0x583a ,0x10 ,0 ,0},
+	{0x583b ,0x10 ,0 ,0},
+	{0x583c ,0x2  ,0 ,0},
+	{0x583d ,0xce ,0 ,0},
+
+};
+
 static const struct reg_value ov5640_setting_QSXGA_2592_1944[] = {
 	{0x3008, 0x42, 0, 0},
 	{0x3c07, 0x08, 0, 0},
@@ -694,7 +798,7 @@ static const struct reg_value ov5640_setting_QSXGA_2592_1944[] = {
 	{0x3a0a, 0x00, 0, 0}, {0x3a0b, 0xf6, 0, 0}, {0x3a0e, 0x03, 0, 0},
 	{0x3a0d, 0x04, 0, 0}, {0x3a14, 0x03, 0, 0}, {0x3a15, 0xd8, 0, 0},
 	{0x4001, 0x02, 0, 0}, {0x4004, 0x06, 0, 0},
-	{0x4407, 0x04, 0, 0}, {0x460b, 0x35, 0, 0}, {0x460c, 0x20, 0, 0},
+	{0x4407, 0x04, 0, 0}, {0x460b, 0x35, 0, 0}, {0x460c, 0x22, 0, 0},
 	{0x3824, 0x02, 0, 0}, {0x5001, 0x83, 0, 70},
 	{0x3008, 0x02, 0, 20},
 };
@@ -1599,7 +1703,7 @@ static int ov5640_set_dvp_pclk(struct ov5640_dev *sensor)
 			 &bit_div, &pclk_div);
 
 	if (bit_div == 2)
-		bit_div = 8;
+		bit_div = 0xA;
 
 	ret = ov5640_mod_reg(sensor, OV5640_REG_SC_PLL_CTRL0,
 			     0x0f, bit_div);
@@ -1654,6 +1758,43 @@ static int ov5640_set_jpeg_timings(struct ov5640_dev *sensor,
 }
 
 /* download ov5640 settings to sensor through i2c */
+static int ov5640_download_firmware(struct ov5640_dev *sensor,
+				    struct reg_value *pModeSetting,
+				    s32 ArySize)
+{
+	register u32 Delay_ms = 0;
+	register u16 RegAddr = 0;
+	register u8 Mask = 0;
+	register u8 Val = 0;
+	u8 RegVal = 0;
+	int i, retval = 0;
+
+	for (i = 0; i < ArySize; ++i, ++pModeSetting) {
+		Delay_ms = pModeSetting->delay_ms;
+		RegAddr = pModeSetting->reg_addr;
+		Val = pModeSetting->val;
+		Mask = pModeSetting->mask;
+
+		if (Mask) {
+			retval = ov5640_read_reg(sensor, RegAddr, &RegVal);
+			if (retval < 0)
+				goto err;
+
+			RegVal &= ~(u8)Mask;
+			Val &= Mask;
+			Val |= RegVal;
+		}
+
+		retval = ov5640_write_reg(sensor, RegAddr, Val);
+		if (retval < 0)
+			goto err;
+
+		if (Delay_ms)
+			msleep(Delay_ms);
+	}
+err:
+	return retval;
+}
 static int ov5640_set_timings(struct ov5640_dev *sensor,
 			      const struct ov5640_mode_info *mode)
 {
@@ -2381,6 +2522,20 @@ static int ov5640_set_mode(struct ov5640_dev *sensor)
 	if (ret < 0)
 		goto restore_auto_exp_gain;
 
+#if 1
+	//John_gao add new ov5640  
+	{
+		struct reg_value *pModeSetting = ov5640_setting_new;
+		s32 ArySize = ARRAY_SIZE(ov5640_setting_new);
+		printk("GLS ????? set reg \n");
+		ret = ov5640_download_firmware(sensor, pModeSetting,
+				ArySize);
+		if (ret < 0)
+			printk("GLS set ov5640_setting_new err !!\n");
+	}
+	//end John_gao
+#endif
+
 	/* restore auto gain and exposure */
 	if (auto_gain)
 		ov5640_set_autogain(sensor, true);
@@ -2446,7 +2601,8 @@ static int ov5640_restore_mode(struct ov5640_dev *sensor)
 
 static void ov5640_power(struct ov5640_dev *sensor, bool enable)
 {
-	gpiod_set_value_cansleep(sensor->pwdn_gpio, enable ? 0 : 1);
+	//gpiod_set_value_cansleep(sensor->pwdn_gpio, enable ? 0 : 1);
+	gpio_direction_output(sensor->pwdn_gpio, enable ? 0 : 1 );
 }
 
 /*
@@ -2466,21 +2622,27 @@ static void ov5640_power(struct ov5640_dev *sensor, bool enable)
 static void ov5640_powerup_sequence(struct ov5640_dev *sensor)
 {
 	if (sensor->pwdn_gpio) {
-		gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-
+	//gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		gpio_direction_output(sensor->reset_gpio, 1);
+	
 		/* camera power cycle */
 		ov5640_power(sensor, false);
-		usleep_range(5000, 10000);	/* t2 */
+		usleep_range(5000, 10000);
 		ov5640_power(sensor, true);
-		usleep_range(1000, 2000);	/* t3 */
+		usleep_range(5000, 10000);
 
-		gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		//gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+		gpio_direction_output(sensor->reset_gpio, 0);
+		usleep_range(1000, 2000);
+
+		//gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+		gpio_direction_output(sensor->reset_gpio, 1);
 	} else {
 		/* software reset */
 		ov5640_write_reg(sensor, OV5640_REG_SYS_CTRL0,
 				 OV5640_REG_SYS_CTRL0_SW_RST);
 	}
-	usleep_range(20000, 25000);	/* t4 */
+	usleep_range(20000, 25000);
 }
 
 static int ov5640_set_power_on(struct ov5640_dev *sensor)
@@ -2546,7 +2708,7 @@ static int ov5640_set_power_mipi(struct ov5640_dev *sensor, bool on)
 	 *		  "ov5640_set_stream_mipi()")
 	 * [4] = 0	: Power up MIPI HS Tx
 	 * [3] = 0	: Power up MIPI LS Rx
-	 * [2] = 1	: MIPI interface enabled
+	 * [2] = 0	: MIPI interface disabled
 	 */
 	ret = ov5640_write_reg(sensor, OV5640_REG_IO_MIPI_CTRL00, 0x44);
 	if (ret)
@@ -2768,12 +2930,16 @@ out:
 
 static int ov5640_try_frame_interval(struct ov5640_dev *sensor,
 				     struct v4l2_fract *fi,
-				     const struct ov5640_mode_info *mode_info)
+				     u32 width, u32 height)
 {
-	const struct ov5640_mode_info *mode = mode_info;
+	const struct ov5640_mode_info *mode;
 	enum ov5640_frame_rate rate = OV5640_15_FPS;
 	int minfps, maxfps, best_fps, fps;
 	int i;
+
+	mode = ov5640_find_mode(sensor, width, height, false);
+	if (!mode)
+		return -EINVAL;
 
 	minfps = ov5640_framerates[OV5640_15_FPS];
 	maxfps = ov5640_framerates[mode->max_fps];
@@ -2802,7 +2968,7 @@ static int ov5640_try_frame_interval(struct ov5640_dev *sensor,
 	fi->denominator = best_fps;
 
 find_mode:
-	mode = ov5640_find_mode(sensor, mode->width, mode->height, false);
+	mode = ov5640_find_mode(sensor, width, height, false);
 	return mode ? rate : -EINVAL;
 }
 
@@ -2833,6 +2999,7 @@ static int ov5640_get_fmt(struct v4l2_subdev *sd,
 
 static int ov5640_try_fmt_internal(struct v4l2_subdev *sd,
 				   struct v4l2_mbus_framefmt *fmt,
+				   enum ov5640_frame_rate fr,
 				   const struct ov5640_mode_info **new_mode)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
@@ -2872,22 +3039,12 @@ static int ov5640_try_fmt_internal(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static void __v4l2_ctrl_vblank_update(struct ov5640_dev *sensor, u32 vblank)
-{
-	const struct ov5640_mode_info *mode = sensor->current_mode;
-
-	__v4l2_ctrl_modify_range(sensor->ctrls.vblank, OV5640_MIN_VBLANK,
-				 OV5640_MAX_VTS - mode->height, 1, vblank);
-
-	__v4l2_ctrl_s_ctrl(sensor->ctrls.vblank, vblank);
-}
-
 static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 {
 	const struct ov5640_mode_info *mode = sensor->current_mode;
 	enum ov5640_pixel_rate_id pixel_rate_id = mode->pixel_rate;
 	struct v4l2_mbus_framefmt *fmt = &sensor->fmt;
-	const struct ov5640_timings *timings = ov5640_timings(sensor, mode);
+	const struct ov5640_timings *timings;
 	s32 exposure_val, exposure_max;
 	unsigned int hblank;
 	unsigned int i = 0;
@@ -2905,8 +3062,6 @@ static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 	if (!ov5640_is_csi2(sensor)) {
 		__v4l2_ctrl_s_ctrl_int64(sensor->ctrls.pixel_rate,
 					 ov5640_calc_pixel_rate(sensor));
-
-		__v4l2_ctrl_vblank_update(sensor, timings->vblank_def);
 
 		return 0;
 	}
@@ -2950,13 +3105,28 @@ static int ov5640_update_pixel_rate(struct ov5640_dev *sensor)
 	__v4l2_ctrl_s_ctrl_int64(sensor->ctrls.pixel_rate, pixel_rate);
 	__v4l2_ctrl_s_ctrl(sensor->ctrls.link_freq, i);
 
+	timings = ov5640_timings(sensor, mode);
 	hblank = timings->htot - mode->width;
 	__v4l2_ctrl_modify_range(sensor->ctrls.hblank,
 				 hblank, hblank, 1, hblank);
 
 	vblank = timings->vblank_def;
 
-	__v4l2_ctrl_vblank_update(sensor, vblank);
+	if (sensor->current_fr != mode->def_fps) {
+		/*
+		 * Compute the vertical blanking according to the framerate
+		 * configured with s_frame_interval.
+		 */
+		int fie_num = sensor->frame_interval.numerator;
+		int fie_denom = sensor->frame_interval.denominator;
+
+		vblank = ((fie_num * pixel_rate / fie_denom) / timings->htot) -
+			mode->height;
+	}
+
+	__v4l2_ctrl_modify_range(sensor->ctrls.vblank, OV5640_MIN_VBLANK,
+				 OV5640_MAX_VTS - mode->height, 1, vblank);
+	__v4l2_ctrl_s_ctrl(sensor->ctrls.vblank, vblank);
 
 	exposure_max = timings->crop.height + vblank - 4;
 	exposure_val = clamp_t(s32, sensor->ctrls.exposure->val,
@@ -2989,7 +3159,8 @@ static int ov5640_set_fmt(struct v4l2_subdev *sd,
 		goto out;
 	}
 
-	ret = ov5640_try_fmt_internal(sd, mbus_fmt, &new_mode);
+	ret = ov5640_try_fmt_internal(sd, mbus_fmt,
+				      sensor->current_fr, &new_mode);
 	if (ret)
 		goto out;
 
@@ -3392,7 +3563,8 @@ static int ov5640_s_ctrl(struct v4l2_ctrl *ctrl)
 	 * not apply any controls to H/W at this time. Instead
 	 * the controls will be restored right after power-up.
 	 */
-	if (sensor->power_count == 0)
+	//if (sensor->power_count == 0)
+		if(1)
 		return 0;
 
 	switch (ctrl->id) {
@@ -3595,7 +3767,6 @@ static int ov5640_enum_frame_interval(
 	struct v4l2_subdev_frame_interval_enum *fie)
 {
 	struct ov5640_dev *sensor = to_ov5640_dev(sd);
-	const struct ov5640_mode_info *mode;
 	struct v4l2_fract tpf;
 	int ret;
 
@@ -3604,14 +3775,11 @@ static int ov5640_enum_frame_interval(
 	if (fie->index >= OV5640_NUM_FRAMERATES)
 		return -EINVAL;
 
-	mode = ov5640_find_mode(sensor, fie->width, fie->height, false);
-	if (!mode)
-		return -EINVAL;
-
 	tpf.numerator = 1;
 	tpf.denominator = ov5640_framerates[fie->index];
 
-	ret = ov5640_try_frame_interval(sensor, &tpf, mode);
+	ret = ov5640_try_frame_interval(sensor, &tpf,
+					fie->width, fie->height);
 	if (ret < 0)
 		return -EINVAL;
 
@@ -3650,7 +3818,9 @@ static int ov5640_s_frame_interval(struct v4l2_subdev *sd,
 
 	mode = sensor->current_mode;
 
-	frame_rate = ov5640_try_frame_interval(sensor, &fi->interval, mode);
+	frame_rate = ov5640_try_frame_interval(sensor, &fi->interval,
+					       mode->width,
+					       mode->height);
 	if (frame_rate < 0) {
 		/* Always return a valid frame interval value */
 		fi->interval = sensor->frame_interval;
@@ -3753,7 +3923,7 @@ static int ov5640_init_cfg(struct v4l2_subdev *sd,
 				v4l2_subdev_get_try_format(sd, state, 0);
 	struct v4l2_rect *crop = v4l2_subdev_get_try_crop(sd, state, 0);
 
-	*fmt = ov5640_is_csi2(sensor) ? ov5640_csi2_default_fmt :
+	*fmt = ov5640_is_csi2(sensor) ? ov5640_mipi_default_fmt :
 					ov5640_dvp_default_fmt;
 
 	crop->left = OV5640_PIXEL_ARRAY_LEFT;
@@ -3859,7 +4029,7 @@ static int ov5640_probe(struct i2c_client *client)
 
 	/*
 	 * default init sequence initialize sensor to
-	 * YUV422 UYVY VGA(30FPS in parallel mode, 60 in MIPI CSI-2 mode)
+	 * YUV422 UYVY VGA@30fps
 	 */
 	sensor->frame_interval.numerator = 1;
 	sensor->frame_interval.denominator = ov5640_framerates[OV5640_30_FPS];
@@ -3893,7 +4063,7 @@ static int ov5640_probe(struct i2c_client *client)
 		return -EINVAL;
 	}
 
-	sensor->fmt = ov5640_is_csi2(sensor) ? ov5640_csi2_default_fmt :
+	sensor->fmt = ov5640_is_csi2(sensor) ? ov5640_mipi_default_fmt :
 					       ov5640_dvp_default_fmt;
 
 	/* get system clock (xclk) */
@@ -3912,16 +4082,39 @@ static int ov5640_probe(struct i2c_client *client)
 	}
 
 	/* request optional power down pin */
+	/*
 	sensor->pwdn_gpio = devm_gpiod_get_optional(dev, "powerdown",
 						    GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->pwdn_gpio))
 		return PTR_ERR(sensor->pwdn_gpio);
+	*/
+	sensor->pwdn_gpio = of_get_named_gpio(dev->of_node, "powerdown-gpios", 0);
+	if (!gpio_is_valid(sensor->pwdn_gpio))
+		dev_warn(dev, "No sensor pwdn pin available");
+	else {
+		ret = devm_gpio_request_one(dev, sensor->pwdn_gpio,  GPIOD_OUT_HIGH, "ov5640_mipi_pwdn");
+		if (ret < 0) {
+			dev_warn(dev, "Failed to set power pin\n");
+			dev_warn(dev, "retval=%d\n", ret);
+			return ret;
+		}
+	}
 
+	sensor->reset_gpio = of_get_named_gpio(dev->of_node, "reset-gpios", 0);
+	if (!gpio_is_valid(sensor->reset_gpio))
+		dev_warn(dev, "No sensor reset pin available");
+	else {
+		ret = devm_gpio_request_one(dev, sensor->reset_gpio, GPIOD_OUT_HIGH, "ov5640_mipi_reset");
+		if (ret < 0) {
+			dev_warn(dev, "Failed to set reset pin\n");
+			return ret;
+		}
+	}
 	/* request optional reset pin */
-	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+	/*sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
 						     GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
-		return PTR_ERR(sensor->reset_gpio);
+		return PTR_ERR(sensor->reset_gpio);*/
 
 	v4l2_i2c_subdev_init(&sensor->sd, client, &ov5640_subdev_ops);
 
@@ -3991,11 +4184,27 @@ static struct i2c_driver ov5640_i2c_driver = {
 		.of_match_table	= ov5640_dt_ids,
 	},
 	.id_table = ov5640_id,
-	.probe    = ov5640_probe,
+	.probe = ov5640_probe,
 	.remove   = ov5640_remove,
 };
 
+#if 0
 module_i2c_driver(ov5640_i2c_driver);
+#else
+static int __init ov5640_i2c_driver_init(void)
+{
+	return i2c_add_driver(&ov5640_i2c_driver);
+}
+static void __exit ov5640_i2c_driver_exit(void)
+{
+	i2c_del_driver(&ov5640_i2c_driver);
+}
+
+late_initcall(ov5640_i2c_driver_init);
+module_exit(ov5640_i2c_driver_exit);
+
+
+#endif
 
 MODULE_DESCRIPTION("OV5640 MIPI Camera Subdev Driver");
 MODULE_LICENSE("GPL");

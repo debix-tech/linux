@@ -10,6 +10,8 @@
 #
 # Normal rules (sorted alphabetically)
 #
+image_out/
+gl_build.sh
 .*
 *.a
 *.asn1.[ch]
