@@ -242,6 +242,8 @@
 	snps,mtl-rx-config = <&mtl_rx_setup>;
 	snps,reset-gpios = <&gpio4 18 GPIO_ACTIVE_LOW>;
 	snps,reset-delays-us = <10 20 200000>;
+	debix,eth_name="ens33";
+   	debix,board="modelA";
 	status = "okay";
 
 	mdio {
@@ -337,6 +339,8 @@
 	phy-reset-gpios = <&gpio4 19 GPIO_ACTIVE_LOW>;
 	phy-reset-duration = <10>;
 	phy-reset-post-delay = <150>;
+	debix,eth_name="ens34";
+   	debix,board="modelA";
 	status = "okay";
 
 	mdio {
@@ -387,6 +391,7 @@
 		pinctrl-0 = <&pinctrl_pmic>;
 		interrupt-parent = <&gpio1>;
 		interrupts = <3 IRQ_TYPE_LEVEL_LOW>;
+		debix,es8316_power;
 
 		regulators {
 			buck1: BUCK1 {

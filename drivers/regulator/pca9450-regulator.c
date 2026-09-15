@@ -1123,7 +1123,7 @@ static int pca9450_i2c_probe(struct i2c_client *i2c)
 		(type == PCA9450_TYPE_PCA9451A ? "pca9451a" : "pca9450bc"));
 
 	//John_gao  ADD For Audio ES8316
-	{
+	if (of_property_read_bool(i2c->dev.of_node, "debix,es8316_power")){
 		unsigned int reg;
 		ret = regmap_read(pca9450->regmap, PCA9450_REG_LDO4CTRL, &reg);
 		if (ret) {

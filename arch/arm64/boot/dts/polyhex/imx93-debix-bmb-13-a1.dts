@@ -162,14 +162,18 @@
 			compatible = "shared-dma-pool";
 			reusable;
 			alloc-ranges = <0 0x80000000 0 0x40000000>;
-			size = <0 0x10000000>;
+			//size = <0 0x10000000>;
+			size = <0 0x08000000>; //John_gao set to 1GB
 			linux,cma-default;
 		};
 
-		ethosu_mem: ethosu_region@C0000000 {
+		//ethosu_mem: ethosu_region@C0000000 {
+		//John_gao set to 1GB
+		ethosu_mem: ethosu_region@a5000000 {
 			compatible = "shared-dma-pool";
 			reusable;
-			reg = <0x0 0xC0000000 0x0 0x10000000>;
+			//reg = <0x0 0xC0000000 0x0 0x10000000>;
+			reg = <0x0 0xa5000000 0x0 0x08000000>;
 		};
 
 		vdev0vring0: vdev0vring0@a4000000 {
@@ -463,6 +467,8 @@
 	pinctrl-1 = <&pinctrl_eqos_sleep>;
 	phy-mode = "rgmii-id";
 	phy-handle = <&ethphy1>;
+	debix,eth_name="eth1";
+   	debix,board="BMB-13";
 	status = "okay";
 
 	mdio {
@@ -489,6 +495,8 @@
 	phy-mode = "rgmii-id";
 	phy-handle = <&ethphy2>;
 	fsl,magic-packet;
+	debix,eth_name="eth0";
+   	debix,board="BMB-13";
 	status = "okay";
 
 	mdio {
@@ -1220,10 +1228,10 @@
 
 	pinctrl_uart5: uart5grp {
 		fsl,pins = <
-			MX93_PAD_DAP_TDO_TRACESWO__LPUART5_TX		0x31e
-			MX93_PAD_DAP_TDI__LPUART5_RX			0x31e
-			MX93_PAD_DAP_TMS_SWDIO__LPUART5_RTS_B		0x31e
-			MX93_PAD_DAP_TCLK_SWCLK__LPUART5_CTS_B		0x31e
+			MX93_PAD_GPIO_IO00__LPUART5_TX	0x31e
+			MX93_PAD_GPIO_IO01__LPUART5_RX			0x31e
+			MX93_PAD_GPIO_IO03__LPUART5_RTS_B		0x31e
+			MX93_PAD_GPIO_IO02__LPUART5_CTS_B		0x31e
 		>;
 	};
 

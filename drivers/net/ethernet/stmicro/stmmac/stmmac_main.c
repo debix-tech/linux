@@ -1028,10 +1028,24 @@ static void stmmac_wait_wol_resume_reset(struct stmmac_priv *priv)
 	}
 }
 //Debix John_gao set eth led
-static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev,struct stmmac_priv *priv)
 {
 	int phy_id1 = 0;
 	int phy_id2 = 0;
+	struct device_node *np = priv->device->of_node;
+	const char *str;
+	int ret;
+	int value_10 = 0x2f60;
+
+	ret = of_property_read_string(np, "debix,board", &str);
+    	if (ret == 0) {
+		dev_info(priv->device, "Board : %s\n", str);	
+		if (strcmp(str, "modelA") == 0) {
+			value_10 = 0x2f60;
+		}else if (strcmp(str, "BMB-13") == 0) {
+			value_10 = 0x6160;
+		}
+	}
 	//page 0
 	phy_write(phydev, 0x1f, 0);
 
@@ -1044,7 +1058,7 @@ static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 		/*switch to extension page44*/
 		phy_write(phydev, 0x1f, 0xd04);
 		//phy_write(phydev, 0x10, 0x6d60); // Model A/B
-		phy_write(phydev, 0x10, 0x2f60);   // Model A/B SE
+		phy_write(phydev, 0x10, value_10);   // Model A/B SE
 
 		/*set led1(yellow) act*/
 		phy_write(phydev, 0x11, 0x8);
@@ -1067,7 +1081,6 @@ static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
  
 	return 0;
 }
-
 static void stmmac_mac_link_up(struct phylink_config *config,
 			       struct phy_device *phy,
 			       unsigned int mode, phy_interface_t interface,
@@ -1186,8 +1199,8 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	if (priv->plat->flags & STMMAC_FLAG_HWTSTAMP_CORRECT_LATENCY)
 		stmmac_hwtstamp_correct_latency(priv, priv);
 
-	//John_gao
-        phy_rtl8211e_led_fixup(phy);
+//Debix John_gao set eth led
+	phy_rtl8211e_led_fixup(phy, priv);
 }
 
 static const struct phylink_mac_ops stmmac_phylink_mac_ops = {

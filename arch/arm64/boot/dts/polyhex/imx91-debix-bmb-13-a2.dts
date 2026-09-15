@@ -13,7 +13,7 @@
 };
 
 / {
-	model = "Debix i.MX91 BMB 13 A1 board";
+	model = "Debix i.MX91 BMB 13 A2 board";
 	compatible = "fsl,imx91-11x11-evk", "fsl,imx91";
 
 	chosen {
@@ -393,7 +393,9 @@
 	pinctrl-1 = <&pinctrl_eqos_sleep>;
 	phy-mode = "rgmii-id";
 	phy-handle = <&ethphy1>;
-	status = "okay";
+	debix,eth_name="eth1";
+   	debix,board="BMB-13";
+	status = "okay";	
 
 	mdio {
 		compatible = "snps,dwmac-mdio";
@@ -422,6 +424,8 @@
 	phy-reset-gpios = <&pca9535 11 GPIO_ACTIVE_LOW>;
         phy-reset-duration = <10>;
         phy-reset-post-delay = <150>;
+	debix,eth_name="eth0";
+   	debix,board="BMB-13";
 	status = "okay";
 
 	mdio {
@@ -939,10 +943,10 @@
 
 	pinctrl_uart5: uart5grp {
 		fsl,pins = <
-			MX91_PAD_DAP_TDO_TRACESWO__LPUART5_TX	0x31e
-			MX91_PAD_DAP_TDI__LPUART5_RX		0x31e
-			MX91_PAD_DAP_TMS_SWDIO__LPUART5_RTS_B	0x31e
-			MX91_PAD_DAP_TCLK_SWCLK__LPUART5_CTS_B	0x31e
+			MX91_PAD_GPIO_IO00__LPUART5_TX	0x31e
+			MX91_PAD_GPIO_IO01__LPUART5_RX		0x31e
+			MX91_PAD_GPIO_IO03__LPUART5_RTS_B	0x31e
+			MX91_PAD_GPIO_IO02__LPUART5_CTS_B	0x31e
 		>;
 	};
 	pinctrl_uart6: uart6grp {

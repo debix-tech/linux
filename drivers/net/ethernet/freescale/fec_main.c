@@ -2114,12 +2114,26 @@ static int fec_enet_eee_mode_set(struct net_device *ndev, bool enable)
 
 	return 0;
 }
-
 //John_gao
-static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
+static int phy_rtl8211e_led_fixup(struct phy_device *phydev,struct fec_enet_private *fep)
 {
 	int phy_id1 = 0;
 	int phy_id2 = 0;
+	struct device_node *np = fep->pdev->dev.of_node;
+	const char *str;
+	int ret;
+	int value_10 = 0x2f60;
+
+	ret = of_property_read_string(np, "debix,board", &str);
+    	if (ret == 0) {
+		dev_info(&fep->pdev->dev, "Board : %s\n", str);	
+		if (strcmp(str, "modelA") == 0) {
+			value_10 = 0x2f60;
+		}else if (strcmp(str, "BMB-13") == 0) {
+			value_10 = 0x6160;
+		}
+	}
+
 	//page 0
 	phy_write(phydev, 0x1f, 0);
 
@@ -2132,7 +2146,7 @@ static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 		/*switch to extension page44*/
 		phy_write(phydev, 0x1f, 0xd04);
 		//phy_write(phydev, 0x10, 0x6d60); // Model A/B
-		phy_write(phydev, 0x10, 0x2f60);   // Model A/B SE
+		phy_write(phydev, 0x10, value_10);   // Model A/B SE
 
 		/*set led1(yellow) act*/
 		phy_write(phydev, 0x11, 0x8);
@@ -2155,7 +2169,6 @@ static int phy_rtl8211e_led_fixup(struct phy_device *phydev)
 	
 	return 0;
 }
-
 static void fec_enet_adjust_link(struct net_device *ndev)
 {
 	struct fec_enet_private *fep = netdev_priv(ndev);
@@ -2214,7 +2227,7 @@ static void fec_enet_adjust_link(struct net_device *ndev)
 		phy_print_status(phy_dev);
 
 	//Debix John_gao set eth led
-	phy_rtl8211e_led_fixup(phy_dev);
+	phy_rtl8211e_led_fixup(phy_dev, fep);
 }
 
 static int fec_enet_mdio_wait(struct fec_enet_private *fep)
@@ -4435,6 +4448,7 @@ fec_probe(struct platform_device *pdev)
 	char irq_name[8];
 	int irq_cnt;
 	const struct fec_devinfo *dev_info;
+	const char *eth_name;
 
 	fec_enet_get_queue_num(pdev, &num_tx_qs, &num_rx_qs);
 
@@ -4443,10 +4457,16 @@ fec_probe(struct platform_device *pdev)
 				  FEC_STATS_SIZE, num_tx_qs, num_rx_qs);
 	if (!ndev)
 		return -ENOMEM;
-
+//John_gao set ethname in dts file
+	ret = of_property_read_string(np, "debix,eth_name", &eth_name);
+	if(ret == 0){
+		dev_info(&pdev->dev, "Ethernet name: %s\n", eth_name);
+		strcpy(ndev->name, eth_name);
+	}else{
 	//add by Debix
 	strcpy(ndev->name, "ens34");
 	//end add by Debix 
+	}
 
 	SET_NETDEV_DEV(ndev, &pdev->dev);
 
