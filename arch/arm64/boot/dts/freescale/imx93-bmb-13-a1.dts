@@ -979,7 +979,7 @@
 
 &usbotg1 {
 #if 1 
-	dr_mode = "host";
+	dr_mode = "otg";
 	status = "okay";
 #else
 	dr_mode = "otg";
